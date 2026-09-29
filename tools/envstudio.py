@@ -9,6 +9,7 @@ agents use to discover types and items, and to check and resolve Recipes
     envstudio.py describe-item <catalog.yaml> <item>
     envstudio.py validate <file | ->          a Recipe (or a Catalog): {ok, diagnostics}
     envstudio.py resolve <recipe | ->         a Recipe resolved: terrain, objects, solids
+    envstudio.py generate <recipe | -> --out-dir DIR   environment.glb / .xml / .json
 
 --json prints JSON (the default when the output is not a terminal is still
 text; pass --json in scripts). A file may be YAML or JSON; "-" reads stdin
@@ -128,11 +129,24 @@ def cmd_resolve(args) -> dict:
     return resolved_json(parsed)
 
 
+def cmd_generate(args) -> dict:
+    import env_generate
+
+    kind, parsed = _parse(args)
+    if kind != "recipe":
+        raise fail("schema", "wrong_schema", "generate takes a Recipe", expected=env_schema.RECIPE_SCHEMA)
+    paths = env_generate.generate(parsed, args.out_dir)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    return {"ok": True, "files": {kind: str(path) for kind, path in paths.items()}, "fingerprint": manifest["fingerprint"]}
+
+
 def _text(command: str, result: dict) -> str:
     if command == "types":
         return "\n".join(f"{row['id']:18} {row['kind']:8} {row['label']}" for row in result["types"])
     if command == "catalog":
         return "\n".join(f"{row['id']:22} {row['type']:16} {row['name']}" for row in result["items"])
+    if command == "generate":
+        return "\n".join(f"{kind:8} {path}" for kind, path in result["files"].items())
     if command == "validate":
         return f"OK  {result['kind']}" + (f" ({result['objects']} objects, {result['terrain']} terrain)"
                                             if result["kind"] == "recipe" else f" ({result['items']} items)")
@@ -150,13 +164,16 @@ def main(argv: list[str] | None = None) -> int:
     describe_item = commands.add_parser("describe-item")
     describe_item.add_argument("catalog")
     describe_item.add_argument("item")
-    for name in ("validate", "resolve"):
+    for name in ("validate", "resolve", "generate"):
         sub = commands.add_parser(name)
         sub.add_argument("file", help="a YAML / JSON file, or - for stdin")
         sub.add_argument("--base", type=Path, help="with -, the folder the catalog path is relative to")
+        if name == "generate":
+            sub.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     handlers = {"types": cmd_types, "describe-type": cmd_describe_type, "catalog": cmd_catalog,
-                "describe-item": cmd_describe_item, "validate": cmd_validate, "resolve": cmd_resolve}
+                "describe-item": cmd_describe_item, "validate": cmd_validate, "resolve": cmd_resolve,
+                "generate": cmd_generate}
     try:
         result = handlers[args.command](args)
     except DiagnosticError as error:

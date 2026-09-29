@@ -192,12 +192,14 @@ python -m pip install -r requirements.txt
 python tools/envstudio.py types                                            # 使える部品の型
 python tools/envstudio.py validate recipes/examples/drone-practice-field.yaml
 python tools/envstudio.py --json resolve recipes/examples/hills-field.yaml # 解決済みの環境（JSON）
+python tools/envstudio.py generate recipes/examples/car-test-course.yaml --out-dir build/car-test-course
 python -m pytest tests
 ```
 
 - データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)
 - 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`
 - 例の環境：`recipes/examples/`（ドローン練習場 20 m × 30 m、車のテストコース、丘のフィールド）
+- 生成物（#3）：`environment.glb`（Three.js、glTF の x = 東・y = 上・z = -北）、`environment.xml`（MuJoCo、ENU。地形は hfield か z = 0 が上面の板、物体は `object:<id>` の body と形状ごとの `geom:<id>/<形状名>`、線や灯火のような見た目だけの形状は contype 0 の group 2）、`environment.json`（対応表、範囲、地形、sha256、指紋）。同じ Recipe からは同じファイルができます。
 
 座標は ENU（x = 東、y = 北、z = 上）、単位は m と度、原点は環境の中心です（hakoniwa-urban-mobility の世界と同じ）。
 
