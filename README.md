@@ -185,6 +185,22 @@ Hakoniwa Environment Studio
 Environment Studio を使わなくても、同じ schema に従った Recipe を手書き・AI 生成して利用できる構造を維持します。
 商用価値は独自フォーマットへのロックインではなく、**環境を速く・簡単に・拡張可能な形で作る UX** に置きます。
 
+## Quick start
+
+```bash
+python -m pip install -r requirements.txt
+python tools/envstudio.py types                                            # 使える部品の型
+python tools/envstudio.py validate recipes/examples/drone-practice-field.yaml
+python tools/envstudio.py --json resolve recipes/examples/hills-field.yaml # 解決済みの環境（JSON）
+python -m pytest tests
+```
+
+- データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)
+- 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`
+- 例の環境：`recipes/examples/`（ドローン練習場 20 m × 30 m、車のテストコース、丘のフィールド）
+
+座標は ENU（x = 東、y = 北、z = 上）、単位は m と度、原点は環境の中心です（hakoniwa-urban-mobility の世界と同じ）。
+
 ## MVP roadmap
 
 MVP は [Issue #1](https://github.com/hakoniwalab/hakoniwa-environment-studio/issues/1) で管理します。

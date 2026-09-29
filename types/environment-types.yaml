@@ -1,0 +1,270 @@
+# Environment types (docs/data-contract.md). Universal: an item in a Catalog
+# picks a type and gives its parameters; a Recipe placement may change only
+# the parameters marked level: placement.
+#
+# Units: metres and degrees. Shapes are in the object's own frame: x along its
+# width, y along its depth (+y is the side it faces: the direction a car
+# drives up a ramp, a drone flies through a gate, a sign faces), z up from its
+# base. (x, y, z) is a solid's centre; z defaults to half its height (standing
+# on the base). roll / pitch / yaw tilt a solid about its centre.
+schema: hakoniwa.environment-types/v1
+types:
+  # --- Roots ----------------------------------------------------------------------
+  - id: object
+    abstract: true
+    label: 物体
+    description: Something standing in the environment.
+    id_prefix: object
+    params:
+      color: {kind: color, label: 色, default: "#b0b4ba", level: placement}
+      snap: {kind: bool, label: 吸い付き, default: false, level: item,
+             description: Whether the editor pulls it flush against neighbours.}
+      friction: {kind: number, label: 摩擦係数, default: 1.0, min: 0, max: 5, level: item,
+                 description: Sliding friction of its surfaces (MuJoCo geom friction).}
+    behavior: {surface: ground, snap: $snap, friction: $friction}
+
+  - id: block
+    abstract: true
+    extends: object
+    params:
+      width_m: {kind: length, label: 幅, min: 0.01, max: 1000, level: item, description: Size along its x.}
+      depth_m: {kind: length, label: 奥行き, min: 0.01, max: 1000, level: item, description: Size along its y.}
+      height_m: {kind: length, label: 高さ, min: 0.01, max: 500, level: item, description: Size along z.}
+    shapes:
+      - {name: body, primitive: box, w: $width_m, d: $depth_m, h: $height_m}
+
+  - id: terrain
+    abstract: true
+    label: 地面
+    description: The ground of the whole environment.
+    id_prefix: terrain
+    params:
+      color: {kind: color, label: 地面の色, default: "#7a8b5a", level: placement}
+      friction: {kind: number, label: 摩擦係数, default: 1.0, min: 0, max: 5, level: item}
+    terrain: {kind: flat, color: $color, friction: $friction}
+
+  # --- Terrain --------------------------------------------------------------------
+  - id: flat_ground
+    extends: terrain
+    label: 平らな地面
+    description: Flat ground at z = 0 over the whole environment.
+
+  - id: hills_terrain
+    extends: terrain
+    label: 丘のある地面
+    description: >-
+      A height field (MuJoCo hfield) of smooth hills placed by a seed: the same
+      parameters always give the same ground.
+    params:
+      max_height_m: {kind: length, label: 最大の高さ, default: 2.0, min: 0.05, max: 50, level: placement}
+      hills: {kind: integer, label: 丘の数, default: 6, min: 1, max: 100, level: placement}
+      radius_m: {kind: length, label: 丘の大きさ（半径）, default: 4.0, min: 0.2, max: 500, level: placement}
+      seed: {kind: integer, label: 乱数の種, default: 1, min: 0, max: 1000000, level: placement,
+             description: Picks where the hills are; change it for another ground of the same kind.}
+      resolution_m: {kind: length, label: 格子の間隔, default: 0.25, min: 0.02, max: 10, level: item,
+                     description: Spacing of the height samples.}
+    terrain: {kind: hfield, generator: hills, color: $color, friction: $friction}
+
+  # --- Structures and obstacles ---------------------------------------------------
+  - id: wall
+    extends: block
+    label: 壁
+    description: A straight wall; its length is set per placement.
+    id_prefix: wall
+    params:
+      snap: {kind: bool, label: 吸い付き, default: true, level: item}
+      width_m: {kind: length, label: 長さ, min: 0.1, max: 1000, level: placement}
+
+  - id: building_block
+    extends: block
+    label: 建物
+    description: A building as a block, sized per placement.
+    id_prefix: building
+    params:
+      snap: {kind: bool, label: 吸い付き, default: true, level: item}
+      width_m: {kind: length, label: 幅, min: 1, max: 1000, level: placement}
+      depth_m: {kind: length, label: 奥行き, min: 1, max: 1000, level: placement}
+      height_m: {kind: length, label: 高さ, min: 1, max: 500, level: placement}
+
+  - id: box_obstacle
+    extends: block
+    label: 箱の障害物
+    description: A box obstacle, sized per placement.
+    id_prefix: box
+    params:
+      width_m: {kind: length, label: 幅, min: 0.05, max: 100, level: placement}
+      depth_m: {kind: length, label: 奥行き, min: 0.05, max: 100, level: placement}
+      height_m: {kind: length, label: 高さ, min: 0.05, max: 100, level: placement}
+
+  # A traffic cone: a square foot and a tapering body (stacked cylinders).
+  - id: pylon
+    extends: object
+    label: パイロン
+    description: A traffic cone on a square foot.
+    id_prefix: pylon
+    params:
+      color: {kind: color, label: 色, default: "#f06a1d", level: placement}
+      width_m: {kind: length, label: 台座の幅, default: 0.38, min: 0.1, max: 2, level: item}
+      height_m: {kind: length, label: 高さ, default: 0.7, min: 0.2, max: 3, level: item}
+    shapes:
+      - {name: foot, primitive: box, w: $width_m, d: $width_m, h: 0.03, color: "#2b2b2b"}
+      - {name: lower, primitive: cylinder, w: $width_m * 0.7, d: $width_m * 0.7, h: ($height_m - 0.03) / 2,
+         z: 0.03 + ($height_m - 0.03) / 4}
+      - {name: upper, primitive: cylinder, w: $width_m * 0.4, d: $width_m * 0.4, h: ($height_m - 0.03) / 2,
+         z: 0.03 + ($height_m - 0.03) * 3 / 4, color: "#f5f5f5"}
+    envelope: {primitive: box, w: $width_m, d: $width_m}
+
+  # A drone race gate: two posts, a top bar and, when the opening is raised, a
+  # bottom bar. Fly through along y.
+  - id: gate
+    extends: object
+    label: ゲート
+    description: A frame to fly through along its y; the opening's size and height are set per placement.
+    id_prefix: gate
+    params:
+      color: {kind: color, label: 色, default: "#e0463a", level: placement}
+      opening_width_m: {kind: length, label: 開口の幅, default: 1.5, min: 0.3, max: 20, level: placement}
+      opening_height_m: {kind: length, label: 開口の高さ, default: 1.5, min: 0.3, max: 20, level: placement}
+      clearance_m: {kind: length, label: 開口の下端, default: 0.0, min: 0, max: 20, level: placement,
+                    description: Height of the opening's bottom above the ground (a bottom bar when above 0).}
+      bar_m: {kind: length, label: 枠の太さ, default: 0.1, min: 0.02, max: 1, level: item}
+    shapes:
+      - {name: post-left, primitive: box, w: $bar_m, d: $bar_m, h: $clearance_m + $opening_height_m + $bar_m,
+         x: -($opening_width_m + $bar_m) / 2}
+      - {name: post-right, primitive: box, w: $bar_m, d: $bar_m, h: $clearance_m + $opening_height_m + $bar_m,
+         x: ($opening_width_m + $bar_m) / 2}
+      - {name: top, primitive: box, w: $opening_width_m, d: $bar_m, h: $bar_m,
+         z: $clearance_m + $opening_height_m + $bar_m / 2}
+      - {name: bottom, primitive: box, w: $opening_width_m, d: $bar_m, h: $bar_m,
+         z: $clearance_m - $bar_m / 2, when: $clearance_m >= $bar_m}
+
+  # A wedge rising along +y: drive up it along its y.
+  - id: ramp
+    extends: object
+    label: スロープ
+    description: A wedge that rises along its y from the ground to its height.
+    id_prefix: ramp
+    params:
+      width_m: {kind: length, label: 幅, default: 2.0, min: 0.2, max: 50, level: placement}
+      length_m: {kind: length, label: 長さ, default: 4.0, min: 0.2, max: 100, level: placement}
+      height_m: {kind: length, label: 高さ, default: 0.5, min: 0.02, max: 20, level: placement}
+    shapes:
+      - {name: body, primitive: wedge, w: $width_m, d: $length_m, h: $height_m}
+
+  - id: platform
+    extends: block
+    label: 台
+    description: A platform with a flat top.
+    id_prefix: platform
+    params:
+      width_m: {kind: length, label: 幅, min: 0.2, max: 100, level: placement}
+      depth_m: {kind: length, label: 奥行き, min: 0.2, max: 100, level: placement}
+      height_m: {kind: length, label: 高さ, min: 0.01, max: 50, level: placement}
+
+  # A platform with a round marking on its top (the marking takes no part in collision).
+  - id: landing_pad
+    extends: platform
+    label: 着陸台
+    description: A platform marked for landing.
+    id_prefix: pad
+    params:
+      mark_color: {kind: color, label: マークの色, default: "#f2f2f2", level: placement}
+    shapes:
+      - {name: body, primitive: box, w: $width_m, d: $depth_m, h: $height_m}
+      - {name: mark, primitive: cylinder, w: "min($width_m, $depth_m) * 0.7", d: "min($width_m, $depth_m) * 0.7",
+         h: 0.004, z: $height_m + 0.002, color: $mark_color, collide: false}
+
+  # --- Roadside -------------------------------------------------------------------
+  # A road slab with edge lines and lane lines (markings take no part in collision).
+  - id: road_surface
+    extends: object
+    label: 道路
+    description: A straight road along its y, with edge lines and lines between lanes.
+    id_prefix: road
+    params:
+      color: {kind: color, label: 路面の色, default: "#4a4d52", level: placement}
+      snap: {kind: bool, label: 吸い付き, default: true, level: item}
+      width_m: {kind: length, label: 幅, default: 7.0, min: 1, max: 50, level: placement}
+      length_m: {kind: length, label: 長さ, default: 20.0, min: 1, max: 1000, level: placement}
+      lanes: {kind: integer, label: 車線の数, default: 2, values: [1, 2, 3, 4], level: placement}
+      line_color: {kind: color, label: 線の色, default: "#f4f4f4", level: item}
+    shapes:
+      - {name: slab, primitive: box, w: $width_m, d: $length_m, h: 0.02}
+      - {name: edge-left, primitive: box, w: 0.15, d: $length_m, h: 0.004, x: -$width_m / 2 + 0.2, z: 0.022,
+         color: $line_color, collide: false}
+      - {name: edge-right, primitive: box, w: 0.15, d: $length_m, h: 0.004, x: $width_m / 2 - 0.2, z: 0.022,
+         color: $line_color, collide: false}
+      - {name: lane-1, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: -$width_m / 2 + $width_m / $lanes,
+         z: 0.022, color: $line_color, collide: false, when: $lanes >= 2}
+      - {name: lane-2, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: -$width_m / 2 + 2 * $width_m / $lanes,
+         z: 0.022, color: $line_color, collide: false, when: $lanes >= 3}
+      - {name: lane-3, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: -$width_m / 2 + 3 * $width_m / $lanes,
+         z: 0.022, color: $line_color, collide: false, when: $lanes >= 4}
+
+  - id: road_marking
+    extends: object
+    label: 路面の標示
+    description: A painted marking such as a stop line (no collision).
+    id_prefix: marking
+    params:
+      color: {kind: color, label: 色, default: "#f4f4f4", level: placement}
+      width_m: {kind: length, label: 長さ, default: 3.5, min: 0.1, max: 50, level: placement}
+      depth_m: {kind: length, label: 幅, default: 0.45, min: 0.05, max: 10, level: item}
+    shapes:
+      - {name: paint, primitive: box, w: $width_m, d: $depth_m, h: 0.004, z: 0.024, collide: false}
+
+  # Posts at both ends (and the middle when long) carrying a rail.
+  - id: guard_rail
+    extends: object
+    label: ガードレール
+    description: A guard rail along its x.
+    id_prefix: rail
+    params:
+      color: {kind: color, label: 色, default: "#d8dadd", level: placement}
+      snap: {kind: bool, label: 吸い付き, default: true, level: item}
+      width_m: {kind: length, label: 長さ, default: 4.0, min: 0.5, max: 200, level: placement}
+      height_m: {kind: length, label: 高さ, default: 0.8, min: 0.3, max: 3, level: item}
+    shapes:
+      - {name: post-left, primitive: box, w: 0.1, d: 0.1, h: $height_m, x: -$width_m / 2 + 0.05}
+      - {name: post-right, primitive: box, w: 0.1, d: 0.1, h: $height_m, x: $width_m / 2 - 0.05}
+      - {name: post-middle, primitive: box, w: 0.1, d: 0.1, h: $height_m, when: $width_m > 4}
+      - {name: rail, primitive: box, w: $width_m, d: 0.06, h: 0.3, y: 0.08, z: $height_m - 0.2}
+
+  # A pole and a plate facing +y; a round plate is a disc (a cylinder tipped on its side).
+  - id: road_sign
+    extends: object
+    label: 道路標識
+    description: A sign plate on a pole, facing its y.
+    id_prefix: sign
+    params:
+      color: {kind: color, label: 板の色, default: "#c62828", level: placement}
+      plate: {kind: enum, label: 板の形, values: [round, square], default: round, level: item}
+      plate_m: {kind: length, label: 板の大きさ, default: 0.6, min: 0.2, max: 3, level: item}
+      height_m: {kind: length, label: 高さ, default: 2.2, min: 1, max: 8, level: item,
+                 description: Height of the plate's top.}
+    shapes:
+      - {name: pole, primitive: cylinder, w: 0.06, d: 0.06, h: $height_m - $plate_m / 2, color: "#9aa0a6"}
+      - {name: plate, primitive: cylinder, w: $plate_m, d: $plate_m, h: 0.02, y: 0.04, z: $height_m - $plate_m / 2,
+         roll: 90, when: $plate == "round"}
+      - {name: plate-square, primitive: box, w: $plate_m, d: 0.02, h: $plate_m, y: 0.04, z: $height_m - $plate_m / 2,
+         when: $plate == "square"}
+
+  # A pole and a housing with three lamps facing +y (lamps are looks only).
+  - id: traffic_signal
+    extends: object
+    label: 信号機
+    description: A traffic signal (appearance and collision only; its lamps are not controlled here).
+    id_prefix: signal
+    params:
+      color: {kind: color, label: 本体の色, default: "#3a3d42", level: placement}
+      height_m: {kind: length, label: 高さ, default: 3.0, min: 1.5, max: 10, level: item,
+                 description: Height of the housing's top.}
+    shapes:
+      - {name: pole, primitive: cylinder, w: 0.12, d: 0.12, h: $height_m - 0.9, color: "#9aa0a6"}
+      - {name: housing, primitive: box, w: 0.35, d: 0.25, h: 0.9, z: $height_m - 0.45}
+      - {name: lamp-red, primitive: cylinder, w: 0.2, d: 0.2, h: 0.02, y: 0.135, z: $height_m - 0.18, roll: 90,
+         color: "#e53935", collide: false}
+      - {name: lamp-yellow, primitive: cylinder, w: 0.2, d: 0.2, h: 0.02, y: 0.135, z: $height_m - 0.45, roll: 90,
+         color: "#fbc02d", collide: false}
+      - {name: lamp-green, primitive: cylinder, w: 0.2, d: 0.2, h: 0.02, y: 0.135, z: $height_m - 0.72, roll: 90,
+         color: "#43a047", collide: false}

@@ -1,0 +1,24 @@
+# A car test course (30 m x 40 m): a two-lane road running north with a stop
+# line, a signal and a stop sign, guard rails on its west side, a cone slalom
+# and a ramp east of the road, a building in the north-west corner.
+schema: hakoniwa.environment-recipe/v1
+name: 車のテストコース（30 m × 40 m）
+description: A two-lane road with a stop line and a signal, a slalom and a ramp.
+catalog: ../../catalogs/starter/catalog.yaml
+size_m: {east: 30, north: 40}
+terrain: {item: asphalt-ground, params: {color: "#6c7075"}}
+objects:
+  - {id: road, item: two-lane-road, pose: {x_m: 0, y_m: 0, yaw_deg: 0}, params: {length_m: 38}}
+  # Northbound lane is the east half of the road (x 0 to 3.5).
+  - {id: stop-line, item: stop-line, pose: {x_m: 1.75, y_m: 8, yaw_deg: 0}}
+  - {id: signal, item: traffic-signal, pose: {x_m: 4.2, y_m: 8.6, yaw_deg: 180}}
+  - {id: stop-sign, item: stop-sign, pose: {x_m: 4.2, y_m: 7.2, yaw_deg: 180}}
+  - {id: rail-1, item: guard-rail, pose: {x_m: -4.1, y_m: -8, yaw_deg: 90}}
+  - {id: rail-2, item: guard-rail, pose: {x_m: -4.1, y_m: -4, yaw_deg: 90}}
+  - {id: rail-3, item: guard-rail, pose: {x_m: -4.1, y_m: 0, yaw_deg: 90}}
+  - {id: cone-1, item: traffic-cone, pose: {x_m: 9, y_m: -12, yaw_deg: 0}}
+  - {id: cone-2, item: traffic-cone, pose: {x_m: 9, y_m: -8, yaw_deg: 0}}
+  - {id: cone-3, item: traffic-cone, pose: {x_m: 9, y_m: -4, yaw_deg: 0}}
+  - {id: cone-4, item: traffic-cone, pose: {x_m: 9, y_m: 0, yaw_deg: 0}}
+  - {id: ramp, item: car-ramp, pose: {x_m: 10, y_m: 10, yaw_deg: 0}}
+  - {id: building, item: building-block, pose: {x_m: -9, y_m: 14, yaw_deg: 0}}

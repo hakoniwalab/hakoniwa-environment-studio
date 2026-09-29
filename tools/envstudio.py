@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Environment Studio's command line: the contract people, scripts and AI
+agents use to discover types and items, and to check and resolve Recipes
+(docs/ai-contract.md).
+
+    envstudio.py types                        placeable types (--all: abstract ones too)
+    envstudio.py describe-type <type>         a type's parameters, behaviour, terrain
+    envstudio.py catalog <catalog.yaml>       a Catalog's items
+    envstudio.py describe-item <catalog.yaml> <item>
+    envstudio.py validate <file | ->          a Recipe (or a Catalog): {ok, diagnostics}
+    envstudio.py resolve <recipe | ->         a Recipe resolved: terrain, objects, solids
+
+--json prints JSON (the default when the output is not a terminal is still
+text; pass --json in scripts). A file may be YAML or JSON; "-" reads stdin
+(then --base names the folder the Recipe's catalog path is relative to).
+Exit status: 0 OK, 1 the input has problems (diagnostics), 2 bad usage.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import yaml  # noqa: E402
+
+import env_schema  # noqa: E402
+from env_diagnostics import DiagnosticError, fail  # noqa: E402
+
+CONTRACT_VERSION = "1"
+
+
+def _read(source: str, base: Path | None) -> tuple[dict, Path]:
+    if source == "-":
+        text = sys.stdin.read()
+        path = (base or Path.cwd()).resolve() / "stdin.yaml"
+    else:
+        path = Path(source).resolve()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise fail(str(source), "missing_field", f"cannot read: {exc}") from exc
+    try:
+        data = yaml.safe_load(text)  # JSON is YAML too
+    except yaml.YAMLError as exc:
+        raise fail(str(source), "wrong_type", f"invalid YAML / JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise fail(str(source), "wrong_type", "must be a mapping", expected="mapping", actual=type(data).__name__)
+    return data, path
+
+
+def _schemas() -> dict:
+    import env_types
+
+    return {"types": env_types.TYPES_SCHEMA, "catalog": env_schema.CATALOG_SCHEMA, "recipe": env_schema.RECIPE_SCHEMA}
+
+
+def cmd_types(args) -> dict:
+    library = env_schema.types()
+    rows = [
+        {"id": t.id, "label": t.label, "kind": "terrain" if t.is_terrain else "object", "abstract": t.abstract,
+         "extends": t.parents[0] if t.parents else None, "description": t.description}
+        for t in library.types.values() if args.all or not t.abstract
+    ]
+    return {"contract": CONTRACT_VERSION, "schemas": _schemas(), "types": rows}
+
+
+def cmd_describe_type(args) -> dict:
+    library = env_schema.types()
+    if args.type not in library.types:
+        raise fail("type", "unknown_reference", "no such type", expected=sorted(library.types), actual=args.type)
+    return library.types[args.type].as_json()
+
+
+def cmd_catalog(args) -> dict:
+    catalog = env_schema.load_catalog(Path(args.catalog))
+    return {"catalog": catalog.meta, "items": [
+        {"id": item.id, "name": item.name, "type": item.type.id, "kind": "terrain" if item.type.is_terrain else "object",
+         "category": item.category} for item in catalog.items.values()]}
+
+
+def cmd_describe_item(args) -> dict:
+    catalog = env_schema.load_catalog(Path(args.catalog))
+    if args.item not in catalog.items:
+        raise fail("item", "unknown_reference", "no such item", expected=sorted(catalog.items), actual=args.item)
+    return catalog.items[args.item].as_json()
+
+
+def _parse(args):
+    data, path = _read(args.file, args.base)
+    schema = data.get("schema")
+    if schema == env_schema.CATALOG_SCHEMA:
+        return "catalog", env_schema.parse_catalog(data, path)
+    return "recipe", env_schema.parse_recipe(data, path)
+
+
+def cmd_validate(args) -> dict:
+    kind, parsed = _parse(args)
+    summary = {"kind": kind}
+    if kind == "recipe":
+        summary.update(objects=len(parsed.objects), terrain=parsed.terrain.kind)
+    else:
+        summary.update(items=len(parsed.items))
+    return {"ok": True, "diagnostics": [], **summary}
+
+
+def resolved_json(recipe) -> dict:
+    return {
+        "name": recipe.name, "description": recipe.description,
+        "size_m": {"east": recipe.size_east_m, "north": recipe.size_north_m},
+        "frame": {"units": "m", "axes": "ENU (x east, y north, z up)", "origin": "centre", "yaw": "deg, counter-clockwise from east"},
+        "terrain": {"item": recipe.terrain_item, **recipe.terrain.as_json(with_heights=False)},
+        "objects": [{
+            "id": obj.id, "item": obj.item, "type": obj.type,
+            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
+            "params": obj.params, **obj.shape.as_json(),
+        } for obj in recipe.objects],
+    }
+
+
+def cmd_resolve(args) -> dict:
+    kind, parsed = _parse(args)
+    if kind != "recipe":
+        raise fail("schema", "wrong_schema", "resolve takes a Recipe", expected=env_schema.RECIPE_SCHEMA)
+    return resolved_json(parsed)
+
+
+def _text(command: str, result: dict) -> str:
+    if command == "types":
+        return "\n".join(f"{row['id']:18} {row['kind']:8} {row['label']}" for row in result["types"])
+    if command == "catalog":
+        return "\n".join(f"{row['id']:22} {row['type']:16} {row['name']}" for row in result["items"])
+    if command == "validate":
+        return f"OK  {result['kind']}" + (f" ({result['objects']} objects, {result['terrain']} terrain)"
+                                            if result["kind"] == "recipe" else f" ({result['items']} items)")
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="envstudio", description=__doc__.splitlines()[0])
+    parser.add_argument("--json", action="store_true", help="print JSON")
+    commands = parser.add_subparsers(dest="command", required=True)
+    types_parser = commands.add_parser("types")
+    types_parser.add_argument("--all", action="store_true")
+    commands.add_parser("describe-type").add_argument("type")
+    commands.add_parser("catalog").add_argument("catalog")
+    describe_item = commands.add_parser("describe-item")
+    describe_item.add_argument("catalog")
+    describe_item.add_argument("item")
+    for name in ("validate", "resolve"):
+        sub = commands.add_parser(name)
+        sub.add_argument("file", help="a YAML / JSON file, or - for stdin")
+        sub.add_argument("--base", type=Path, help="with -, the folder the catalog path is relative to")
+    args = parser.parse_args(argv)
+    handlers = {"types": cmd_types, "describe-type": cmd_describe_type, "catalog": cmd_catalog,
+                "describe-item": cmd_describe_item, "validate": cmd_validate, "resolve": cmd_resolve}
+    try:
+        result = handlers[args.command](args)
+    except DiagnosticError as error:
+        problems = {"ok": False, "diagnostics": [item.as_json() for item in error.diagnostics]}
+        if args.json:
+            print(json.dumps(problems, ensure_ascii=False, indent=2))
+        else:
+            for item in error.diagnostics:
+                print(f"NG  {item.path}: {item.reason}（{item.code}"
+                      + (f"、期待: {item.expected}" if item.expected not in (None, []) else "")
+                      + (f"、実際: {item.actual!r}" if item.actual is not None else "") + "）", file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else _text(args.command, result))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

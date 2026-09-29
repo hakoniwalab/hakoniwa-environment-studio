@@ -1,0 +1,87 @@
+# Starter Catalog for Car / Drone test environments (issue #7): items of the
+# types in types/environment-types.yaml. Sizes are common ones for test fields
+# (metres); nothing here is from a supplier's catalogue.
+schema: hakoniwa.environment-catalog/v1
+catalog:
+  id: starter
+  name: スターター（車・ドローンの試験場）
+  description: A small set to build Car test courses and Drone obstacle courses.
+
+items:
+  # --- Terrain ----------------------------------------------------------------------
+  - id: grass-ground
+    type: flat_ground
+    name: 平らな地面（芝）
+    params: {color: "#6f8f4e"}
+
+  - id: asphalt-ground
+    type: flat_ground
+    name: 平らな地面（舗装）
+    params: {color: "#5b5f64"}
+
+  - id: rolling-hills
+    type: hills_terrain
+    name: なだらかな丘
+    params: {color: "#7a8b5a", max_height_m: 1.5, hills: 6, radius_m: 5.0, seed: 7}
+
+  # --- Structures and obstacles -------------------------------------------------------
+  - id: concrete-wall
+    type: wall
+    name: コンクリート壁（高さ 2 m）
+    params: {width_m: 5.0, depth_m: 0.2, height_m: 2.0, color: "#a9adb2"}
+
+  - id: building-block
+    type: building_block
+    name: 建物ブロック
+    params: {width_m: 10.0, depth_m: 8.0, height_m: 9.0, color: "#c9c3b6"}
+
+  - id: box-obstacle
+    type: box_obstacle
+    name: 箱の障害物（1 m）
+    params: {width_m: 1.0, depth_m: 1.0, height_m: 1.0, color: "#c08a3e"}
+
+  - id: traffic-cone
+    type: pylon
+    name: パイロン（0.7 m）
+
+  - id: race-gate
+    type: gate
+    name: レースゲート（1.5 m 角）
+    params: {opening_width_m: 1.5, opening_height_m: 1.5, clearance_m: 0.5}
+
+  - id: car-ramp
+    type: ramp
+    name: スロープ（幅 2 m・長さ 4 m・高さ 0.5 m）
+    params: {color: "#8d9096"}
+
+  - id: platform-1m
+    type: platform
+    name: 台（1 m）
+    params: {width_m: 2.0, depth_m: 2.0, height_m: 1.0, color: "#9ea3a8"}
+
+  - id: landing-pad
+    type: landing_pad
+    name: 着陸台（2 m 角）
+    params: {width_m: 2.0, depth_m: 2.0, height_m: 0.2, color: "#2f6fb0"}
+
+  # --- Roadside ---------------------------------------------------------------------
+  - id: two-lane-road
+    type: road_surface
+    name: 道路（2 車線・幅 7 m）
+
+  - id: stop-line
+    type: road_marking
+    name: 停止線
+
+  - id: guard-rail
+    type: guard_rail
+    name: ガードレール（4 m）
+
+  - id: stop-sign
+    type: road_sign
+    name: 標識（止まれ・丸）
+    params: {color: "#c62828", plate: round}
+
+  - id: traffic-signal
+    type: traffic_signal
+    name: 信号機

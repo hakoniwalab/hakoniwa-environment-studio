@@ -1,0 +1,16 @@
+# A 40 m x 40 m field of rolling hills (an hfield terrain) with obstacles for
+# cars and drones; each object stands on the ground under it.
+schema: hakoniwa.environment-recipe/v1
+name: 丘のフィールド（40 m × 40 m）
+description: Rolling hills with boxes, a platform, a landing pad and cones.
+catalog: ../../catalogs/starter/catalog.yaml
+size_m: {east: 40, north: 40}
+terrain: {item: rolling-hills}
+objects:
+  - {id: box-1, item: box-obstacle, pose: {x_m: -8, y_m: -6, yaw_deg: 20}}
+  - {id: box-2, item: box-obstacle, pose: {x_m: 6, y_m: -10, yaw_deg: 0}, params: {height_m: 2}}
+  - {id: platform, item: platform-1m, pose: {x_m: 10, y_m: 8, yaw_deg: 0}}
+  - {id: landing-pad, item: landing-pad, pose: {x_m: -12, y_m: 12, yaw_deg: 0}}
+  - {id: gate, item: race-gate, pose: {x_m: 0, y_m: 4, yaw_deg: 45}}
+  - {id: cone-1, item: traffic-cone, pose: {x_m: -3, y_m: -15, yaw_deg: 0}}
+  - {id: cone-2, item: traffic-cone, pose: {x_m: 3, y_m: -15, yaw_deg: 0}}

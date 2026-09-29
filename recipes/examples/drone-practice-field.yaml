@@ -1,0 +1,17 @@
+# A 20 m x 30 m drone practice field: three gates in the middle, a landing pad
+# at the back right (north-east), cones marking the start. Frame: ENU metres,
+# origin at the field's centre, yaw counter-clockwise from east; a gate is
+# flown through along its y (yaw 0: northwards).
+schema: hakoniwa.environment-recipe/v1
+name: ドローン練習場（20 m × 30 m）
+description: Three gates in the middle, a landing pad at the back right.
+catalog: ../../catalogs/starter/catalog.yaml
+size_m: {east: 20, north: 30}
+terrain: {item: grass-ground}
+objects:
+  - {id: gate-1, item: race-gate, pose: {x_m: 0, y_m: -6, yaw_deg: 0}}
+  - {id: gate-2, item: race-gate, pose: {x_m: 0, y_m: 0, yaw_deg: 0}}
+  - {id: gate-3, item: race-gate, pose: {x_m: 0, y_m: 6, yaw_deg: 0}}
+  - {id: landing-pad, item: landing-pad, pose: {x_m: 7, y_m: 12, yaw_deg: 0}}
+  - {id: start-left, item: traffic-cone, pose: {x_m: -1.5, y_m: -12, yaw_deg: 0}}
+  - {id: start-right, item: traffic-cone, pose: {x_m: 1.5, y_m: -12, yaw_deg: 0}}
