@@ -194,6 +194,9 @@ components:
   - id: hakoniwa-envsim
     roles: [asset_generator, environment_model]
     purpose: Read CityGML (PLATEAU, converted OpenStreetMap), build PLATEAU City Worlds, and convert MJCF colliders to GLB.
+  - id: hakoniwa-urban-mobility
+    roles: [integration_boundary]
+    purpose: Receive the Cities the Studio makes (City World job contract, urban_assets.py register-city / unregister-city) and run them with vehicles.
 
 connections:
   - from: hakoniwa-envsim
@@ -206,6 +209,16 @@ connections:
         - An imported City World keeps Envsim's colliders, terrain hfield, and visuals unchanged (docs/citygml-parts.md section 7).
       validation_notes:
         - tools/env_roundtrip.py matched three workspace City Worlds after an unedited import and export.
+  - from: hakoniwa-environment-studio
+    to: hakoniwa-urban-mobility
+    interface: City World job, City registration
+    contract:
+      status: partially_verified
+      requires:
+        - An exported Recipe or an Envsim City World build follows hakoniwa-urban-mobility schemas/city-world-job.yaml and passes its tools/city_world_job.py check before registration.
+        - The Studio registers and unregisters Cities with tools/urban_assets.py register-city / unregister-city and reads the catalog with urban_assets.py list --json; Urban Studio only lists and uses them.
+      validation_notes:
+        - car-test-course, sapporo-351-exact, and sapporo-lod2 were registered from the Studio; an EAMS Hexa flew on sapporo-lod2 in Urban Studio (2026-09-30).
 
 data_flow:
   - Browser -> Studio (tools/env_studio.py, 127.0.0.1:28097) -> Environment Recipe in work/recipes/environment-studio/recipes
@@ -269,7 +282,7 @@ agency_boundary:
 
 missing_pieces:
   - Record configure, doctor, unit tests, and browser authoring evidence with Foundation Python on Linux, Windows, and a clean host.
-  - hakoniwa-environment-studio and hakoniwa-urban-mobility have no Business Pack Catalog entries (missing_catalog_entry), so the Urban export (schemas/city-world-job.yaml, register-city) is recorded in data_flow rather than as a connection, and this Recipe stays in the component repository.
+  - This Recipe stays in the component repository (as hakoniwa-fpv-drone's); the Business Pack Catalog entry references it, and the Business Pack Recipe validator does not cover component-owned Recipes.
 
 demo:
   prerequisites:
@@ -313,7 +326,9 @@ expected_result: >
   work/recipes/environment-studio.
 
 source_catalogs:
+  - component_id: hakoniwa-environment-studio
   - component_id: hakoniwa-envsim
+  - component_id: hakoniwa-urban-mobility
 
 source_artifacts:
   - repository: hakoniwalab/hakoniwa-environment-studio
