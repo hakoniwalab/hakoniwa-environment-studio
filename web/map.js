@@ -319,8 +319,17 @@ async function init() {
   L.control.scale().addTo(map);
   let importing = false;
   let plateau = null;
+  // OpenStreetMap: a default id from the centre (as PLATEAU's, without a
+  // municipality), following the selection until it is typed over.
+  let osmIdTyped = false;
+  const defaultOsmId = () => `osm-lat${numeric("latitude").toFixed(3)}-lon${numeric("longitude").toFixed(3)}`
+    .replaceAll(".", "_");
+  $("#recipe-id").addEventListener("input", () => {
+    osmIdTyped = $("#recipe-id").value.trim() !== "";
+  });
   const controls = selectionControls(map, (valid) => {
     $("#import").disabled = importing || !valid;
+    if (valid && !osmIdTyped) $("#recipe-id").value = defaultOsmId();
     plateau?.selectionChanged(valid);
   });
   map.fitBounds(selectionBounds().pad(0.35), { maxZoom: 19 });
