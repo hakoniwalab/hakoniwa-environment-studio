@@ -1,27 +1,26 @@
 """The one place Environment Studio reaches into hakoniwa-envsim.
 
-Envsim is a sibling checkout ($HAKONIWA_ENVSIM_ROOT, else ../hakoniwa-envsim,
-which the Workspace Recipe hakoniwa/recipes/citygml-parts.yaml materializes).
+Envsim is a source repository of the Studio's Business Pack Recipe
+(recipes/business-pack/environment-studio.yaml, which configure materializes;
+$HAKONIWA_ENVSIM_ROOT, else ../hakoniwa-envsim; tools/env_workspace.py).
 Its pipeline modules import each other by flat name, so its directories go on
 sys.path once, here, and nowhere else.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import sys
 
+import env_workspace
 from env_diagnostics import fail
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def root() -> Path:
-    found = Path(os.environ.get("HAKONIWA_ENVSIM_ROOT") or ROOT.parent / "hakoniwa-envsim").resolve()
+    found = env_workspace.dependency_root("hakoniwa-envsim")
     if not (found / "src/city_pipeline/gml_lod1_extract.py").is_file():
         raise fail("envsim", "missing_field",
-                   "hakoniwa-envsim is needed for CityGML (set HAKONIWA_ENVSIM_ROOT or clone it next to this repository)",
+                   f"hakoniwa-envsim is needed for CityGML: in the Business Pack Workspace, {env_workspace.CONFIGURE}",
                    expected=str(found))
     return found
 

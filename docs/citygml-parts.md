@@ -17,7 +17,7 @@ OpenStreetMap / GeoJSON ─ envsim osm2citygml.py ─┴→ CityGML（標準の�
 - **このリポジトリ（プライベート）**：CityGML を編集できる部品にする部分。
 
 envsim は `$HAKONIWA_ENVSIM_ROOT`、無ければ `../hakoniwa-envsim` から読みます。
-依存（shapely・trimesh など）は `requirements.txt` にあり、Workspace Recipe `hakoniwa/recipes/citygml-parts.yaml` で用意できます。
+依存（hakoniwa-envsim と shapely・trimesh など）は、このリポジトリの Business Pack Recipe `recipes/business-pack/environment-studio.yaml` にあり、Business Pack の Workspace で `recipe.py configure` が Foundation Python に用意します（README の Quick start）。以下の `<ws>` は Studio の Recipe workspace（`$HAKONIWA_WORK_DIR/recipes/environment-studio`）です。
 
 ## 2. 入力と選択
 
@@ -155,17 +155,17 @@ PLATEAU のデータには、外形がもともと重なっている建物もあ
 
 `POST /api/map/import` の処理は次のとおりです。
 
-1. Overpass か GeoJSON のデータを、envsim の `osm2citygml.run` で `work/map-data/<id>/map_bldg_op.gml`・`map_tran_op.gml` にします。
+1. Overpass か GeoJSON のデータを、envsim の `osm2citygml.run` で `<ws>/map-data/<id>/map_bldg_op.gml`・`map_tran_op.gml` にします。
 2. そのディレクトリを部品変換にかけます。
-3. Recipe を `work/recipes/<id>.yaml` に保存します。
+3. Recipe を `<ws>/recipes/<id>.yaml` に保存します。
 
-元の地図データは `work/map-data/<id>/map.json` に残ります。
+元の地図データは `<ws>/map-data/<id>/map.json` に残ります。
 
 ## 9. 地図ページから PLATEAU の City World を作る
 
 地図ページの「PLATEAU から City World を作る」で、選んだ範囲の City World を hakoniwa-envsim に作らせ、終わったらそのまま部品として取り込みます（7 章。envsim の出力はそのまま使います）。実装は `tools/env_cityworld.py` です。
 
-- **置き場所**：`work/city-worlds/<ID>/`。ビジネスパックの City World Web UI のジョブと同じ形（`hakoniwa-envsim-build.yaml`、`job.json`、`generation.log`、`build/`）なので、「ワークスペースの街」の一覧にも出ます。
+- **置き場所**：`<ws>/city-worlds/<ID>/`。ビジネスパックの City World Web UI のジョブと同じ形（`hakoniwa-envsim-build.yaml`、`job.json`、`generation.log`、`build/`）なので、「ワークスペースの街」の一覧にも出ます。
 - **設定**：City World Web UI と同じ（visual-physics-v1：LOD2 の見た目、建物の当たり判定 P0〜P3、DEM の地形、道路、路面標示、橋）。範囲の指定も同じです。
 - **ダウンロード**：envsim が PLATEAU のカタログに問い合わせて CityGML を取ります。取った CityGML は共有のキャッシュに残し、次から使い回します。キャッシュは `HAKONIWA_PLATEAU_CACHE`、無ければ地図ページの「フォルダ」（ビジネスパックの work）の `recipes/city-world-web-ui/runtime/cache/plateau-citygml`、それも無ければ `work/city-worlds/cache` です。
 - **実行**：`hako.py --config … build` を裏で動かし、`[HAKO_PROGRESS]` の行から進み具合を表示します（`GET /api/city-worlds/build/<ID>`）。同時に動かすのは 1 つだけで、中止もできます（`POST …/cancel`）。ページを開き直しても、作っている途中のものを追い続けます。

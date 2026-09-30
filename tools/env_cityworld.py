@@ -2,7 +2,8 @@
 """Build a PLATEAU City World with hakoniwa-envsim from the Studio (#14).
 
 The map page's selection (centre, half extents: the City World browser's
-rules) becomes an Envsim build under work/city-worlds/<id>/: its
+rules) becomes an Envsim build under city-worlds/<id>/ in the Studio's Recipe
+workspace ($HAKONIWA_WORK_DIR/recipes/environment-studio): its
 hakoniwa-envsim-build.yaml (the business pack's visual-physics profile:
 LOD2 looks, building physics P0-P3, DEM terrain, roads, markings, bridges)
 and job.json, then `tools/hako.py --config ... build` runs in the background.
@@ -36,9 +37,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_envsim  # noqa: E402
 import env_rules  # noqa: E402
+import env_workspace  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
-WORK = ROOT / "work/city-worlds"
+WORK = env_workspace.recipe_workspace() / "city-worlds"
 BUSINESS_PACK_CACHE = "recipes/city-world-web-ui/runtime/cache/plateau-citygml"
 MIN_HALF_M, MAX_HALF_M = 10.0, 1000.0
 LOG_TAIL_LINES = 30
@@ -52,7 +53,8 @@ class BuildError(RuntimeError):
 
 def plateau_cache(roots: list[Path]) -> Path:
     """Where downloaded PLATEAU CityGML is kept: HAKONIWA_PLATEAU_CACHE, else
-    the business pack's shared cache in a workspace root, else work/city-worlds/cache."""
+    the City World Web UI's shared cache in the Business Pack work directory,
+    else city-worlds/cache in the Studio's Recipe workspace."""
     configured = os.environ.get("HAKONIWA_PLATEAU_CACHE")
     if configured:
         return Path(configured).expanduser().resolve()
@@ -167,12 +169,6 @@ def _check_offline(job: Path, job_id: str, center, half) -> None:
                          "チェックを外して別の ID で作ってください（ダウンロード済みの CityGML は使い回します）。")
 
 
-def _python(envsim: Path) -> str:
-    """Envsim's own interpreter when it has a virtual environment."""
-    candidate = envsim / ".venv" / "bin" / "python"
-    return str(candidate) if candidate.is_file() else sys.executable
-
-
 class Builds:
     """The City World builds this Studio started (one runs at a time)."""
 
@@ -280,7 +276,7 @@ def collider_view(job: Path, mjcf: Path, envsim: Path | None = None) -> None:
     envsim = envsim or env_envsim.root()
     viewer = job / "viewer"
     viewer.mkdir(parents=True, exist_ok=True)
-    subprocess.run([_python(envsim), str(envsim / "src" / "city_pipeline" / "mjcf_colliders2glb.py"),
+    subprocess.run([sys.executable, str(envsim / "src" / "city_pipeline" / "mjcf_colliders2glb.py"),
                     "--in", str(mjcf), "--out", str(viewer / "city-world-colliders.glb"),
                     "--receipt", str(viewer / "city-world-colliders-receipt.json")],
                    cwd=envsim, check=True, stdin=subprocess.DEVNULL)
@@ -291,7 +287,7 @@ def build_job(job: Path, offline: bool = False, envsim: Path | None = None) -> i
     import shutil
 
     envsim = envsim or env_envsim.root()
-    command = [_python(envsim), str(envsim / "tools" / "hako.py"), "--config",
+    command = [sys.executable, str(envsim / "tools" / "hako.py"), "--config",
                str(job / "hakoniwa-envsim-build.yaml"), *(["--offline"] if offline else []), "build"]
     print(f"$ {' '.join(command)}", flush=True)
     code = subprocess.call(command, cwd=envsim, stdin=subprocess.DEVNULL)

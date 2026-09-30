@@ -1,0 +1,15 @@
+# Environment Studio's Python packages, installed into the Business Pack
+# Foundation Python by `python tools/recipe.py configure --recipe
+# ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml`.
+PyYAML>=6.0,<7
+# MuJoCo validation and the collider GLB; the same version as the Urban and
+# Drone Core Recipes, which share this Foundation Python.
+mujoco==3.13.0
+numpy>=2.0,<3
+# CityGML parts (tools/env_citygml.py and the map import) use hakoniwa-envsim's
+# extractors, which need these.
+shapely>=2.1,<3
+lxml>=5,<7
+mapbox-earcut>=1.0,<2
+trimesh>=4.8,<5
+Pillow>=11,<13

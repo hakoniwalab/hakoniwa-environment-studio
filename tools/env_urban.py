@@ -26,7 +26,10 @@ City (kind city); one without is a plain World (kind plain, origin 0, 0). The
 receipt also names the Recipe and its fingerprint, so a changed environment
 is a changed World.
 
-    env_urban.py export work/recipes/course.yaml [--out DIR] [--register]
+    env_urban.py export course.yaml [--out DIR] [--register]
+
+Exports go to urban/<id>/ in the Studio's Recipe workspace
+($HAKONIWA_WORK_DIR/recipes/environment-studio, tools/env_workspace.py).
 """
 
 from __future__ import annotations
@@ -35,7 +38,6 @@ import argparse
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import shutil
 import struct
@@ -49,10 +51,10 @@ import env_colliders  # noqa: E402
 import env_generate  # noqa: E402
 import env_schema  # noqa: E402
 import env_version  # noqa: E402
+import env_workspace  # noqa: E402
 from env_diagnostics import DiagnosticError  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
-EXPORTS = ROOT / "work/urban"
+EXPORTS = env_workspace.recipe_workspace() / "urban"
 MJCF_FRAME = "X=North,Y=-East,Z=Up"
 GLB_FRAME = "X=East,Y=Up,Z=-North"
 # The Studio's frame (x east, y north) inside Urban's (x north, y west): -90 degrees about z.
@@ -67,9 +69,8 @@ class ExportError(RuntimeError):
 
 
 def urban_root() -> Path:
-    """hakoniwa-urban-mobility: $HAKONIWA_URBAN_MOBILITY_ROOT, else next to this repository."""
-    configured = os.environ.get("HAKONIWA_URBAN_MOBILITY_ROOT")
-    return Path(configured).expanduser().resolve() if configured else (ROOT.parent / "hakoniwa-urban-mobility").resolve()
+    """hakoniwa-urban-mobility, a source repository of the Studio's Business Pack Recipe."""
+    return env_workspace.dependency_root("hakoniwa-urban-mobility")
 
 
 def _sha256(path: Path) -> str:

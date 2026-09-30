@@ -16,7 +16,7 @@ GLB: the vertices of each layer (terrain, roads, other layers, buildings) in
 the world: each Envsim vertex has a Studio vertex within TOLERANCE_GLB_M and
 back.
 
-    env_roundtrip.py --envsim-build BUILD --recipe work/recipes/sapporo.yaml
+    env_roundtrip.py --envsim-build BUILD --recipe sapporo.yaml
 
 Without --recipe the build is imported into a temporary directory first. The
 exit status is 0 only when everything matches.

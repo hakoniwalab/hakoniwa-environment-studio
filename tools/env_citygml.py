@@ -23,10 +23,10 @@ Each part keeps where it came from (gml:id, source file, OSM tags when the
 CityGML came from OpenStreetMap) in its `source`, so later stages can attach
 the same building's LOD2 geometry and move it with the part.
 
-    env_citygml.py --citygml DIR --center LAT,LON --half-extent NS,EW --out work/recipes/x.yaml
+    env_citygml.py --citygml DIR --center LAT,LON --half-extent NS,EW --out x.yaml
 
-Envsim is found at $HAKONIWA_ENVSIM_ROOT or ../hakoniwa-envsim (the Workspace
-Recipe hakoniwa/recipes/citygml-parts.yaml materializes it there).
+Envsim is a source repository of the Studio's Business Pack Recipe
+(recipes/business-pack/environment-studio.yaml; tools/env_envsim.py).
 """
 
 from __future__ import annotations

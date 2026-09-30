@@ -8,7 +8,7 @@ urban-mobility は World を **City World ジョブ**（フォルダ）で受け
 
 ## 2. 書き出すもの
 
-`work/urban/<Recipe ID>/` に、次の構成で書きます（ジョブのフォルダ名が City Asset の ID になります）。
+Studio の Recipe workspace の `urban/<Recipe ID>/`（`$HAKONIWA_WORK_DIR/recipes/environment-studio/urban/<Recipe ID>/`）に、次の構成で書きます（ジョブのフォルダ名が City Asset の ID になります）。
 
 | ファイル | 中身 |
 |---|---|
@@ -32,7 +32,7 @@ urban-mobility は World を **City World ジョブ**（フォルダ）で受け
 
 - **Studio の画面**：環境を保存してから、上の「urban-mobility へ」を押します。書き出し、urban のチェック、`register-city` までを行います。
 - **コマンド**：`tools/env_urban.py export <Recipe> [--out DIR] [--register] [--no-precompile]`
-- urban-mobility は `$HAKONIWA_URBAN_MOBILITY_ROOT`、無ければ `../hakoniwa-urban-mobility` から探します。登録先は urban の決まりどおり、ビジネスパックの `work/urban/assets/cities/<ID>.asset.yaml` です。
+- urban-mobility は、Studio の Business Pack Recipe の依存（`recipe_local_requirements`）として `recipe.py configure` が用意したものを使います（`$HAKONIWA_URBAN_MOBILITY_ROOT`、無ければ `../hakoniwa-urban-mobility`）。登録先は urban の決まりどおり、ビジネスパックの `work/urban/assets/cities/<ID>.asset.yaml` です。
 - 登録の解除は urban 側で `tools/urban_assets.py unregister-city --id <ID>` です。
 
 ## 4. 確かめたこと

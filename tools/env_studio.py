@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Environment Studio: the browser UI and its JSON API over Catalog and Recipe YAML.
 
-Lifecycle (as the Business Pack tools):
+It runs in the Hakoniwa Business Pack Workspace with the Foundation Python
+that the Studio's Recipe configures (tools/env_workspace.py), from
+hakoniwa-business-pack:
+  python tools/workspace.py enter
+  python tools/recipe.py configure --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
+Its data is in the Recipe workspace, $HAKONIWA_WORK_DIR/recipes/environment-studio
+(below: <ws>).
+
+Lifecycle (as the Business Pack tools; the paths are this repository's):
   python tools/env_studio.py start [--port N] [--open-browser]   run in the background
   python tools/env_studio.py status                              is it running, and where
   python tools/env_studio.py stop                                stop the background Studio
   python tools/env_studio.py [serve] [--port N] [--open-browser] run in this terminal (Ctrl+C)
-The background Studio records work/studio/studio.json (pid, port, url) and
-logs to work/studio/studio.log.
+The background Studio records <ws>/studio/studio.json (pid, port, url) and
+logs to <ws>/studio/studio.log.
 
 API (all JSON):
   GET  /api/catalogs           the Catalogs (catalogs/<id>/catalog.yaml)
@@ -24,7 +32,7 @@ API (all JSON):
   POST /api/shutdown           stop this Studio (it listens on 127.0.0.1 only)
 
 Examples live in recipes/examples/ (read only); saving writes
-work/recipes/<id>.yaml, so saving an example makes an editable copy. A
+<ws>/recipes/<id>.yaml, so saving an example makes an editable copy. A
 Recipe names its Catalog by path; the API speaks of Catalogs by id, and the
 save, 3D and validate requests carry the catalog_id they use.
 """
@@ -64,6 +72,7 @@ import env_rules  # noqa: E402
 import env_schema  # noqa: E402
 import env_validate  # noqa: E402
 import env_version  # noqa: E402
+import env_workspace  # noqa: E402
 from env_diagnostics import DiagnosticError, load_yaml_text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,9 +80,9 @@ WEB_ROOT = ROOT / "web"
 CATALOGS = ROOT / "catalogs"
 DEFAULT_CATALOG_ID = "starter"
 EXAMPLE_RECIPES = ROOT / "recipes/examples"
-USER_RECIPES = ROOT / "work/recipes"
+USER_RECIPES = env_workspace.recipe_workspace() / "recipes"
 DEFAULT_PORT = 8097  # Booth Studio uses 8096
-STATE_DIR = ROOT / "work/studio"
+STATE_DIR = env_workspace.recipe_workspace() / "studio"
 APP_NAME = "environment-studio"
 START_TIMEOUT_SEC = 15.0
 STOP_TIMEOUT_SEC = 5.0
@@ -378,13 +387,13 @@ def map_config() -> dict:
 
 
 def import_map(body: object) -> dict:
-    """Make a Recipe of parts from map data and save it under work/recipes/ (#10).
+    """Make a Recipe of parts from map data and save it under <ws>/recipes/ (#10).
 
     Map data goes through CityGML, the shared intermediate representation:
     hakoniwa-envsim's osm2citygml.py turns OpenStreetMap (Overpass) or GeoJSON
     into LOD1 CityGML, and the parts converter (env_citygml.py) turns that
     into one part per building and road surface. The map data and the CityGML
-    are kept in work/map-data/<id>/, so the import can be redone offline.
+    are kept in <ws>/map-data/<id>/, so the import can be redone offline.
 
     Body: {id, name?, selection: {center: {latitude, longitude},
     half_extent_m: {north_south, east_west}} (the PLATEAU City World
@@ -461,13 +470,13 @@ def import_map(body: object) -> dict:
 
 def city_world_roots() -> list[Path]:
     """Where to look for Envsim builds: HAKONIWA_CITY_WORLD_ROOTS (separated
-    like PATH), else the business-pack workspace next to this repository;
-    and the City Worlds this Studio built (work/city-worlds)."""
+    like PATH), else the Business Pack work directory (HAKONIWA_WORK_DIR);
+    and the City Worlds this Studio built (env_cityworld.WORK)."""
     configured = os.environ.get("HAKONIWA_CITY_WORLD_ROOTS")
     if configured:
         roots = [Path(item).expanduser().resolve() for item in configured.split(os.pathsep) if item]
     else:
-        roots = [(ROOT.parent / "hakoniwa-business-pack" / "work").resolve()]
+        roots = [env_workspace.work_dir()]
     return roots + [env_cityworld.WORK.resolve()]
 
 
@@ -500,7 +509,7 @@ def list_city_worlds(root: str | None) -> dict:
 
 def import_city_world(body: object) -> dict:
     """Make a Recipe of parts from an Envsim build (its selection, the
-    buildings it extracted, its roads) and save it under work/recipes/.
+    buildings it extracted, its roads) and save it under <ws>/recipes/.
 
     Body: {id, path, name?, terrain?, catalog_id?, overwrite?, visuals?,
     passthrough?}: visuals false leaves out the LOD2 looks, passthrough false
@@ -558,7 +567,7 @@ def _own_assets(data: dict, directory: Path, recipe_id: str) -> tuple[list[Path]
     receipt names the hfield beside it). So deleting one never breaks the
     other. Each asset inside `directory` but outside <recipe_id>.assets is
     copied there (to the same place inside) and the param rewritten; paths
-    elsewhere (absolute, outside work/recipes) stay. Returns the new files
+    elsewhere (absolute, outside <ws>/recipes) stay. Returns the new files
     and folders, and the rewritten params: {"objects": {id: {param: path}},
     "terrain": {param: path}}."""
     own = directory / f"{recipe_id}.assets"
@@ -607,7 +616,7 @@ def _own_assets(data: dict, directory: Path, recipe_id: str) -> tuple[list[Path]
 
 def export_urban(recipe_id: str, body: object) -> dict:
     """Write a saved Recipe as a hakoniwa-urban-mobility World (a City World
-    job under work/urban/<id>/, env_urban.py) and, with register, register it
+    job under <ws>/urban/<id>/, env_urban.py) and, with register, register it
     there as a City Asset. Body: {register?: bool}."""
     found = _recipe_files().get(_check_id(recipe_id))
     if found is None:
@@ -627,9 +636,9 @@ def export_urban(recipe_id: str, body: object) -> dict:
 
 
 def delete_recipe(recipe_id: str) -> dict:
-    """Move a saved Recipe to work/trash/<time>-<id>/, with what belongs only
+    """Move a saved Recipe to <ws>/trash/<time>-<id>/, with what belongs only
     to it: its visual assets (<id>.assets) and the map data it was imported
-    from (work/map-data/<id>). Nothing is erased: empty the trash by hand.
+    from (<ws>/map-data/<id>). Nothing is erased: empty the trash by hand.
     Examples (recipes/examples) cannot be deleted."""
     found = _recipe_files().get(recipe_id)  # only a listed Recipe (also one whose name is no valid id)
     if found is None:
@@ -653,7 +662,7 @@ def delete_recipe(recipe_id: str) -> dict:
 
 
 def save_recipe(recipe_id: str, body: object) -> dict:
-    """Check a Recipe and write it under work/recipes/.
+    """Check a Recipe and write it under <ws>/recipes/.
 
     The saved catalog path points at the Catalog the request names
     (catalog_id), relative to the saved file (a copied example keeps working).
@@ -899,8 +908,14 @@ def start(port: int, open_browser: bool, state_dir: Path) -> int:
 
 
 def command_hint(command: str) -> str:
-    """How the person running this installation issues a lifecycle command."""
-    return f"python tools/env_studio.py {command}"
+    """How the person running this installation issues a lifecycle command,
+    from where they are (in the Workspace, usually hakoniwa-business-pack)."""
+    script = Path(__file__).resolve()
+    try:
+        script = Path(os.path.relpath(script, Path.cwd()))
+    except ValueError:  # another drive on Windows
+        pass
+    return f"python {script.as_posix()} {command}"
 
 
 def status(state_dir: Path) -> int:

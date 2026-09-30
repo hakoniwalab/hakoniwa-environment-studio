@@ -187,18 +187,35 @@ Environment Studio を使わなくても、同じ schema に従った Recipe を
 
 ## Quick start
 
+Environment Studio は、[箱庭ビジネスパック](https://github.com/hakoniwalab/hakoniwa-business-pack)の Workspace で使います。Python は Business Pack の Foundation Python（3.12）に一本化し、個別の venv は作りません。依存（hakoniwa-envsim・hakoniwa-urban-mobility と Python パッケージ）は、このリポジトリの Business Pack Recipe [recipes/business-pack/environment-studio.yaml](recipes/business-pack/environment-studio.yaml) に書いてあり、`recipe.py configure` が用意します。
+
+`hakoniwa-business-pack` で Workspace に入ります（プロンプトの先頭に `(hako)` が付きます）：
+
 ```bash
-python -m pip install -r requirements.txt
-python tools/envstudio.py types                                            # 使える部品の型
-python tools/envstudio.py validate recipes/examples/drone-practice-field.yaml   # スキーマ＋MuJoCo の物理検証
-python tools/envstudio.py --json resolve recipes/examples/hills-field.yaml # 解決済みの環境（JSON）
-python tools/envstudio.py generate recipes/examples/car-test-course.yaml --out-dir build/car-test-course
-python -m pytest tests
-python tools/env_studio.py start                                          # ブラウザの Studio（http://127.0.0.1:8097/）
-python tools/env_studio.py stop
+python3.12 tools/workspace.py enter
 ```
 
-Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `work/recipes/`（例の環境は保存するとコピーになります）。一覧の × で環境を削除できます。すぐには消さず、見た目の GLB（`<ID>.assets/`）と地図から取り込んだ元データ（`work/map-data/<ID>/`）と一緒に `work/trash/<日時>-<ID>/` へ移します（戻すときはそこから `work/` へ戻し、要らなければ手で消します）。例の環境は消せません。別の ID で保存すると、見た目の GLB もその ID の `<ID>.assets/` にコピーするので、元の環境を消してもコピーは壊れません（手で書いた Recipe がほかの環境の `.assets/` を指している場合は、削除を止めてその環境を示します）。部品を動かしたときは、3D の部品をその場で動かし、高さ（地形・道路の上）だけをサーバに聞きます（`POST /api/poses`）。GLB を作り直すのは、形・品目・地面・大きさが変わったときだけです。
+以降は `(hako)` シェルの `hakoniwa-business-pack` で実行します。
+
+```bash
+python tools/recipe.py configure --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
+python tools/recipe.py doctor    --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
+python ../hakoniwa-environment-studio/tools/env_studio.py start     # ブラウザの Studio（http://127.0.0.1:8097/）
+python ../hakoniwa-environment-studio/tools/env_studio.py status
+python ../hakoniwa-environment-studio/tools/env_studio.py stop      # Workspace を抜ける（exit）前に止める
+```
+
+コマンドの道具とテスト：
+
+```bash
+python ../hakoniwa-environment-studio/tools/envstudio.py types                                        # 使える部品の型
+python ../hakoniwa-environment-studio/tools/envstudio.py validate ../hakoniwa-environment-studio/recipes/examples/drone-practice-field.yaml
+python -m unittest discover -s ../hakoniwa-environment-studio/tests
+```
+
+Studio の作業データは、Business Pack の Recipe workspace `work/recipes/environment-studio/`（`$HAKONIWA_WORK_DIR/recipes/environment-studio`、以下 `<ws>`）に置きます。Workspace の外では Studio は起動せず、入り方を表示して止まります。
+
+Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `<ws>/recipes/`（例の環境は保存するとコピーになります）。一覧の × で環境を削除できます。すぐには消さず、見た目の GLB（`<ID>.assets/`）と地図から取り込んだ元データ（`<ws>/map-data/<ID>/`）と一緒に `<ws>/trash/<日時>-<ID>/` へ移します（戻すときはそこから `<ws>/` へ戻し、要らなければ手で消します）。例の環境は消せません。別の ID で保存すると、見た目の GLB もその ID の `<ID>.assets/` にコピーするので、元の環境を消してもコピーは壊れません（手で書いた Recipe がほかの環境の `.assets/` を指している場合は、削除を止めてその環境を示します）。部品を動かしたときは、3D の部品をその場で動かし、高さ（地形・道路の上）だけをサーバに聞きます（`POST /api/poses`）。GLB を作り直すのは、形・品目・地面・大きさが変わったときだけです。
 
 地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、範囲を指定して取り込むと、その範囲の建物と道路が部品になった Recipe ができます。範囲の指定は PLATEAU の City World ブラウザと同じです（中心マーカー、区画のドラッグ、四隅のハンドル、half extent 10〜1000 m）。
 
@@ -206,15 +223,15 @@ Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘�
   1. hakoniwa-envsim の `osm2citygml.py` が、OpenStreetMap（Overpass API）か GeoJSON を CityGML LOD1 にします（変換規則は envsim の `docs/osm-to-citygml.md`）。
   2. このリポジトリの部品変換ツール `tools/env_citygml.py` が、それを部品にします。
 - **部品の単位**：建物 1 棟（CityGML の `bldg:Building`）＝ `building-footprint` の部品 1 つ。道路の面は `road-area` です。建物は切らずに丸ごと使い、はみ出す建物があれば環境のほうを広げます。
-- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。City World に地形（PLATEAU の DEM）があれば、それが地面になり、建物は移動先の地面の高さに合わせて立ちます。LOD2 のある建物は、PLATEAU のテクスチャ付きの見た目（建物ごとの GLB）で表示され、部品と一緒に動きます。envsim が作った地形（hfield と GLB）・建物ごとの当たり判定（P0〜P3）・道路網などの層は作り直さずにそのまま使うので、**取り込んで編集せずに出力すれば envsim の出力と同じ世界になります**（`tools/env_roundtrip.py` で照合。動かした部品は、その分だけ移して使います）。地図ページの「PLATEAU から City World を作る」では、選んだ範囲の City World を hakoniwa-envsim に作らせ（`work/city-worlds/<ID>/`、ダウンロードした CityGML は共有キャッシュで使い回し）、終わったらそのまま部品として取り込みます。
-- **出典の記録**：部品は gml:id・元のファイル・OSM のタグを `source` に、Recipe は原点・範囲・出典（© OpenStreetMap contributors / ODbL、PLATEAU）を `geo` に持ちます。取得した地図データと CityGML は `work/map-data/<id>/` に残ります。
-- **準備**：hakoniwa-envsim が必要です（`../hakoniwa-envsim` か `HAKONIWA_ENVSIM_ROOT`）。Workspace Recipe `hakoniwa/recipes/citygml-parts.yaml` で用意できます。依存は `python -m venv .venv && .venv/bin/pip install -r requirements.txt` で入ります。
+- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。City World に地形（PLATEAU の DEM）があれば、それが地面になり、建物は移動先の地面の高さに合わせて立ちます。LOD2 のある建物は、PLATEAU のテクスチャ付きの見た目（建物ごとの GLB）で表示され、部品と一緒に動きます。envsim が作った地形（hfield と GLB）・建物ごとの当たり判定（P0〜P3）・道路網などの層は作り直さずにそのまま使うので、**取り込んで編集せずに出力すれば envsim の出力と同じ世界になります**（`tools/env_roundtrip.py` で照合。動かした部品は、その分だけ移して使います）。地図ページの「PLATEAU から City World を作る」では、選んだ範囲の City World を hakoniwa-envsim に作らせ（`<ws>/city-worlds/<ID>/`、ダウンロードした CityGML は共有キャッシュで使い回し）、終わったらそのまま部品として取り込みます。
+- **出典の記録**：部品は gml:id・元のファイル・OSM のタグを `source` に、Recipe は原点・範囲・出典（© OpenStreetMap contributors / ODbL、PLATEAU）を `geo` に持ちます。取得した地図データと CityGML は `<ws>/map-data/<id>/` に残ります。
+- **準備**：hakoniwa-envsim を使います。Quick start の `recipe.py configure` が、無ければ隣（`../hakoniwa-envsim`）に clone します（`HAKONIWA_ENVSIM_ROOT` で別の場所を指せます）。
 
-コマンドでも変換できます：
+コマンドでも変換できます（`(hako)` シェルの `hakoniwa-business-pack` で）：
 
 ```bash
-python ../hakoniwa-envsim/src/city_pipeline/osm2citygml.py --bbox 35.6795,139.7650,35.6822,139.7683 --overpass --out-dir work/map-data/tokyo
-python tools/env_citygml.py --citygml work/map-data/tokyo --center 35.68085,139.76665 --half-extent 149.787,149.367 --out work/recipes/tokyo.yaml
+python ../hakoniwa-envsim/src/city_pipeline/osm2citygml.py --bbox 35.6795,139.7650,35.6822,139.7683 --overpass --out-dir work/recipes/environment-studio/map-data/tokyo
+python ../hakoniwa-environment-studio/tools/env_citygml.py --citygml work/recipes/environment-studio/map-data/tokyo --center 35.68085,139.76665 --half-extent 149.787,149.367 --out work/recipes/environment-studio/recipes/tokyo.yaml
 ```
 
 - データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)

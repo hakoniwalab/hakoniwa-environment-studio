@@ -1,0 +1,330 @@
+id: environment-studio
+title: Environment Studio (browser authoring of simulation environments, Core-free)
+recipe_version: 0.1
+
+goal:
+  user_request: ブラウザで地面・道路・建物などの部品を置いて試験環境を作り、PLATEAU や地図の街も部品として編集して、MuJoCo で検証し、Urban Mobility で使えるようにしたい
+  description: >
+    Run the Environment Studio browser authoring tool from the Business Pack
+    Workspace with Foundation Python. The Studio edits Environment Recipes
+    (Type / Catalog / Recipe), validates them with MuJoCo, generates GLB and
+    MJCF, turns CityGML (PLATEAU, OpenStreetMap converted by hakoniwa-envsim)
+    and hakoniwa-envsim City Worlds into editable parts without losing their
+    fidelity, and exports a Recipe as a hakoniwa-urban-mobility City World job.
+
+feasibility:
+  status: feasible
+  confidence: high
+  rationale:
+    - Environment Studio owns the Type / Catalog / Recipe contract, the browser editor, MuJoCo validation, and GLB / MJCF generation.
+    - hakoniwa-envsim owns CityGML extraction, OpenStreetMap to CityGML conversion, PLATEAU City World builds, and the MJCF collider GLB converter.
+    - hakoniwa-urban-mobility owns the City World job contract (schemas/city-world-job.yaml) and City registration (tools/urban_assets.py register-city).
+
+validation:
+  status: partially_verified
+  summary: >
+    On 2026-09-30 on macOS arm64, recipe.py configure installed the Recipe
+    Python packages into Foundation Python (keeping mujoco 3.13.0 shared with
+    the Urban Recipes), doctor reported both source dependencies satisfied, all
+    Studio unit tests passed with Foundation Python, and the Studio started from
+    the Workspace, listed and validated the Recipes moved into its Recipe
+    workspace, showed an imported PLATEAU Recipe in 3D, and exported two Recipes
+    that Urban's check accepted and register-city registered. Linux, Windows,
+    and a clean host are not recorded.
+  steps:
+    - id: workspace_configure
+      status: verified
+      evidence:
+        - repository: hakoniwalab/hakoniwa-environment-studio
+          path: recipes/business-pack/environment-studio.yaml
+          revision: main
+      notes:
+        - configure installed shapely, lxml, mapbox-earcut, and Pillow into work/foundation/install/python; doctor reported hakoniwa-envsim and hakoniwa-urban-mobility SATISFIED.
+        - python -m unittest discover -s ../hakoniwa-environment-studio/tests ran 131 tests with Foundation Python and passed.
+    - id: browser_studio
+      status: verified
+      evidence:
+        - repository: hakoniwalab/hakoniwa-environment-studio
+          path: tools/env_studio.py
+          revision: main
+      notes:
+        - env_studio.py start from the Workspace served http://127.0.0.1:8097/; eleven moved Recipes validated with MuJoCo and an imported PLATEAU Recipe rendered in 3D.
+        - Outside the Workspace the Studio stops with the Workspace and configure commands instead of starting.
+    - id: urban_export
+      status: verified
+      evidence:
+        - repository: hakoniwalab/hakoniwa-environment-studio
+          path: tools/env_urban.py
+          revision: main
+      notes:
+        - car-test-course and sapporo-351-exact were exported to work/recipes/environment-studio/urban, passed hakoniwa-urban-mobility tools/city_world_job.py check, and were registered.
+    - id: other_hosts
+      status: not_tested
+      notes:
+        - Linux, Windows, and a clean-host configure are not recorded.
+constraints:
+  - no-hakoniwa-core-process
+  - no-hakopy
+  - no-hako-cmd
+  - foundation-python-only
+  - local-loopback-web-ui
+  - generated-data-remains-under-recipe-workspace
+  - external-map-and-plateau-apis-used-only-by-explicit-import
+
+target_environment:
+  required_for: interactive-environment-authoring
+  status: specified
+  os: macOS | Linux | Windows
+  os_version: current-supported-host
+  architecture: host-native
+  execution_mode: native
+  notes:
+    - Verified on macOS arm64; Linux and Windows are design targets of the same Python-only tool.
+  runtimes:
+    - name: Python
+      required: true
+      version: "3.12"
+      path: work/foundation/install/python
+    - name: MuJoCo
+      required: true
+      version: 3.13.0
+      path: recipes/requirements/environment-studio.txt
+
+execution_environment:
+  required_for: interactive-environment-authoring
+  status: specified
+  os: macOS | Linux | Windows
+  os_version: current-supported-host
+  architecture: host-native
+  execution_mode: native
+  gui:
+    required: true
+    status: local-browser
+  shared_memory:
+    required: false
+    access: not-used
+  python:
+    environment: foundation-venv
+    path: work/foundation/install/python
+    version: "3.12"
+    hakopy_available: not-required
+  notes:
+    - The Studio runs in the Business Pack Workspace (python tools/workspace.py enter) and refuses to start outside it.
+    - Its data is in the Recipe workspace work/recipes/environment-studio (the Business Pack work directory, HAKONIWA_WORK_DIR).
+
+foundation_contract:
+  mode: not_required
+  reason: The Studio is a local Python web tool that runs MuJoCo in process; it does not start Hakoniwa Core, shared memory, hako-cmd, or hakopy.
+
+runtime_dependencies:
+  python:
+    interpreter: work/foundation/install/python
+    requirements: recipes/requirements/environment-studio.txt
+    packages:
+      - name: PyYAML
+        version: ">=6.0,<7"
+        purpose: Read and write Types, Catalogs, and Environment Recipes.
+      - name: mujoco
+        version: 3.13.0
+        purpose: Validate Recipes physically and compile the MJCF behind the collider GLB; the same version as the Urban Recipes.
+      - name: numpy
+        version: ">=2.0,<3"
+        purpose: Terrain height fields and geometry.
+      - name: shapely
+        version: ">=2.1,<3"
+        purpose: Polygon parts, clipping, and hakoniwa-envsim's CityGML extractors.
+      - name: lxml
+        version: ">=5,<7"
+        purpose: hakoniwa-envsim's CityGML reader.
+      - name: mapbox-earcut
+        version: ">=1.0,<2"
+        purpose: Triangulation in hakoniwa-envsim's GLB converters.
+      - name: trimesh
+        version: ">=4.8,<5"
+        purpose: GLB generation and reading.
+      - name: Pillow
+        version: ">=11,<13"
+        purpose: Textures of PLATEAU building GLBs.
+
+recipe_local_requirements_schema_version: 1
+recipe_local_requirements:
+  hakoniwa-envsim:
+    root:
+      default_path: ../hakoniwa-envsim
+      override_env: HAKONIWA_ENVSIM_ROOT
+      relative_to: recipe_repository
+    source:
+      type: git
+      url: https://github.com/hakoniwalab/hakoniwa-envsim.git
+      revision: main
+    required_artifacts:
+      - path: tools/hako.py
+        kind: file
+      - path: src/city_pipeline/geodesy.py
+        kind: file
+      - path: src/city_pipeline/gml_lod1_extract.py
+        kind: file
+      - path: src/city_pipeline/road_terrain_probe.py
+        kind: file
+      - path: src/city_pipeline/osm2citygml.py
+        kind: file
+      - path: src/city_pipeline/mjcf_colliders2glb.py
+        kind: file
+  hakoniwa-urban-mobility:
+    root:
+      default_path: ../hakoniwa-urban-mobility
+      override_env: HAKONIWA_URBAN_MOBILITY_ROOT
+      relative_to: recipe_repository
+    source:
+      type: git
+      url: https://github.com/hakoniwalab/hakoniwa-urban-mobility.git
+      revision: main
+    required_artifacts:
+      - path: schemas/city-world-job.yaml
+        kind: file
+      - path: tools/city_world_job.py
+        kind: file
+      - path: tools/urban_assets.py
+        kind: file
+
+components:
+  - id: hakoniwa-environment-studio
+    roles: [asset_generator, environment_model, visualizer]
+    purpose: Edit Environment Recipes in the browser, validate them with MuJoCo, generate GLB / MJCF, and export them to Urban Mobility.
+  - id: hakoniwa-envsim
+    roles: [asset_generator, environment_model]
+    purpose: Read CityGML (PLATEAU, converted OpenStreetMap), build PLATEAU City Worlds, and convert MJCF colliders to GLB.
+
+connections:
+  - from: hakoniwa-envsim
+    to: hakoniwa-environment-studio
+    interface: CityGML, City World build outputs
+    contract:
+      status: partially_verified
+      requires:
+        - The Studio imports Envsim's pipeline modules from its checkout (tools/env_envsim.py) and runs its tools/hako.py with Foundation Python.
+        - An imported City World keeps Envsim's colliders, terrain hfield, and visuals unchanged (docs/citygml-parts.md section 7).
+      validation_notes:
+        - tools/env_roundtrip.py matched three workspace City Worlds after an unedited import and export.
+
+data_flow:
+  - Browser -> Studio (tools/env_studio.py, 127.0.0.1:8097) -> Environment Recipe in work/recipes/environment-studio/recipes
+  - OpenStreetMap / GeoJSON -> envsim osm2citygml.py -> CityGML -> tools/env_citygml.py -> Recipe of parts
+  - PLATEAU selection -> envsim tools/hako.py (work/recipes/environment-studio/city-worlds) -> City World -> Recipe of parts
+  - Recipe -> MuJoCo validation -> environment.glb / environment.xml
+  - Recipe -> tools/env_urban.py -> City World job (work/recipes/environment-studio/urban) -> urban_assets.py register-city
+
+time_model:
+  mode: wall-clock
+  notes:
+    - Authoring and validation are interactive; simulation time is not used.
+
+artifact_sets:
+  environment_recipes:
+    status: partially_verified
+    description: Environment Recipes saved in the Studio, with their own assets (<id>.assets) and the map data they were imported from.
+    artifacts: [work/recipes/environment-studio/recipes, work/recipes/environment-studio/map-data]
+  city_worlds:
+    status: partially_verified
+    description: PLATEAU City Worlds the Studio asked Envsim to build.
+    artifacts: [work/recipes/environment-studio/city-worlds]
+  urban_exports:
+    status: partially_verified
+    description: City World jobs exported for hakoniwa-urban-mobility.
+    artifacts: [work/recipes/environment-studio/urban]
+
+artifacts:
+  - id: environment_recipes
+    kind: generated-directory
+    path: work/recipes/environment-studio/recipes
+  - id: city_worlds
+    kind: generated-directory
+    path: work/recipes/environment-studio/city-worlds
+  - id: urban_exports
+    kind: generated-directory
+    path: work/recipes/environment-studio/urban
+  - id: studio_state
+    kind: generated-directory
+    path: work/recipes/environment-studio/studio
+
+agency_boundary:
+  agent_actions:
+    - id: configure_studio
+      description: Materialize the source repositories and install the Recipe Python packages into Foundation Python.
+      autonomous: true
+    - id: run_studio
+      description: Start and stop the local Studio server.
+      autonomous: true
+      preconditions:
+        - user_requested_execution
+  human_decisions:
+    - id: approve_environment
+      description: Decide whether an authored or imported environment is suitable for the intended simulation.
+      required_before: [external_delivery]
+  required_permissions:
+    - id: map_network_access
+      description: The OpenStreetMap Overpass API, map tiles, and the PLATEAU API are reached only when the operator imports a map area or builds a City World.
+      status: required-at-runtime
+
+missing_pieces:
+  - Record configure, doctor, unit tests, and browser authoring evidence with Foundation Python on Linux, Windows, and a clean host.
+  - hakoniwa-environment-studio and hakoniwa-urban-mobility have no Business Pack Catalog entries (missing_catalog_entry), so the Urban export (schemas/city-world-job.yaml, register-city) is recorded in data_flow rather than as a connection, and this Recipe stays in the component repository.
+
+demo:
+  prerequisites:
+    - id: enter_workspace
+      command: python tools/workspace.py enter
+      expected: Start the managed Workspace shell (the prompt shows (hako)) in hakoniwa-business-pack.
+  steps:
+    - id: inspect_plan
+      command: python tools/recipe.py plan --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
+      expected: Show hakoniwa-envsim and hakoniwa-urban-mobility (clone or reuse) and the Recipe Python requirements; no Foundation build.
+    - id: configure
+      command: python tools/recipe.py configure --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
+      expected: Clone missing source repositories and install the Recipe Python packages into Foundation Python.
+    - id: doctor
+      command: python tools/recipe.py doctor --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
+      expected: Report every source dependency and required artifact as satisfied.
+    - id: unit_tests
+      command: python -m unittest discover -s ../hakoniwa-environment-studio/tests
+      expected: All Studio unit tests pass with Foundation Python.
+    - id: start_studio
+      command: python ../hakoniwa-environment-studio/tools/env_studio.py start
+      expected: The Studio runs in the background at http://127.0.0.1:8097/ and prints its URL, state file, and log.
+    - id: studio_status
+      command: python ../hakoniwa-environment-studio/tools/env_studio.py status
+      expected: Report the running Studio's pid, port, and URL.
+  cleanup:
+    expected_behavior:
+      - Run python ../hakoniwa-environment-studio/tools/env_studio.py stop before leaving the Workspace.
+    verification_checks:
+      - The Studio's port 8097 is free and work/recipes/environment-studio/studio/studio.json is removed.
+    cautions:
+      - exit leaves the Workspace shell but does not stop a background Studio.
+
+expected_result: >
+  From the Business Pack Workspace, configure prepares the Studio's sources and
+  Python packages in Foundation Python, and the Studio starts at
+  http://127.0.0.1:8097/, keeping its Recipes, City Worlds, and Urban exports in
+  work/recipes/environment-studio.
+
+source_catalogs:
+  - component_id: hakoniwa-envsim
+
+source_artifacts:
+  - repository: hakoniwalab/hakoniwa-environment-studio
+    path: tools/env_studio.py
+    revision: main
+    description: The Studio server and its start / status / stop lifecycle.
+  - repository: hakoniwalab/hakoniwa-environment-studio
+    path: tools/env_workspace.py
+    revision: main
+    description: Workspace resolution of the Recipe workspace and the source repositories.
+  - repository: hakoniwalab/hakoniwa-envsim
+    path: tools/hako.py
+    revision: main
+    description: PLATEAU acquisition and City World conversion entry point.
+  - repository: hakoniwalab/hakoniwa-urban-mobility
+    path: schemas/city-world-job.yaml
+    revision: main
+    description: The City World job contract the Urban export follows.
