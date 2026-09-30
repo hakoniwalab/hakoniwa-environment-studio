@@ -20,16 +20,16 @@
     <aside class="sidebar">
       <section class="panel">
         <h2>範囲</h2>
-        <p class="hint">地図を動かして、枠を取り込みたい場所に合わせます（枠は地図の中心）。</p>
         <div class="row">
-          <label class="field">東西 (m)<input id="size-east" type="number" min="20" step="10" value="300"></label>
-          <label class="field">南北 (m)<input id="size-north" type="number" min="20" step="10" value="300"></label>
+          <label class="field">Latitude<input id="latitude" type="number" step="0.000001"></label>
+          <label class="field">Longitude<input id="longitude" type="number" step="0.000001"></label>
         </div>
-        <label class="field">中心（緯度, 経度）
-          <span class="row"><input id="center" placeholder="35.6809, 139.7667" autocomplete="off">
-            <button id="go" class="secondary">移動</button></span>
-        </label>
-        <p id="bbox" class="meta"></p>
+        <div class="row">
+          <label class="field">N/S half extent [m]<input id="northSouth" type="number" min="10" max="1000" step="10" value="150"></label>
+          <label class="field">E/W half extent [m]<input id="eastWest" type="number" min="10" max="1000" step="10" value="150"></label>
+        </div>
+        <p class="hint">地図のクリック、中心マーカーまたは青い区画のドラッグで位置を変更できます。四隅のハンドルで範囲を変更できます。100m + 100mは一辺200mの範囲です。</p>
+        <div id="selection-summary" class="meta"></div>
       </section>
 
       <section class="panel">

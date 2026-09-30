@@ -8,51 +8,179 @@ import { $, api, el } from "./dom.js";
 
 const DEFAULT_CENTER = [35.6809, 139.7667]; // Tokyo Station
 const DEFAULT_ZOOM = 17;
-const STORE_KEY = "hakoniwa-environment-map-view";
-// WGS84: metres per degree at a latitude (the area's size; Envsim's geodesy.py
-// does the exact conversion).
-const A = 6378137.0;
-const E2 = 6.69437999014e-3;
-
-function metresPerDegree(lat) {
-  const phi = (lat * Math.PI) / 180;
-  const w = Math.sqrt(1 - E2 * Math.sin(phi) ** 2);
-  return { north: (Math.PI / 180) * A * (1 - E2) / w ** 3, east: (Math.PI / 180) * A / w * Math.cos(phi) };
-}
+const STORE_KEY = "hakoniwa-environment-map-selection";
+// Metres per degree of latitude, as Envsim (plateau_citygml.bounding_box) and
+// the PLATEAU City World browser convert a selection to degrees.
+const METRES_PER_DEGREE = 111320;
+const HALF_EXTENT = { min: 10, max: 1000 }; // metres, as in the PLATEAU browser
 
 function setStatus(message, kind = "") {
   $("#status").textContent = message;
   $("#status").className = `status ${kind}`;
 }
 
-function loadView() {
+const numeric = (id) => Number($(`#${id}`).value);
+
+function loadSelection() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (saved && Array.isArray(saved.center)) return saved;
+    if (saved && Number.isFinite(saved.latitude)) return saved;
   } catch { /* private window or nothing saved */ }
-  return { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM };
+  return { latitude: DEFAULT_CENTER[0], longitude: DEFAULT_CENTER[1], northSouth: 150, eastWest: 150 };
 }
 
-function saveView(map) {
+function saveSelection() {
   try {
-    const center = map.getCenter();
-    localStorage.setItem(STORE_KEY, JSON.stringify({ center: [center.lat, center.lng], zoom: map.getZoom() }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      latitude: numeric("latitude"), longitude: numeric("longitude"),
+      northSouth: numeric("northSouth"), eastWest: numeric("eastWest"),
+    }));
   } catch { /* storage unavailable */ }
 }
 
-// The area: size_m about the map's centre, as degrees.
-function bbox(map) {
-  const center = map.getCenter();
-  const east = Number($("#size-east").value);
-  const north = Number($("#size-north").value);
-  const scale = metresPerDegree(center.lat);
-  const halfLat = north / 2 / scale.north;
-  const halfLon = east / 2 / scale.east;
-  const round = (value) => Math.round(value * 1e7) / 1e7;
+// The selection as the PLATEAU City World browser sends it.
+function selection() {
   return {
-    south: round(center.lat - halfLat), west: round(center.lng - halfLon),
-    north: round(center.lat + halfLat), east: round(center.lng + halfLon),
+    center: { latitude: numeric("latitude"), longitude: numeric("longitude") },
+    half_extent_m: { north_south: numeric("northSouth"), east_west: numeric("eastWest") },
   };
+}
+
+function selectionIsValid() {
+  return Number.isFinite(numeric("latitude")) && Number.isFinite(numeric("longitude"))
+    && numeric("latitude") >= -90 && numeric("latitude") <= 90
+    && numeric("longitude") >= -180 && numeric("longitude") <= 180
+    && ["northSouth", "eastWest"].every((id) => numeric(id) >= HALF_EXTENT.min && numeric(id) <= HALF_EXTENT.max);
+}
+
+function boundsOf(latitude, longitude, northSouth, eastWest) {
+  const latDelta = northSouth / METRES_PER_DEGREE;
+  const lonDelta = eastWest / (METRES_PER_DEGREE * Math.cos((latitude * Math.PI) / 180));
+  return L.latLngBounds([latitude - latDelta, longitude - lonDelta], [latitude + latDelta, longitude + lonDelta]);
+}
+
+function selectionBounds() {
+  return boundsOf(numeric("latitude"), numeric("longitude"), numeric("northSouth"), numeric("eastWest"));
+}
+
+function setInputsFromBounds(bounds) {
+  const center = bounds.getCenter();
+  const northSouth = (bounds.getNorth() - bounds.getSouth()) * METRES_PER_DEGREE / 2;
+  const eastWest = (bounds.getEast() - bounds.getWest()) * METRES_PER_DEGREE * Math.cos((center.lat * Math.PI) / 180) / 2;
+  $("#latitude").value = center.lat.toFixed(6);
+  $("#longitude").value = center.lng.toFixed(6);
+  $("#northSouth").value = northSouth.toFixed(1);
+  $("#eastWest").value = eastWest.toFixed(1);
+}
+
+// The selection on the map: a draggable centre marker, a rectangle that moves
+// when dragged and corner handles that resize it (the opposite corner stays),
+// a click on the map to recentre -- the PLATEAU City World browser's controls.
+function selectionControls(map, onChange) {
+  const marker = L.marker(map.getCenter(), { draggable: true }).addTo(map)
+    .bindTooltip("中心", { direction: "top" });
+  const rectangle = L.rectangle([[0, 0], [0, 0]], {
+    color: "#1367a8", weight: 2, fillColor: "#2d8dca", fillOpacity: 0.18, className: "selection-rectangle",
+  }).addTo(map).bindTooltip("ドラッグで移動／四隅のハンドルで大きさを変更");
+  const handles = ["nw", "ne", "se", "sw"].map((direction) => L.marker([0, 0], {
+    draggable: true, keyboard: false, zIndexOffset: 1000,
+    icon: L.divIcon({
+      className: `selection-resize-handle selection-resize-handle-${direction}`,
+      html: '<span aria-hidden="true"></span>', iconSize: [28, 28], iconAnchor: [14, 14],
+    }),
+  }).addTo(map));
+  const opposite = [2, 3, 0, 1];
+  const corners = (bounds) => [bounds.getNorthWest(), bounds.getNorthEast(), bounds.getSouthEast(), bounds.getSouthWest()];
+  let suppressClickUntil = 0;
+  let interaction = null;
+  // Leaflet may send a click right after a drag; ignore it for a moment.
+  const suppressClick = () => { suppressClickUntil = Date.now() + 250; };
+
+  function refresh({ skipHandle = -1 } = {}) {
+    if (!selectionIsValid()) {
+      $("#selection-summary").textContent = "範囲の値を確認してください（half extent は 10〜1000 m）。";
+      onChange(false);
+      return;
+    }
+    const center = [numeric("latitude"), numeric("longitude")];
+    marker.setLatLng(center);
+    const bounds = selectionBounds();
+    rectangle.setBounds(bounds);
+    corners(bounds).forEach((corner, index) => { if (index !== skipHandle) handles[index].setLatLng(corner); });
+    $("#selection-summary").textContent = `${(numeric("eastWest") * 2).toFixed(0)}m × ${(numeric("northSouth") * 2).toFixed(0)}m`
+      + ` / center=${center[0].toFixed(6)}, ${center[1].toFixed(6)}`;
+    saveSelection();
+    onChange(true);
+  }
+
+  function setCenter(latlng) {
+    $("#latitude").value = latlng.lat.toFixed(6);
+    $("#longitude").value = latlng.lng.toFixed(6);
+    refresh();
+  }
+
+  map.on("click", (event) => { if (Date.now() >= suppressClickUntil) setCenter(event.latlng); });
+  marker.on("drag", (event) => setCenter(event.target.getLatLng()));
+  for (const id of ["latitude", "longitude", "northSouth", "eastWest"]) {
+    $(`#${id}`).addEventListener("input", () => refresh());
+    $(`#${id}`).addEventListener("change", () => {
+      if (selectionIsValid()) map.fitBounds(selectionBounds().pad(0.35), { maxZoom: 19 });
+    });
+  }
+  handles.forEach((handle, index) => {
+    let fixed = null;
+    handle.on("mousedown", (event) => {
+      // The handle sits over the movable rectangle: claim the gesture first.
+      interaction = "resize";
+      L.DomEvent.stopPropagation(event.originalEvent);
+      suppressClick();
+    });
+    handle.on("dragstart", () => {
+      interaction = "resize";
+      fixed = corners(rectangle.getBounds())[opposite[index]];
+      suppressClick();
+    });
+    handle.on("drag", (event) => {
+      setInputsFromBounds(L.latLngBounds(fixed, event.target.getLatLng()));
+      refresh({ skipHandle: index });
+    });
+    handle.on("dragend", () => {
+      suppressClick();
+      fixed = null;
+      interaction = null;
+      refresh();
+    });
+  });
+  rectangle.on("mousedown", (event) => {
+    const target = event.originalEvent?.target;
+    if (interaction === "resize" || (target instanceof Element && target.closest(".selection-resize-handle"))) return;
+    interaction = "move";
+    L.DomEvent.stopPropagation(event.originalEvent);
+    suppressClick();
+    const start = event.latlng;
+    const original = rectangle.getBounds();
+    map.dragging.disable();
+    const move = (moveEvent) => {
+      const dLat = moveEvent.latlng.lat - start.lat;
+      const dLon = moveEvent.latlng.lng - start.lng;
+      setInputsFromBounds(L.latLngBounds([original.getSouth() + dLat, original.getWest() + dLon],
+        [original.getNorth() + dLat, original.getEast() + dLon]));
+      refresh();
+    };
+    const finish = () => {
+      suppressClick();
+      map.off("mousemove", move);
+      map.off("mouseup", finish);
+      document.removeEventListener("mouseup", finish);
+      map.dragging.enable();
+      interaction = null;
+    };
+    map.on("mousemove", move);
+    map.on("mouseup", finish);
+    document.addEventListener("mouseup", finish, { once: true });
+  });
+  refresh();
+  return { refresh };
 }
 
 const ROOT_KEY = "hakoniwa-environment-world-root";
@@ -60,11 +188,8 @@ const ROOT_KEY = "hakoniwa-environment-world-root";
 // The City Worlds (Envsim builds) in a workspace: listed, outlined on the map,
 // and imported as parts (POST /api/city-worlds/import).
 function worldBounds(build) {
-  const scale = metresPerDegree(build.center.latitude);
-  const halfLat = build.half_extent_m.north_south / scale.north;
-  const halfLon = build.half_extent_m.east_west / scale.east;
-  return [[build.center.latitude - halfLat, build.center.longitude - halfLon],
-    [build.center.latitude + halfLat, build.center.longitude + halfLon]];
+  return boundsOf(build.center.latitude, build.center.longitude, build.half_extent_m.north_south,
+    build.half_extent_m.east_west);
 }
 
 async function searchWorlds(map, layer) {
@@ -129,33 +254,19 @@ function report(result) {
 
 async function init() {
   const config = await api("GET", "map/config");
-  const view = loadView();
-  const map = L.map("map").setView(view.center, view.zoom);
-  L.tileLayer(config.tiles.url, { maxZoom: 19, attribution: config.tiles.attribution }).addTo(map);
-  const area = L.rectangle([[0, 0], [0, 0]], { color: "#1f6feb", weight: 2, fillOpacity: 0.08, interactive: false }).addTo(map);
-  const centre = L.circleMarker(view.center, { radius: 4, color: "#1f6feb", interactive: false }).addTo(map);
+  const saved = loadSelection();
+  $("#latitude").value = saved.latitude.toFixed(6);
+  $("#longitude").value = saved.longitude.toFixed(6);
+  $("#northSouth").value = saved.northSouth;
+  $("#eastWest").value = saved.eastWest;
+  const map = L.map("map", { maxZoom: 20 }).setView([saved.latitude, saved.longitude], DEFAULT_ZOOM);
+  L.tileLayer(config.tiles.url, { maxZoom: 20, maxNativeZoom: 19, attribution: config.tiles.attribution }).addTo(map);
+  L.control.scale().addTo(map);
+  let importing = false;
+  const controls = selectionControls(map, (valid) => { $("#import").disabled = importing || !valid; });
+  map.fitBounds(selectionBounds().pad(0.35), { maxZoom: 19 });
+  const update = () => controls.refresh();
 
-  const update = () => {
-    const box = bbox(map);
-    area.setBounds([[box.south, box.west], [box.north, box.east]]);
-    centre.setLatLng(map.getCenter());
-    const c = map.getCenter();
-    $("#bbox").textContent = `中心 ${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}／範囲 ${box.south}, ${box.west} 〜 ${box.north}, ${box.east}`;
-    const east = Number($("#size-east").value);
-    const north = Number($("#size-north").value);
-    $("#import").disabled = !(east > 0 && north > 0 && Math.max(east, north) <= config.max_side_m);
-    if (Math.max(east, north) > config.max_side_m) setStatus(`一辺は ${config.max_side_m} m までです`, "error");
-  };
-  map.on("move", update);
-  map.on("moveend", () => saveView(map));
-  for (const id of ["#size-east", "#size-north"]) $(id).addEventListener("input", update);
-  update();
-
-  $("#go").addEventListener("click", () => {
-    const [lat, lon] = $("#center").value.split(/[,\s]+/).filter(Boolean).map(Number);
-    if (Number.isFinite(lat) && Number.isFinite(lon)) map.setView([lat, lon], Math.max(map.getZoom(), 16));
-    else setStatus("中心は「緯度, 経度」で入力してください", "error");
-  });
   $("#source").addEventListener("change", () => { $("#geojson-field").hidden = $("#source").value !== "geojson"; });
 
   const worlds = L.layerGroup().addTo(map);
@@ -163,8 +274,8 @@ async function init() {
   $("#world-search").addEventListener("click", () => searchWorlds(map, worlds));
   searchWorlds(map, worlds);
 
-  const catalog = await api("GET", "catalogs/starter");
-  $("#terrain").replaceChildren(...catalog.items.filter((item) => item.kind === "terrain")
+  // Only grounds that need no data of their own (map data brings no terrain).
+  $("#terrain").replaceChildren(...config.terrains
     .map((item) => el("option", { value: item.id, selected: item.id === "city-ground" }, item.name)));
 
   $("#import").addEventListener("click", async () => {
@@ -173,7 +284,11 @@ async function init() {
       setStatus("ID は小文字・数字・- _ で付けてください", "error");
       return;
     }
-    const body = { id, name: $("#recipe-name").value.trim(), bbox: bbox(map), terrain: $("#terrain").value,
+    if (!selectionIsValid()) {
+      setStatus("範囲の値を確認してください", "error");
+      return;
+    }
+    const body = { id, name: $("#recipe-name").value.trim(), selection: selection(), terrain: $("#terrain").value,
       source: $("#source").value };
     if (body.source === "geojson") {
       const file = $("#geojson").files[0];
@@ -183,6 +298,7 @@ async function init() {
         return;
       }
     }
+    importing = true;
     $("#import").disabled = true;
     setStatus(body.source === "overpass" ? "OpenStreetMap から取得して作っています…" : "作っています…");
     try {
@@ -194,6 +310,7 @@ async function init() {
     } catch (error) {
       setStatus(error.message, "error");
     } finally {
+      importing = false;
       update();
     }
   });

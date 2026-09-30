@@ -18,3 +18,10 @@
 #report ul { margin: 4px 0; padding-left: 18px; }
 .leaflet-container { font: inherit; }
 #world-list li { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+/* The selection, as in the PLATEAU City World browser. */
+.selection-rectangle { cursor: move; }
+.selection-resize-handle { display: grid; place-items: center; background: transparent; }
+.selection-resize-handle span { display: block; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 3px; background: #1367a8; box-shadow: 0 1px 4px #17222d99; }
+.selection-resize-handle-nw, .selection-resize-handle-se { cursor: nwse-resize; }
+.selection-resize-handle-ne, .selection-resize-handle-sw { cursor: nesw-resize; }
+#selection-summary { margin-top: 6px; font: .78rem ui-monospace, monospace; }

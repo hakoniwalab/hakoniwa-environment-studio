@@ -156,10 +156,27 @@ class StudioServerTest(unittest.TestCase):
         self.assertIn("overpass", json.loads(geo["query"]))
         data = self.user.parent / "map-data/my-block"
         self.assertTrue((data / "map.json").exists() and (data / "map_bldg_op.gml").exists())
+        # The PLATEAU City World browser's selection form: the typed half extents are kept.
+        center = test_env_citygml.box().center
+        with mock.patch.object(osm, "fetch_overpass", return_value=test_env_citygml.sample()):
+            status, result = self.call("POST", "/api/map/import", {"id": "by-selection", "selection": {
+                "center": {"latitude": center[0], "longitude": center[1]},
+                "half_extent_m": {"north_south": 50, "east_west": 50}}})
+        self.assertEqual(status, 200, result)
+        self.assertEqual(result["size_m"]["north"], 100.0)
+        self.assertLessEqual(result["assumed"]["building_height"], result["buildings"])
+        status, error = self.call("POST", "/api/map/import", {"id": "tiny", "selection": {
+            "center": {"latitude": center[0], "longitude": center[1]}, "half_extent_m": {"north_south": 5, "east_west": 50}}})
+        self.assertEqual(status, 400)
+        # A ground that needs data of its own is not offered for map data.
+        status, error = self.call("POST", "/api/map/import", {"id": "dem", "terrain": "city-dem", "bbox": box})
+        self.assertEqual(status, 400)
+        self.assertIn("city-dem", error["error"])
         # The same id again is refused; the map settings are there for the page.
         self.assertEqual(self.call("POST", "/api/map/import", {"id": "my-block", "bbox": box})[0], 409)
         _, config = self.call("GET", "/api/map/config")
         self.assertIn("{z}", config["tiles"]["url"])
+        self.assertNotIn("city-dem", [item["id"] for item in config["terrains"]])
         status, error = self.call("POST", "/api/map/import", {"id": "big", "bbox": {
             "south": 35, "west": 135, "north": 35.2, "east": 135.2}, "source": "geojson",
             "geojson": {"type": "FeatureCollection", "features": []}})

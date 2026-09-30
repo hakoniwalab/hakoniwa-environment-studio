@@ -200,7 +200,7 @@ python tools/env_studio.py stop
 
 Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `work/recipes/`（例の環境は保存するとコピーになります）。
 
-地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、枠（東西 × 南北 m、地図の中心）を合わせて取り込むと、その範囲の建物と道路が部品になった Recipe ができます。
+地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、範囲を指定して取り込むと、その範囲の建物と道路が部品になった Recipe ができます。範囲の指定は PLATEAU の City World ブラウザと同じです（中心マーカー、区画のドラッグ、四隅のハンドル、half extent 10〜1000 m）。
 
 - **経路**：地図データは、街データの標準の中間表現である CityGML を経由します。
   1. hakoniwa-envsim の `osm2citygml.py` が、OpenStreetMap（Overpass API）か GeoJSON を CityGML LOD1 にします（変換規則は envsim の `docs/osm-to-citygml.md`）。

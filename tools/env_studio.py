@@ -264,12 +264,31 @@ DEFAULT_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 DEFAULT_TILES_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 
 
+def _ready_terrains(catalog_id: str = DEFAULT_CATALOG_ID) -> list[dict]:
+    """Terrain items that make a ground from their defaults alone: map data
+    brings no terrain, so one that needs data (a City World's DEM) is left out."""
+    catalog = env_schema.load_catalog(_catalog_path(catalog_id))
+    ready = []
+    for item in catalog.items.values():
+        if not item.type.is_terrain:
+            continue
+        try:
+            env_schema.parse_recipe({"schema": env_schema.RECIPE_SCHEMA, "size_m": {"east": 20, "north": 20},
+                                     "terrain": {"item": item.id}, "objects": []},
+                                    USER_RECIPES.resolve() / "terrain.yaml", catalog)
+        except DiagnosticError:
+            continue
+        ready.append({"id": item.id, "name": item.name})
+    return ready
+
+
 def map_config() -> dict:
     return {
         "tiles": {"url": os.environ.get("HAKONIWA_MAP_TILES", DEFAULT_TILES),
                   "attribution": os.environ.get("HAKONIWA_MAP_TILES_ATTRIBUTION", DEFAULT_TILES_ATTRIBUTION)},
         "overpass": os.environ.get("HAKONIWA_OVERPASS_URL") or "https://overpass-api.de/api/interpreter",
         "max_side_m": 2000.0,
+        "terrains": _ready_terrains(),
     }
 
 
@@ -282,7 +301,9 @@ def import_map(body: object) -> dict:
     into one part per building and road surface. The map data and the CityGML
     are kept in work/map-data/<id>/, so the import can be redone offline.
 
-    Body: {id, name?, bbox: {south, west, north, east}, source: "overpass" |
+    Body: {id, name?, selection: {center: {latitude, longitude},
+    half_extent_m: {north_south, east_west}} (the PLATEAU City World
+    browser's form; or bbox: {south, west, north, east}), source: "overpass" |
     "geojson", geojson?, terrain?, catalog_id?, overwrite?}.
     """
     if not isinstance(body, dict):
@@ -293,29 +314,45 @@ def import_map(body: object) -> dict:
     if (target.exists() or recipe_id in _recipe_files()) and not body.get("overwrite"):
         raise StudioError(f"Recipe {recipe_id} はもうあります（別の ID にしてください）", HTTPStatus.CONFLICT)
     source = body.get("source", "overpass")
+    terrain = body.get("terrain") or "city-ground"
+    if terrain not in {item["id"] for item in _ready_terrains(body.get("catalog_id") or DEFAULT_CATALOG_ID)}:
+        raise StudioError(f"地面 {terrain} は地図からの取り込みでは使えません（City World の地形データなどが必要な地面です）")
     data_dir = directory.parent / "map-data" / recipe_id
     try:
         osm = env_citygml.osm2citygml()
-        box = body.get("bbox")
-        bbox = osm.Box.of(box["south"], box["west"], box["north"], box["east"]) if isinstance(box, dict) else None
+        chosen = body.get("selection")
+        if isinstance(chosen, dict):
+            center = (float(chosen["center"]["latitude"]), float(chosen["center"]["longitude"]))
+            half = (float(chosen["half_extent_m"]["north_south"]), float(chosen["half_extent_m"]["east_west"]))
+            if not all(10 <= value <= 1000 for value in half):
+                raise StudioError("half_extent_m must be 10 to 1000 m (as in the PLATEAU City World browser)")
+            bbox = osm.Box.of(*env_citygml.bounding_box(center, half))
+        else:
+            box = body.get("bbox")
+            bbox = osm.Box.of(box["south"], box["west"], box["north"], box["east"]) if isinstance(box, dict) else None
         geojson = body.get("geojson") if source == "geojson" else None
         osm_json = None if geojson is not None else osm.fetch_overpass(bbox) if bbox else None
         receipt = osm.run(bbox, data_dir, "map", overpass=source == "overpass", osm_json=osm_json, geojson=geojson)
-        selection = receipt["selection"]
+        if not isinstance(chosen, dict):  # a bbox: its own centre and half extents
+            selection = receipt["selection"]
+            center = (selection["center"]["latitude"], selection["center"]["longitude"])
+            half = (selection["half_extent_m"]["north_south"], selection["half_extent_m"]["east_west"])
         catalog = _catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID)
         recipe, report = env_citygml.convert(
-            data_dir, (selection["center"]["latitude"], selection["center"]["longitude"]),
-            (selection["half_extent_m"]["north_south"], selection["half_extent_m"]["east_west"]),
+            data_dir, center, half,
             catalog=_catalog_reference(catalog, directory), name=body.get("name") or None,
-            terrain_item=body.get("terrain") or "city-ground")
+            terrain_item=terrain)
         if receipt.get("data_timestamp"):
             recipe["geo"]["data_timestamp"] = receipt["data_timestamp"]
         if receipt.get("query"):
             query = json.loads(recipe["geo"]["query"])
             recipe["geo"]["query"] = json.dumps({**query, "overpass": receipt["query"]}, ensure_ascii=False, sort_keys=True)
         env_schema.parse_recipe(recipe, target)
-    except (KeyError, TypeError) as exc:
-        raise StudioError("bbox must be {south, west, north, east} in degrees") from exc
+    except (KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, DiagnosticError):
+            raise StudioError(f"地図から作れません: {exc}") from exc
+        raise StudioError("selection must be {center: {latitude, longitude}, half_extent_m: {north_south, east_west}}"
+                          " (or bbox {south, west, north, east})") from exc
     except DiagnosticError as exc:
         raise StudioError(f"地図から作れません: {exc}") from exc
     except Exception as exc:  # noqa: BLE001 - Envsim's converter reports its own errors
@@ -328,7 +365,12 @@ def import_map(body: object) -> dict:
     return {
         "id": recipe_id, "path": str(target), "citygml": str(data_dir), "size_m": recipe["size_m"],
         "buildings": report["buildings"], "roads": report["roads"],
-        "skipped": receipt["skipped"] + report["skipped"], "assumed": receipt["assumed"],
+        "skipped": receipt["skipped"] + report["skipped"],
+        # Counted over the parts made (the CityGML may hold more than the selection takes).
+        "assumed": {
+            "building_height": sum(1 for obj in recipe["objects"] if obj["item"] == "building-footprint"
+                                   and (obj["source"].get("tags") or {}).get("height_source") not in (None, "height")),
+            "road_width": receipt["assumed"]["road_width"], "road_lanes": receipt["assumed"]["road_lanes"]},
         "notes": receipt["notes"] + report["notes"],
     }
 

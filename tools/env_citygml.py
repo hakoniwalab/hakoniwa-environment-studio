@@ -89,6 +89,18 @@ def osm2citygml():
     return module
 
 
+def bounding_box(center: tuple[float, float], half_extent: tuple[float, float]) -> tuple[float, float, float, float]:
+    """(south, west, north, east) of a selection, as Envsim (and the PLATEAU
+    City World browser) computes it from its centre and half extents."""
+    tools = str(envsim_root() / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import plateau_citygml
+
+    west, south, east, north = plateau_citygml.bounding_box(center[0], center[1], half_extent[0], half_extent[1])
+    return south, west, north, east
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 

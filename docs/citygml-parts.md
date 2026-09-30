@@ -107,6 +107,15 @@ PLATEAU のデータには、外形がもともと重なっている建物もあ
 
 ## 8. 地図ページからの取り込み
 
+**範囲の指定**は、PLATEAU の City World ブラウザ（ビジネスパックの City World Web UI）と同じ仕様です。
+
+- 入力は Latitude・Longitude と、N/S・E/W の half extent（10〜1000 m）
+- 地図のクリック、中心マーカーまたは青い区画のドラッグで位置を変更
+- 四隅のハンドルで大きさを変更（反対の角は固定）
+- 度とメートルの換算も同じ（緯度 1 度 = 111,320 m。envsim の `plateau_citygml.bounding_box`）
+- サーバには `selection: {center: {latitude, longitude}, half_extent_m: {north_south, east_west}}` を送り、入力した値がそのまま選択範囲になります（従来の `bbox` も受け付けます）
+- 地面の選択肢は、追加のデータなしで作れる地面だけです（`city-dem` のように City World の地形データが必要な地面は出しません）
+
 `POST /api/map/import` の処理は次のとおりです。
 
 1. Overpass か GeoJSON のデータを、envsim の `osm2citygml.run` で `work/map-data/<id>/map_bldg_op.gml`・`map_tran_op.gml` にします。
