@@ -64,6 +64,15 @@ export function turned(parts, degrees, [px, py]) {
   }));
 }
 
+// A number per solids list (the same list while a part's shape is unchanged).
+const SOLIDS = new WeakMap();
+let solidsCount = 0;
+function solidsVersion(solids) {
+  if (!solids) return 0;
+  if (!SOLIDS.has(solids)) SOLIDS.set(solids, (solidsCount += 1));
+  return SOLIDS.get(solids);
+}
+
 export class PlanView {
   constructor(container, { onSelect, onChange, onChangeMany, onDragEnd = () => {} }) {
     this.container = container;
@@ -84,6 +93,9 @@ export class PlanView {
     // problem list below it grows and shrinks), so only the visible area changes.
     this.scale = null;
     this.drag = null;
+    // Each part's drawing, kept while nothing it shows changes (a drag in a
+    // city of hundreds of parts redraws only the part that moves).
+    this.drawn = new Map(); // id -> {key, group, area}
     this.svg = svg("svg", { class: "plan", tabindex: "0" });
     this.world = svg("g");
     this.svg.append(this.world);
@@ -159,8 +171,11 @@ export class PlanView {
 
   render() {
     const px = this.metresPerPixel();
-    const nodes = [];
     const { minX, maxX, minY, maxY } = this.area;
+    // The background (terrain, grid, labels), kept while the zoom, area, grid and terrain stay.
+    const backgroundKey = [px, minX, maxX, minY, maxY, this.grid, this.terrain?.href, JSON.stringify(this.terrain?.grid)].join("|");
+    if (this.background?.key !== backgroundKey) {
+    const nodes = [];
     if (this.terrain) {
       // Over the grid's own area when it has one (an Envsim terrain), else the environment.
       const grid = this.terrain.grid;
@@ -189,64 +204,33 @@ export class PlanView {
     const size = svg("text", { x: 0, y: -minY + 18 * px, class: "label-area", "font-size": 11 * px }, []);
     size.textContent = `${roundMm(maxX - minX)} m × ${roundMm(maxY - minY)} m（原点は中心）`;
     nodes.push(size);
+    this.background = { key: backgroundKey, nodes };
+    }
+    const nodes = [...this.background.nodes];
 
     // Larger parts first, so smaller ones (a cone on a platform) stay in
     // sight on top of them, and the selected part last of all. Elevated parts
     // (raised above the ground) are drawn faint and dashed, so what is
     // under them shows through.
     // Roads and markings (the surface layer) lie under everything.
+    const areas = new Map(this.parts.map((part) => [part, part.width * part.depth])); // the envelope's area, once
     const ordered = [...this.parts].sort((a, b) =>
       Number(this.selection.has(a.id)) - Number(this.selection.has(b.id))
       || Number(b.layer === "surface") - Number(a.layer === "surface")
-      || area(footprint(b)) - area(footprint(a)));
+      || areas.get(b) - areas.get(a));
     const single = this.selection.size === 1;
+    const kept = new Map();
     for (const part of ordered) {
-      const shapes = outlines(part);
-      const corners = shapes.flatMap((shape) => shape.polygon);
-      const bad = this.problems.outside.has(part.id) || this.problems.overlapping.has(part.id);
       const selected = this.selection.has(part.id);
-      const mounted = part.surface === "elevated";
-      const group = svg("g", {
-        class: `part${mounted ? " mounted" : ""}${part.layer === "surface" ? " surface" : ""}${selected ? " selected" : ""}${bad ? " problem" : ""}`,
-        "data-id": part.id,
-      });
-      for (const shape of shapes) {
-        group.append(svg("polygon", {
-          points: points(shape.polygon), fill: shape.color,
-          class: shape.collide ? "" : "paint", "stroke-width": px * (selected ? 3 : 1.5),
-        }));
-      }
-      // A tick on the local +y side marks the part's facing, for rotations
-      // (a part drawn by its solids shows its own shape instead).
-      const yaw = (part.yaw * Math.PI) / 180;
-      const front = [part.x - Math.sin(yaw) * part.depth / 2, part.y + Math.cos(yaw) * part.depth / 2];
-      if (!part.detailed) {
-        group.append(svg("line", {
-          x1: part.x, y1: -part.y, x2: front[0], y2: -front[1], class: "facing", "stroke-width": px * 1.5,
-        }));
-      }
-      // The id only when it fits inside the part (about 6.5 px per character).
-      const box = bounds(corners);
-      // (A part drawn by its solids only when selected: its box says little about where its shape has room.)
-      if ((!part.detailed || selected) && (box.maxX - box.minX) / px > part.id.length * 6.5 + 8
-        && (box.maxY - box.minY) / px > 14) {
-        const label = svg("text", { x: part.x, y: -part.y + 4 * px, class: "label", "font-size": 11 * px, "stroke-width": 3 * px });
-        label.textContent = part.id;
-        group.append(label);
-      }
-      if (selected && single) {
-        const reach = part.depth / 2 + 28 * px;
-        const handle = [part.x - Math.sin(yaw) * reach, part.y + Math.cos(yaw) * reach];
-        group.append(svg("line", {
-          x1: front[0], y1: -front[1], x2: handle[0], y2: -handle[1], class: "handle-bar", "stroke-width": px,
-        }));
-        group.append(svg("circle", {
-          cx: handle[0], cy: -handle[1], r: 7 * px, class: "rotate-handle", "data-handle": "rotate",
-          "stroke-width": px * 1.5,
-        }));
-      }
+      const bad = this.problems.outside.has(part.id) || this.problems.overlapping.has(part.id);
+      const key = [part.x, part.y, part.yaw, part.width, part.depth, part.primitive, part.color, part.detailed,
+        part.layer, part.surface, solidsVersion(part.solids), selected, bad, selected && single, px].join("|");
+      const before = this.drawn.get(part.id);
+      const group = before?.key === key ? before.group : this.partGroup(part, px, selected, bad, single);
+      kept.set(part.id, { key, group });
       nodes.push(group);
     }
+    this.drawn = kept;
     // Several selected: a dashed box around them, their pivot, and one handle
     // above them that turns them together.
     const chosen = this.parts.filter((part) => this.selection.has(part.id));
@@ -282,7 +266,62 @@ export class PlanView {
         nodes.push(svg("path", { d, class: "snap-line", "stroke-width": px * 1.5 }));
       }
     }
-    this.world.replaceChildren(...nodes);
+    // Only what changed is put in (a drag changes one part's drawing).
+    const current = [...this.world.childNodes];
+    const changed = nodes.map((node, index) => index).filter((index) => current[index] !== nodes[index]);
+    if (current.length !== nodes.length || changed.some((index) => nodes[index].parentNode === this.world)) {
+      this.world.replaceChildren(...nodes); // reordered (a new selection draws last): all at once
+    } else {
+      for (const index of changed) this.world.replaceChild(nodes[index], current[index]);
+    }
+  }
+
+  // One part as drawn on the plan: its outlines, facing tick, label and (when
+  // it alone is selected) its rotate handle.
+  partGroup(part, px, selected, bad, single) {
+    const shapes = outlines(part);
+    const corners = shapes.flatMap((shape) => shape.polygon);
+    const mounted = part.surface === "elevated";
+    const group = svg("g", {
+      class: `part${mounted ? " mounted" : ""}${part.layer === "surface" ? " surface" : ""}${selected ? " selected" : ""}${bad ? " problem" : ""}`,
+      "data-id": part.id,
+    });
+    for (const shape of shapes) {
+      group.append(svg("polygon", {
+        points: points(shape.polygon), fill: shape.color,
+        class: shape.collide ? "" : "paint", "stroke-width": px * (selected ? 3 : 1.5),
+      }));
+    }
+    // A tick on the local +y side marks the part's facing, for rotations
+    // (a part drawn by its solids shows its own shape instead).
+    const yaw = (part.yaw * Math.PI) / 180;
+    const front = [part.x - Math.sin(yaw) * part.depth / 2, part.y + Math.cos(yaw) * part.depth / 2];
+    if (!part.detailed) {
+      group.append(svg("line", {
+        x1: part.x, y1: -part.y, x2: front[0], y2: -front[1], class: "facing", "stroke-width": px * 1.5,
+      }));
+    }
+    // The id only when it fits inside the part (about 6.5 px per character).
+    const box = bounds(corners);
+    // (A part drawn by its solids only when selected: its box says little about where its shape has room.)
+    if ((!part.detailed || selected) && (box.maxX - box.minX) / px > part.id.length * 6.5 + 8
+      && (box.maxY - box.minY) / px > 14) {
+      const label = svg("text", { x: part.x, y: -part.y + 4 * px, class: "label", "font-size": 11 * px, "stroke-width": 3 * px });
+      label.textContent = part.id;
+      group.append(label);
+    }
+    if (selected && single) {
+      const reach = part.depth / 2 + 28 * px;
+      const handle = [part.x - Math.sin(yaw) * reach, part.y + Math.cos(yaw) * reach];
+      group.append(svg("line", {
+        x1: front[0], y1: -front[1], x2: handle[0], y2: -handle[1], class: "handle-bar", "stroke-width": px,
+      }));
+      group.append(svg("circle", {
+        cx: handle[0], cy: -handle[1], r: 7 * px, class: "rotate-handle", "data-handle": "rotate",
+        "stroke-width": px * 1.5,
+      }));
+    }
+    return group;
   }
 
   pointerDown(event) {

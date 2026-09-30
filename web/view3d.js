@@ -115,7 +115,9 @@ export class View3D {
 
   // ids: the selected objects (one or several).
   setSelected(ids) {
-    this.selected = new Set(ids || []);
+    const selected = new Set(ids || []);
+    if (selected.size === this.selected.size && [...selected].every((id) => this.selected.has(id))) return;
+    this.selected = selected;
     this.applyHighlight();
   }
 

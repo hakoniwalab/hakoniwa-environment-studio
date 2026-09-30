@@ -247,16 +247,36 @@ export function slideDistance(part, direction, others, area, limit = 10000) {
 export function checkLayout(parts, area) {
   const outside = parts.filter((part) => outsideBy(part, area) > TOLERANCE_M + EPSILON_M).map((part) => part.id);
   const overlaps = [];
-  // Boxes first: only parts whose boxes meet are compared solid by solid.
-  const boxes = parts.map((part) => bounds(footprint(part)));
+  // Boxes first, found through a grid of cells (a city has hundreds of parts):
+  // only parts whose boxes meet are compared solid by solid, in list order.
+  const solid = parts.filter((part) => part.layer !== "surface");
+  const boxes = solid.map((part) => bounds(footprint(part)));
   const meet = (a, b) => a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
-  for (let i = 0; i < parts.length; i += 1) {
-    if (parts[i].layer === "surface") continue;
-    for (let j = i + 1; j < parts.length; j += 1) {
-      if (parts[j].layer === "surface" || !meet(boxes[i], boxes[j])) continue;
-      const depth = overlapDepth(parts[i], parts[j]);
-      if (depth > TOLERANCE_M + EPSILON_M) overlaps.push({ a: parts[i].id, b: parts[j].id, depth });
+  const cells = new Map();
+  boxes.forEach((box, index) => {
+    for (let cx = Math.floor(box.minX / LAYOUT_CELL_M); cx <= Math.floor(box.maxX / LAYOUT_CELL_M); cx += 1) {
+      for (let cy = Math.floor(box.minY / LAYOUT_CELL_M); cy <= Math.floor(box.maxY / LAYOUT_CELL_M); cy += 1) {
+        const key = `${cx},${cy}`;
+        if (!cells.has(key)) cells.set(key, []);
+        cells.get(key).push(index);
+      }
     }
+  });
+  const pairs = new Set();
+  for (const members of cells.values()) {
+    for (let a = 0; a < members.length; a += 1) {
+      for (let b = a + 1; b < members.length; b += 1) pairs.add(members[a] * solid.length + members[b]);
+    }
+  }
+  for (const pair of [...pairs].sort((p, q) => p - q)) {
+    const i = Math.floor(pair / solid.length);
+    const j = pair % solid.length;
+    if (!meet(boxes[i], boxes[j])) continue;
+    const depth = overlapDepth(solid[i], solid[j]);
+    if (depth > TOLERANCE_M + EPSILON_M) overlaps.push({ a: solid[i].id, b: solid[j].id, depth });
   }
   return { outside, overlaps };
 }
+
+// The size of the grid cells checkLayout sorts parts into, metres.
+const LAYOUT_CELL_M = 20;

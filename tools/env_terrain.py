@@ -90,19 +90,15 @@ class Terrain:
         if self.kind != "hfield":
             return 0.0
         # The Studio resolves the whole Recipe on every edit, and usually one
-        # object moved: remembered per grid (the same tuple while a DEM stays
-        # cached) and outline.
-        heights_id = id(self.heights)
-        if _UNDER.get("heights") is not self.heights:
-            _UNDER.clear()
-            _UNDER["heights"] = self.heights
-        key = (heights_id, self.grid_half_east, self.grid_half_north, tuple(polygon))
-        if key not in _UNDER:
-            if len(_UNDER) > 100_000:
-                _UNDER.clear()
-                _UNDER["heights"] = self.heights
-            _UNDER[key] = self._highest_under(polygon)
-        return _UNDER[key]
+        # object moved: remembered per grid (make_terrain gives the same one
+        # while the terrain is unchanged) and outline.
+        answers = grid_memo(_UNDER, self.heights)
+        key = (self.grid_half_east, self.grid_half_north, tuple(polygon))
+        if key not in answers:
+            if len(answers) > 100_000:
+                answers.clear()
+            answers[key] = self._highest_under(polygon)
+        return answers[key]
 
     def _highest_under(self, polygon: list[tuple[float, float]]) -> float:
         import env_polygon
@@ -149,9 +145,19 @@ class Terrain:
         return data
 
 
-# highest_under's answers for the latest grid ("heights" holds that grid, so its
-# id stays its own).
+# highest_under's answers, per grid.
 _UNDER: dict = {}
+
+
+def grid_memo(store: dict, heights, grids: int = 4) -> dict:
+    """The memo for a height grid in `store` (the few grids used lately, each
+    kept with its grid so its id stays its own): a dict to fill."""
+    entry = store.get(id(heights))
+    if entry is None or entry[0] is not heights:
+        if len(store) >= grids:
+            store.pop(next(iter(store)))
+        entry = store[id(heights)] = (heights, {})
+    return entry[1]
 
 
 def _inside(polygon, point) -> bool:
@@ -294,7 +300,29 @@ def _read_envsim_hfield(hfield: Path, data: bytes, receipt: dict, receipt_path: 
 def make_terrain(settings: dict, params: dict, size_east: float, size_north: float, path: str,
                  base_dir: Path | None = None) -> Terrain:
     """The terrain of a terrain type's settings (env_types.terrain_settings);
-    `base_dir` is where relative data paths (the envsim generator's) start."""
+    `base_dir` is where relative data paths (the envsim generator's) start.
+    The same terrain comes back (the same object) while nothing it is made
+    from changes, so what is remembered per grid stays."""
+    try:
+        key = json.dumps([settings, params, size_east, size_north, str(base_dir)], sort_keys=True)
+    except (TypeError, ValueError):
+        return _make_terrain(settings, params, size_east, size_north, path, base_dir)
+    terrain = _TERRAINS.get(key)
+    fresh = _make_terrain(settings, params, size_east, size_north, path, base_dir) if (
+        terrain is None or settings.get("generator") == "envsim") else terrain
+    if terrain is not None and fresh is not terrain and fresh == terrain:
+        return terrain  # an Envsim terrain read again (its files checked): unchanged
+    if len(_TERRAINS) >= 8:
+        _TERRAINS.pop(next(iter(_TERRAINS)))
+    _TERRAINS[key] = fresh
+    return fresh
+
+
+_TERRAINS: dict = {}
+
+
+def _make_terrain(settings: dict, params: dict, size_east: float, size_north: float, path: str,
+                  base_dir: Path | None = None) -> Terrain:
     base = dict(color=settings["color"], friction=settings["friction"], size_east_m=size_east, size_north_m=size_north)
     if settings["kind"] == "flat":
         return Terrain("flat", **base)

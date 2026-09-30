@@ -44,7 +44,7 @@ const state = {
   selection: [], // ids of the selected objects (one: the inspector edits it; several: move and turn together)
   // Undo / redo (web/history.js): the Recipe as JSON is recorded whenever
   // editing settles, so a drag or a slider counts as one step.
-  history: new History(HISTORY_LIMIT),
+  history: new History(HISTORY_LIMIT, sameStep),
   lastPaste: { text: null, count: 0 },
   saved: null, // snapshot of the last saved or opened Recipe
   plan: null,
@@ -128,16 +128,19 @@ function render({ live = false } = {}) {
   $("#size-preset").value = [...$("#size-preset").options].some((option) => option.value === preset) ? preset : "";
 
   const views = recipe().objects.map(resolved);
-  // The server's check once it covers this exact layout; the quick check until then.
-  const layout = layoutKey(); // once per render: it stringifies every object
-  const checked = state.validation?.layout === layout ? state.validation.result : null;
+  // The server's check once it covers this exact layout; the quick check until
+  // then. While a part is dragged the quick check alone: the key stringifies
+  // every object, and the drag's end renders again with it.
+  const dragging = live && Boolean(state.plan.drag);
+  const layout = dragging ? null : layoutKey();
+  const checked = layout && state.validation?.layout === layout ? state.validation.result : null;
   const problems = checked ? fromServer(checked, recipe().objects) : quickProblems(views, area());
   state.plan.setScene({
     area: area(), parts: views, selected: state.selection, terrain: state.terrain.image,
     problems: { outside: problems.outside, overlapping: problems.overlapping },
   });
   renderProblems($("#problems"), problems, Boolean(checked), recipe().objects.length > 0);
-  scheduleValidation(layout);
+  if (!dragging) scheduleValidation(layout);
   refreshTerrain();
   // While a slider is held, rebuilding the panels would drop it.
   if (!live && !inspector.sliding) {
@@ -154,17 +157,37 @@ function render({ live = false } = {}) {
 
 // --- Undo / redo (Cmd / Ctrl + Z, Cmd / Ctrl + Shift + Z or Ctrl + Y) ------------
 
+// An undo step: the Recipe without its objects, and each object as JSON. An
+// object unchanged since the last step keeps that step's string, so a city of
+// hundreds of parts costs one string per part moved, not the whole Recipe.
+function step() {
+  const kept = new Map((state.history.head?.objects || []).map((text) => [text, text]));
+  return {
+    rest: JSON.stringify({ ...recipe(), objects: null }), // objects keep their place among the keys
+    objects: recipe().objects.map((obj) => {
+      const text = JSON.stringify(obj);
+      return kept.get(text) ?? text;
+    }),
+  };
+}
+
+function sameStep(a, b) {
+  return a === b || (a !== null && b !== null && a.rest === b.rest && a.objects.length === b.objects.length
+    && a.objects.every((text, index) => text === b.objects[index]));
+}
+
 function resetHistory() {
-  state.history.reset(JSON.stringify(recipe()));
+  state.history.reset(null);
+  state.history.reset(step());
 }
 
 function checkpoint() {
-  state.history.record(JSON.stringify(recipe()));
+  state.history.record(step());
 }
 
 function showSnapshot(snapshot, message) {
   if (snapshot === null) return;
-  state.current.recipe = JSON.parse(snapshot);
+  state.current.recipe = { ...JSON.parse(snapshot.rest), objects: snapshot.objects.map((text) => JSON.parse(text)) };
   const ids = new Set(recipe().objects.map((obj) => obj.id));
   state.selection = state.selection.filter((id) => ids.has(id));
   render();

@@ -8,8 +8,10 @@
 // drops the redo steps, as editors do.
 
 export class History {
-  constructor(limit = 200) {
+  // same(a, b): whether two snapshots are the same document (strings: ===).
+  constructor(limit = 200, same = (a, b) => a === b) {
     this.limit = limit;
+    this.same = same;
     this.reset(null);
   }
 
@@ -26,7 +28,7 @@ export class History {
       this.head = snapshot;
       return false;
     }
-    if (snapshot === this.head) return false;
+    if (this.same(snapshot, this.head)) return false;
     this.past.push(this.head);
     if (this.past.length > this.limit) this.past.shift();
     this.future = [];

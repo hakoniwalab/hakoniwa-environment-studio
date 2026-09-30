@@ -186,8 +186,22 @@ def solid_mesh(solid: Solid):
     return positions, [turn(n) for n in normals], indices
 
 
+_MESHES: dict = {}
+
+
 def terrain_mesh(terrain: env_terrain.Terrain):
-    """The ground: a grid for an hfield, a thin slab (top at z = 0) when flat."""
+    """The ground: a grid for an hfield, a thin slab (top at z = 0) when flat.
+    An hfield's mesh is made once per grid (the 3D preview asks on every edit)."""
+    if terrain.kind == "hfield":
+        memo = env_terrain.grid_memo(_MESHES, terrain.heights)
+        key = (terrain.grid_half_east, terrain.grid_half_north)
+        if key not in memo:
+            memo[key] = _terrain_mesh(terrain)
+        return memo[key]
+    return _terrain_mesh(terrain)
+
+
+def _terrain_mesh(terrain: env_terrain.Terrain):
     if terrain.kind != "hfield":
         positions, normals, indices = _box_mesh(terrain.size_east_m, terrain.size_north_m, 0.02)
         return [(x, y, z - 0.01) for x, y, z in positions], normals, indices

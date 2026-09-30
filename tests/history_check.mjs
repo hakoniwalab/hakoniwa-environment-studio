@@ -48,4 +48,11 @@ history.reset("0");
 for (const snapshot of ["1", "2", "3", "4", "5"]) history.record(snapshot);
 assert.deepEqual([history.undo(), history.undo(), history.undo(), history.undo()], ["4", "3", "2", null]);
 
+// Snapshots other than strings compare with the given same(): an equal copy is no step.
+history = new History(10, (a, b) => a === b || (a !== null && b !== null && a.join("|") === b.join("|")));
+history.reset(["a", "b"]);
+assert.equal(history.record(["a", "b"]), false);
+assert.equal(history.record(["a", "c"]), true);
+assert.deepEqual(history.undo(), ["a", "b"]);
+
 console.log("history OK");
