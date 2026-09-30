@@ -5,6 +5,8 @@
 
 // Interference tolerance (1 mm): touching is fine, overlapping more than this is not.
 export const TOLERANCE_M = 0.001;
+// The largest step "slide until it touches" takes (thinner than any obstacle).
+const MAX_SLIDE_STEP_M = 0.05;
 // Floating-point slack, so an overlap exactly at the tolerance counts as within it.
 const EPSILON_M = 1e-9;
 
@@ -191,8 +193,22 @@ export function contact(a, b) {
 export function slideDistance(part, direction, others, area, limit = 10000) {
   const start = footprint(part);
   // Only parts at the same height can be run into.
-  const obstacles = others.filter((other) => heightOverlap(part, other) > TOLERANCE_M)
-    .map(footprint).filter((polygon) => penetration(start, polygon) <= TOLERANCE_M);
+  // Roads and markings lie on the ground: nothing slides into them. Only
+  // obstacles in the box the part sweeps to the area's edge can be met.
+  const own = bounds(start);
+  const reach = Math.hypot(area.maxX - area.minX, area.maxY - area.minY);
+  limit = Math.min(limit, reach);
+  const swept = {
+    minX: Math.min(own.minX, own.minX + direction[0] * limit), maxX: Math.max(own.maxX, own.maxX + direction[0] * limit),
+    minY: Math.min(own.minY, own.minY + direction[1] * limit), maxY: Math.max(own.maxY, own.maxY + direction[1] * limit),
+  };
+  const obstacles = others.filter((other) => other.layer !== "surface" && heightOverlap(part, other) > TOLERANCE_M)
+    .map(footprint)
+    .filter((polygon) => {
+      const box = bounds(polygon);
+      return box.minX <= swept.maxX && swept.minX <= box.maxX && box.minY <= swept.maxY && swept.minY <= box.maxY;
+    })
+    .filter((polygon) => penetration(start, polygon) <= TOLERANCE_M);
   const startOutside = outsideBy(part, area);
   const blocked = (t) => {
     const moved = { ...part, x: part.x + direction[0] * t, y: part.y + direction[1] * t };
@@ -200,16 +216,20 @@ export function slideDistance(part, direction, others, area, limit = 10000) {
     if (outsideBy(moved, area) > Math.max(startOutside, 0) + EPSILON_M) return true;
     return obstacles.some((other) => penetration(polygon, other) > EPSILON_M);
   };
-  // March in 1 cm steps to the first blocked point, then bisect to 0.01 mm.
-  const step = 0.01;
+  // Steps from 1 cm growing to at most MAX_SLIDE_STEP_M (thinner than any
+  // obstacle, so none is jumped over), up to the first blocked point, then
+  // bisect. Leaving the area blocks, so the march ends within the area.
   let free = 0;
   let hit = null;
-  for (let t = step; t <= limit; t += step) {
+  let step = 0.01;
+  for (let t = step; t <= limit + 1e-9; t = Math.min(limit, t + step)) {
     if (blocked(t)) { hit = t; break; }
     free = t;
+    if (t >= limit) break;
+    step = Math.min(step * 1.5, MAX_SLIDE_STEP_M);
   }
   if (hit === null) return free;
-  for (let i = 0; i < 10; i += 1) {
+  for (let i = 0; i < 20; i += 1) {
     const middle = (free + hit) / 2;
     if (blocked(middle)) hit = middle; else free = middle;
   }
@@ -227,9 +247,13 @@ export function slideDistance(part, direction, others, area, limit = 10000) {
 export function checkLayout(parts, area) {
   const outside = parts.filter((part) => outsideBy(part, area) > TOLERANCE_M + EPSILON_M).map((part) => part.id);
   const overlaps = [];
+  // Boxes first: only parts whose boxes meet are compared solid by solid.
+  const boxes = parts.map((part) => bounds(footprint(part)));
+  const meet = (a, b) => a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
   for (let i = 0; i < parts.length; i += 1) {
+    if (parts[i].layer === "surface") continue;
     for (let j = i + 1; j < parts.length; j += 1) {
-      if (parts[i].layer === "surface" || parts[j].layer === "surface") continue;
+      if (parts[j].layer === "surface" || !meet(boxes[i], boxes[j])) continue;
       const depth = overlapDepth(parts[i], parts[j]);
       if (depth > TOLERANCE_M + EPSILON_M) overlaps.push({ a: parts[i].id, b: parts[j].id, depth });
     }

@@ -28,6 +28,8 @@ const DEFAULT_SIZE = { east: 20, north: 30 };
 // The Catalog's items and the objects resolved from them (web/parts.js).
 const catalog = new Parts({
   resolve: (item, params) => api("POST", "resolve", { catalog_id: state.catalogId, item, params }),
+  resolveMany: (placements) => api("POST", "resolve-many", { catalog_id: state.catalogId, placements })
+    .then((answer) => answer.shapes),
   onShape: () => render({ live: true }),
   onError: (error) => setStatus(error.message, "error"),
 });
@@ -129,14 +131,15 @@ function render({ live = false } = {}) {
 
   const views = recipe().objects.map(resolved);
   // The server's check once it covers this exact layout; the quick check until then.
-  const checked = state.validation?.layout === layoutKey() ? state.validation.result : null;
+  const layout = layoutKey(); // once per render: it stringifies every object
+  const checked = state.validation?.layout === layout ? state.validation.result : null;
   const problems = checked ? fromServer(checked) : quickProblems(views);
   state.plan.setScene({
     area: area(), parts: views, selected: state.selection, terrain: state.terrain.image,
     problems: { outside: problems.outside, overlapping: problems.overlapping },
   });
   renderProblems(problems, Boolean(checked));
-  scheduleValidation();
+  scheduleValidation(layout);
   refreshTerrain();
   // While a slider is held, rebuilding the panels would drop it.
   if (!live && !inspector.sliding) {
@@ -337,8 +340,8 @@ function renderProblems(problems, byServer) {
 }
 
 // Check the layout on the server once editing pauses; a stale answer is ignored.
-function scheduleValidation() {
-  if (!state.current || state.validation?.layout === layoutKey()) return;
+function scheduleValidation(current = layoutKey()) {
+  if (!state.current || state.validation?.layout === current) return;
   clearTimeout(state.validateTimer);
   state.validateTimer = setTimeout(async () => {
     const layout = layoutKey();
@@ -633,6 +636,7 @@ async function openRecipe(id) {
   const loaded = await api("GET", `recipes/${id}`);
   loaded.recipe.objects = loaded.recipe.objects || [];
   await loadCatalog(loaded.catalog_id || state.catalogId);
+  await catalog.prime(loaded.recipe.objects); // every shape in one request, before the first drawing
   state.current = { id, editable: loaded.editable, recipe: loaded.recipe };
   state.openedId = loaded.editable ? id : null; // the saved Recipe this edits (saving it again is no overwrite)
   state.selection = [];

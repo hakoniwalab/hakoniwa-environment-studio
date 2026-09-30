@@ -34,6 +34,23 @@ class PolygonTest(unittest.TestCase):
             self.assertAlmostEqual(sum(polygon.signed_area(piece) for piece in pieces), polygon.signed_area(ring))
         self.assertEqual(polygon.convex_pieces([(0, 0), (1, 0), (1, 1), (0, 1)]), [[(0, 0), (1, 0), (1, 1), (0, 1)]])
 
+    def test_the_sweep_agrees_with_comparing_every_pair(self):
+        import random
+
+        def every_pair(points):
+            n = len(points)
+            edges = [(points[i], points[(i + 1) % n]) for i in range(n)]
+            return not any(polygon._segments_cross(*edges[i], *edges[j]) for i in range(n) for j in range(i + 2, n)
+                           if not (i == 0 and j == n - 1))
+
+        for seed in range(40):
+            rng = random.Random(seed)
+            n, jitter = rng.choice([4, 12, 60, 150]), rng.choice([0.0, 0.5, 3.0])
+            ring = [(math.cos(2 * math.pi * i / n) * (10 + jitter * rng.random()),
+                     math.sin(2 * math.pi * i / n) * (10 + jitter * rng.random())) for i in range(n)]
+            with self.subTest(seed=seed):
+                self.assertEqual(polygon.is_simple(ring), every_pair(ring))
+
     def test_simple_rings_and_cleaning(self):
         self.assertTrue(polygon.is_simple(L_SHAPE))
         self.assertFalse(polygon.is_simple([(0, 0), (2, 2), (2, 0), (0, 2)]))  # a bow tie
@@ -98,6 +115,18 @@ class SurfaceLayerTest(unittest.TestCase):
     def setUp(self):
         self.recipe = env_schema.load_recipe(ROOT / "tests/fixtures/map-shapes.yaml")
         self.objects = {obj.id: obj for obj in self.recipe.objects}
+
+    def test_every_solid_of_an_object_is_checked_against_the_roads(self):
+        # An L-shaped building whose first solid misses a road that its second one meets.
+        data = {"schema": env_schema.RECIPE_SCHEMA, "name": "l", "catalog": str(ROOT / "catalogs/starter/catalog.yaml"),
+                "size_m": {"east": 60, "north": 60}, "terrain": {"item": "grass-ground"}, "objects": [
+                    {"id": "road", "item": "road-area", "pose": {"x_m": 0, "y_m": 20, "yaw_deg": 0},
+                     "params": {"outline": [[-20, -2], [20, -2], [20, 2], [-20, 2]]}},
+                    {"id": "house", "item": "building-footprint", "pose": {"x_m": 0, "y_m": 0, "yaw_deg": 0},
+                     "params": {"footprint": [[-10, -5], [10, -5], [10, 0], [-5, 0], [-5, 19], [-10, 19]]}}]}
+        parsed = env_schema.parse_recipe(data, ROOT / "work/l.yaml")
+        house = next(obj for obj in parsed.objects if obj.id == "house")
+        self.assertEqual(house.pose.z_m, 0.02 + env_schema.SURFACE_GAP_M)
 
     def test_objects_stand_on_the_roads_under_them(self):
         self.assertEqual(self.objects["cone"].pose.z_m, 0.02 + env_schema.SURFACE_GAP_M)  # on the road slab

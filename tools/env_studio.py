@@ -158,6 +158,28 @@ def resolve_json(body: object) -> dict:
     return {"item": item.id, "params": params, **shape.as_json()}
 
 
+def resolve_many_json(body: object) -> dict:
+    """The shapes of many placements at once ({catalog_id, placements: [{item,
+    params}]}): opening a city Recipe needs hundreds. A placement that cannot
+    be resolved answers {error} in its place."""
+    if not isinstance(body, dict) or not isinstance(body.get("placements"), list):
+        raise StudioError("the request body must be {catalog_id, placements: [{item, params}]}")
+    catalog = _catalog(body)
+    shapes = []
+    for placement in body["placements"]:
+        try:
+            if not isinstance(placement, dict):
+                raise StudioError("a placement is {item, params}")
+            item = catalog.items.get(placement.get("item"))
+            if item is None or item.shape is None:
+                raise StudioError(f"no object item {placement.get('item')!r} in the catalog")
+            params, shape = env_schema.resolve_placement(item, placement.get("params") or {}, "params")
+            shapes.append({"item": item.id, "params": params, **shape.as_json()})
+        except (StudioError, DiagnosticError) as exc:
+            shapes.append({"error": str(exc)})
+    return {"shapes": shapes}
+
+
 def terrain_json(body: object) -> dict:
     """The terrain of {catalog_id, terrain: {item, params}, size_m}, with its
     height grid (for the plan's shading)."""
@@ -520,6 +542,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
                 return self._json(import_city_world(self._body()))
             if method == "GET" and parts == ["recipes"]:
                 return self._json(list_recipes())
+            if method == "POST" and parts == ["resolve-many"]:
+                return self._json(resolve_many_json(self._body()))
             if method == "POST" and parts == ["resolve"]:
                 return self._json(resolve_json(self._body()))
             if method == "POST" and parts == ["validate"]:

@@ -406,24 +406,55 @@ HFIELD_CLEARANCE_M = 0.005
 SURFACE_GAP_M = 0.0005
 
 
+def _box(polygon) -> tuple[float, float, float, float]:
+    xs, ys = [x for x, _ in polygon], [y for _, y in polygon]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _boxes_meet(a, b) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
+def _cells(box, size: float):
+    for ix in range(math.floor(box[0] / size), math.floor(box[2] / size) + 1):
+        for iy in range(math.floor(box[1] / size), math.floor(box[3] / size) + 1):
+            yield ix, iy
+
+
 def _on_surfaces(objects: list[EnvObject]) -> list[EnvObject]:
     """Objects standing on the ground stand on top of the surface objects
     (roads) under them, as they do on the terrain: a cone on a road stands on
     the road, not in it."""
-    surfaces = [(obj, _solid_outlines(obj)) for obj in objects if obj.shape.layer == "surface"]
-    if not surfaces:
+    # Surface solids in a grid of cells by their boxes: an object is compared
+    # only with those in the cells its own box covers (city roads are
+    # thousands of tiles).
+    cell = 10.0
+    grid: dict[tuple[int, int], list] = {}
+    count = 0
+    for surface in (obj for obj in objects if obj.shape.layer == "surface"):
+        for polygon, top in _solid_outlines(surface):
+            entry = (_box(polygon), polygon, surface.pose.z_m + top)
+            count += 1
+            for key in _cells(entry[0], cell):
+                grid.setdefault(key, []).append(entry)
+    if not count:
         return objects
     placed_objects = []
     for obj in objects:
         if obj.shape.layer == "surface" or obj.shape.surface != "ground":
             placed_objects.append(obj)
             continue
-        mine = [outline for outline, _ in _solid_outlines(obj)]
+        mine = [(outline, _box(outline)) for outline, _ in _solid_outlines(obj)]
         z = obj.pose.z_m
-        for surface, outlines in surfaces:
-            for polygon, top in outlines:
-                if any(env_polygon.convex_overlap(outline, polygon) for outline in mine):
-                    z = max(z, surface.pose.z_m + top + SURFACE_GAP_M)
+        for outline, box in mine:
+            seen = set()  # per solid: a surface entry in several cells is compared once
+            for key in _cells(box, cell):
+                for entry in grid.get(key, ()):
+                    if id(entry) in seen or not _boxes_meet(box, entry[0]):
+                        continue
+                    seen.add(id(entry))
+                    if env_polygon.convex_overlap(outline, entry[1]):
+                        z = max(z, entry[2] + SURFACE_GAP_M)
         placed_objects.append(obj if z == obj.pose.z_m else replace(obj, pose=replace(obj.pose, z_m=round(z, 6))))
     return placed_objects
 

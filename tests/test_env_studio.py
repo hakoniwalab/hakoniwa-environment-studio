@@ -79,6 +79,16 @@ class StudioServerTest(unittest.TestCase):
             "catalog_id": "starter", "item": "concrete-wall", "params": {"width_m": -1}})[0], 400)
         self.assertEqual(self.call("POST", "/api/resolve", {"catalog_id": "starter", "item": "grass-ground"})[0], 404)
 
+    def test_many_placements_resolve_in_one_request(self):
+        status, answer = self.call("POST", "/api/resolve-many", {"catalog_id": "starter", "placements": [
+            {"item": "concrete-wall", "params": {"width_m": 8}}, {"item": "concrete-wall", "params": {"width_m": -1}},
+            {"item": "no-such"}]})
+        self.assertEqual(status, 200)
+        shapes = answer["shapes"]
+        self.assertEqual(shapes[0]["envelope"]["width_m"], 8)
+        self.assertIn("error", shapes[1])
+        self.assertIn("error", shapes[2])
+
     def test_the_terrain_comes_with_its_height_grid(self):
         status, terrain = self.call("POST", "/api/terrain", {
             "catalog_id": "starter", "terrain": {"item": "rolling-hills", "params": {"seed": 3}}, "size_m": SIZE})

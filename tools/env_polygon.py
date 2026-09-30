@@ -41,15 +41,28 @@ def _segments_cross(p1, p2, q1, q2) -> bool:
 
 
 def is_simple(points: list[tuple[float, float]]) -> bool:
-    """No two edges of the ring touch except neighbours at their shared corner."""
+    """No two edges of the ring touch except neighbours at their shared corner.
+
+    A sweep along x: only edges whose x ranges overlap are compared (and only
+    when their y ranges overlap too), so a long footprint or road outline is
+    checked in about n log n instead of n squared."""
     n = len(points)
     edges = [(points[i], points[(i + 1) % n]) for i in range(n)]
-    for i in range(n):
-        for j in range(i + 1, n):
-            if j == i + 1 or (i == 0 and j == n - 1):
+    order = sorted(range(n), key=lambda i: min(edges[i][0][0], edges[i][1][0]))
+    active: list[int] = []
+    for i in order:
+        (ax, ay), (bx, by) = edges[i]
+        x_lo, y_lo, y_hi = min(ax, bx), min(ay, by), max(ay, by)
+        active = [j for j in active if max(edges[j][0][0], edges[j][1][0]) >= x_lo - EPSILON]
+        for j in active:
+            if abs(i - j) == 1 or abs(i - j) == n - 1:
+                continue  # neighbours share a corner
+            (cx, cy), (dx, dy) = edges[j]
+            if max(cy, dy) < y_lo - EPSILON or min(cy, dy) > y_hi + EPSILON:
                 continue
             if _segments_cross(*edges[i], *edges[j]):
                 return False
+        active.append(i)
     return True
 
 

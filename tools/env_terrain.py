@@ -163,14 +163,29 @@ def _envsim_dem(params: dict, size_east: float, size_north: float, path: str,
         raise fail(f"{path}.dem", "unknown_reference", f"cannot read the Envsim terrain: {exc}", actual=text) from exc
     if receipt["hfield"].get("sha256") and hashlib.sha256(data).hexdigest() != receipt["hfield"]["sha256"]:
         raise fail(f"{path}.dem", "invalid_shape", "the hfield file differs from its receipt (sha256)", actual=str(hfield))
+    ns_m, ew_m = float(receipt["half_extent_m"]["north_south"]), float(receipt["half_extent_m"]["east_west"])
+    resolution = max(float(params.get("resolution_m", 1.0)), max(size_east, size_north) / (MAX_GRID - 1))
+    nrow, ncol = _grid(size_east, size_north, resolution, path)
+    # Sampling is slow (one Envsim call per point) and every request resolves the
+    # Recipe again: kept per terrain file content and grid.
+    key = (hashlib.sha256(data).hexdigest(), ns_m, ew_m, size_east, size_north, nrow, ncol)
+    if key not in _DEM_CACHE:
+        if len(_DEM_CACHE) >= 8:
+            _DEM_CACHE.clear()
+        _DEM_CACHE[key] = _sample_dem(hfield, ns_m, ew_m, size_east, size_north, nrow, ncol)
+    return nrow, ncol, [list(row) for row in _DEM_CACHE[key]]
+
+
+_DEM_CACHE: dict = {}
+
+
+def _sample_dem(hfield: Path, ns_m: float, ew_m: float, size_east: float, size_north: float,
+                nrow: int, ncol: int) -> tuple:
     import env_citygml  # Envsim's reader (imported only for this generator)
 
     _geodesy, _extract, probe = env_citygml.envsim_modules()
     rows, cols, samples = probe.read_hfield(hfield)
-    ns_m, ew_m = float(receipt["half_extent_m"]["north_south"]), float(receipt["half_extent_m"]["east_west"])
     offset = min(samples)
-    resolution = max(float(params.get("resolution_m", 1.0)), max(size_east, size_north) / (MAX_GRID - 1))
-    nrow, ncol = _grid(size_east, size_north, resolution, path)
     heights = []
     for row in range(nrow):
         north = size_north / 2 - row / (nrow - 1) * size_north
@@ -179,8 +194,8 @@ def _envsim_dem(params: dict, size_east: float, size_north: float, path: str,
             east = -size_east / 2 + col / (ncol - 1) * size_east
             # Envsim's hfield axes are MuJoCo's city frame: x = north, y = -east.
             line.append(round(probe.terrain_height(north, -east, samples, rows, cols, ns_m, ew_m) - offset, 4))
-        heights.append(line)
-    return nrow, ncol, heights
+        heights.append(tuple(line))
+    return tuple(heights)
 
 
 def make_terrain(settings: dict, params: dict, size_east: float, size_north: float, path: str,

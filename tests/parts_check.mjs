@@ -47,4 +47,41 @@ assert.equal(parts.resolved({ ...long, params: { length_m: 9 } }).width, 8);
 parts.setCatalog(items);
 assert.equal(parts.shapes.size, 0);
 assert.equal(parts.resolved(obj("x", "nothing", 0, 0)).width, 0.5);
+// Opening a Recipe: every shape in one request; a refused one is not asked again.
+{
+  const batches = [];
+  const errors = [];
+  let redraws = 0;
+  const many = new Parts({
+    resolve: () => { throw new Error("single resolve should not be needed"); },
+    resolveMany: async (placements) => {
+      batches.push(placements.length);
+      return placements.map((placement) => (placement.params.length_m === 99 ? { error: "too long" }
+        : { ...items[0], envelope: { primitive: "box", width_m: placement.params.length_m, depth_m: 0.2 } }));
+    },
+    onShape: () => { redraws += 1; },
+    onError: (error) => errors.push(error.message),
+  });
+  many.setCatalog(items);
+  const walls = [7, 8, 7, 99].map((length, index) => obj(`w${index}`, "wall", 0, 0, { length_m: length }));
+  await many.prime(walls);
+  await new Promise((done) => setTimeout(done, 0));
+  assert.deepEqual(batches, [3]); // 7, 8 and 99 (7 twice is one shape)
+  assert.equal(redraws, 1);
+  assert.deepEqual(errors, ["too long"]);
+  assert.equal(many.resolved(walls[1]).width, 8);
+  assert.equal(many.resolved(walls[3]).width, 5); // refused: the item's shape, and no request per render
+  await many.prime(walls);
+  assert.deepEqual(batches, [3]);
+  // An answer for the previous Catalog does not land in the new one.
+  let late;
+  const racing = new Parts({ resolve: () => new Promise((done) => { late = done; }) });
+  racing.setCatalog(items);
+  racing.resolved(obj("r", "wall", 0, 0, { length_m: 12 }));
+  racing.setCatalog(items);
+  late({ ...items[0], envelope: { primitive: "box", width_m: 12, depth_m: 0.2 } });
+  await new Promise((done) => setTimeout(done, 0));
+  assert.equal(racing.shapes.size, 0);
+}
+
 console.log("parts OK");

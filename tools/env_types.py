@@ -23,6 +23,7 @@ expressions are evaluated; the browser gets resolved shapes from the server.
 from __future__ import annotations
 
 import ast
+import json
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
@@ -175,7 +176,33 @@ def evaluate(value, params: dict, path: str):
 def _points(kind: str, value, path: str) -> list[list[float]]:
     """A footprint (polygon: a simple ring, stored counter-clockwise without a
     repeated closing point) or a centre line (polyline), as [[x, y], ...] in
-    the object's frame, metres."""
+    the object's frame, metres. Checked once per distinct point list (a city
+    Recipe is parsed on every edit); the diagnostic carries this call's path."""
+    try:
+        key = (kind, tuple(tuple(point) for point in value))
+        hash(key)
+    except TypeError:  # not a list of pairs of numbers: let the checks say so
+        return _points_checked(kind, value, path)
+    result = _POINTS_CACHE.get(key)
+    if result is None:
+        try:
+            result = _points_checked(kind, value, "<points>")
+        except DiagnosticError as error:
+            result = error
+        if len(_POINTS_CACHE) >= _CACHE_SIZE:
+            _POINTS_CACHE.clear()
+        _POINTS_CACHE[key] = result
+    if isinstance(result, DiagnosticError):
+        found = result.diagnostics[0]
+        raise fail(path, found.code, found.reason, expected=found.expected, actual=found.actual)
+    return [list(point) for point in result]
+
+
+_CACHE_SIZE = 20000
+_POINTS_CACHE: dict = {}
+
+
+def _points_checked(kind: str, value, path: str) -> list[list[float]]:
     closed = kind == "polygon"
     need = 3 if closed else 2
     shape = "[[x, y], ...]"
@@ -631,7 +658,26 @@ def _number(value, path: str) -> float:
     return round(float(value), 6)
 
 
+_SHAPE_CACHE: dict = {}
+
+
 def resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
+    """The shape of a type with its values, resolved once per distinct values
+    (Shape is frozen; errors are not kept and name this call's path)."""
+    try:
+        key = (id(env_type), json.dumps(params, sort_keys=True))
+    except (TypeError, ValueError):
+        return _resolve_shape(env_type, params, path)
+    shape = _SHAPE_CACHE.get(key)
+    if shape is None:
+        shape = _resolve_shape(env_type, params, path)
+        if len(_SHAPE_CACHE) >= _CACHE_SIZE:
+            _SHAPE_CACHE.clear()
+        _SHAPE_CACHE[key] = shape
+    return shape
+
+
+def _resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
     """The solids, outline and behaviour of an object type with its parameter values.
 
     A "prism" shape (a footprint raised h) becomes one prism solid per convex
