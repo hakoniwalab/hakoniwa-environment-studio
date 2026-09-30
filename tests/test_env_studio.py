@@ -34,9 +34,10 @@ class StudioServerTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.user = Path(directory.name) / "work/recipes"
-        patch = mock.patch.object(env_studio, "USER_RECIPES", self.user)
-        patch.start()
-        self.addCleanup(patch.stop)
+        for patch in (mock.patch.object(env_studio, "USER_RECIPES", self.user),
+                      mock.patch.object(env_studio.env_cityworld, "WORK", self.user.parent / "city-worlds")):
+            patch.start()
+            self.addCleanup(patch.stop)
         self.server = env_studio.make_server(0)
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()

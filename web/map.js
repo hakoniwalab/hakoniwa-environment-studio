@@ -219,8 +219,8 @@ async function searchWorlds(map, layer) {
   setStatus(`${found.builds.length} 件見つかりました`, found.builds.length ? "ok" : "");
 }
 
-async function importWorld(build) {
-  const id = window.prompt("作る環境の ID（小文字・数字・- _）", build.id);
+async function importWorld(build, given = null) {
+  const id = given || window.prompt("作る環境の ID（小文字・数字・- _）", build.id);
   if (!id) return;
   setStatus(`${build.title} を部品にしています…`);
   try {
@@ -243,6 +243,51 @@ async function importWorld(build) {
   } catch (error) {
     setStatus(error.message, "error");
   }
+}
+
+// A City World built from PLATEAU by hakoniwa-envsim (POST /api/city-worlds/build),
+// followed until it is done, then imported under the same id.
+const BUILD_KEY = "hakoniwa-environment-city-world-build";
+const PHASES = { source_download: "ダウンロード", catalog: "カタログの問い合わせ" };
+
+function describeBuild(status) {
+  const progress = status.progress || {};
+  const phase = PHASES[progress.phase] || progress.phase || "準備";
+  const count = progress.total ? ` ${progress.current}/${progress.total}` : "";
+  const feature = progress.feature ? `（${progress.feature}）` : "";
+  const elapsed = status.elapsed_s ? `・${Math.round(status.elapsed_s)} 秒` : "";
+  return `${status.id}：${phase}${feature}${count}${elapsed}`;
+}
+
+async function followBuild(id, onDone) {
+  $("#build-cancel").hidden = false;
+  $("#build-start").disabled = true;
+  try { localStorage.setItem(BUILD_KEY, id); } catch { /* storage unavailable */ }
+  for (;;) {
+    let status;
+    try {
+      status = await api("GET", `city-worlds/build/${encodeURIComponent(id)}`);
+    } catch (error) {
+      $("#build-status").textContent = error.message;
+      break;
+    }
+    $("#build-status").textContent = describeBuild(status);
+    if (status.state !== "running") {
+      if (status.state === "done") {
+        $("#build-status").textContent = `${id} を作りました。部品として取り込みます…`;
+        await onDone(status);
+        $("#build-status").textContent = `${id} を作って取り込みました（City World：${status.build}）`;
+      } else {
+        $("#build-status").replaceChildren(el("div", {}, `${id} を作れませんでした（ログ：${status.log}）`),
+          ...(status.errors.length ? status.errors : status.log_tail.slice(-5)).map((line) => el("div", {}, line)));
+      }
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  try { localStorage.removeItem(BUILD_KEY); } catch { /* storage unavailable */ }
+  $("#build-cancel").hidden = true;
+  $("#build-start").disabled = false;
 }
 
 function report(result) {
@@ -278,6 +323,43 @@ async function init() {
   try { $("#world-root").value = localStorage.getItem(ROOT_KEY) || ""; } catch { /* storage unavailable */ }
   $("#world-search").addEventListener("click", () => searchWorlds(map, worlds));
   searchWorlds(map, worlds);
+
+  const imported = async (status) => {
+    await importWorld({ path: status.build, title: $("#recipe-name").value.trim() || status.id }, status.id);
+    searchWorlds(map, worlds);
+  };
+  $("#build-start").addEventListener("click", async () => {
+    const id = $("#build-id").value.trim();
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) {
+      setStatus("ID は小文字・数字・- _ で付けてください", "error");
+      return;
+    }
+    if (!selectionIsValid()) {
+      setStatus("範囲の値を確認してください", "error");
+      return;
+    }
+    try {
+      await api("POST", "city-worlds/build", {
+        id, name: $("#recipe-name").value.trim() || id, selection: selection(),
+        offline: $("#build-offline").checked, overwrite: $("#build-offline").checked, root: $("#world-root").value.trim().split(",")[0].trim() || undefined,
+      });
+    } catch (error) {
+      setStatus(error.message, "error");
+      return;
+    }
+    setStatus(`${id} を作り始めました（hakoniwa-envsim）`, "ok");
+    followBuild(id, imported);
+  });
+  $("#build-cancel").addEventListener("click", async () => {
+    let id = null;
+    try { id = localStorage.getItem(BUILD_KEY); } catch { /* storage unavailable */ }
+    if (!id || !window.confirm(`${id} を作るのを中止しますか？`)) return;
+    try { await api("POST", `city-worlds/build/${encodeURIComponent(id)}/cancel`, {}); } catch (error) { setStatus(error.message, "error"); }
+  });
+  try {  // a build started before this page was opened again
+    const running = localStorage.getItem(BUILD_KEY);
+    if (running) followBuild(running, imported);
+  } catch { /* storage unavailable */ }
 
   // Only grounds that need no data of their own (map data brings no terrain).
   $("#terrain").replaceChildren(...config.terrains

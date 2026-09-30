@@ -160,3 +160,15 @@ PLATEAU のデータには、外形がもともと重なっている建物もあ
 3. Recipe を `work/recipes/<id>.yaml` に保存します。
 
 元の地図データは `work/map-data/<id>/map.json` に残ります。
+
+## 9. 地図ページから PLATEAU の City World を作る
+
+地図ページの「PLATEAU から City World を作る」で、選んだ範囲の City World を hakoniwa-envsim に作らせ、終わったらそのまま部品として取り込みます（7 章。envsim の出力はそのまま使います）。実装は `tools/env_cityworld.py` です。
+
+- **置き場所**：`work/city-worlds/<ID>/`。ビジネスパックの City World Web UI のジョブと同じ形（`hakoniwa-envsim-build.yaml`、`job.json`、`generation.log`、`build/`）なので、「ワークスペースの街」の一覧にも出ます。
+- **設定**：City World Web UI と同じ（visual-physics-v1：LOD2 の見た目、建物の当たり判定 P0〜P3、DEM の地形、道路、路面標示、橋）。範囲の指定も同じです。
+- **ダウンロード**：envsim が PLATEAU のカタログに問い合わせて CityGML を取ります。取った CityGML は共有のキャッシュに残し、次から使い回します。キャッシュは `HAKONIWA_PLATEAU_CACHE`、無ければ地図ページの「フォルダ」（ビジネスパックの work）の `recipes/city-world-web-ui/runtime/cache/plateau-citygml`、それも無ければ `work/city-worlds/cache` です。
+- **実行**：`hako.py --config … build` を裏で動かし、`[HAKO_PROGRESS]` の行から進み具合を表示します（`GET /api/city-worlds/build/<ID>`）。同時に動かすのは 1 つだけで、中止もできます（`POST …/cancel`）。ページを開き直しても、作っている途中のものを追い続けます。
+- **オフライン**：同じ ID で前に作った City World を、そのとき取ったカタログの応答と CityGML だけで作り直せます（`offline`）。
+- **例**：札幌駅前（345 m × 183 m）は、CityGML がキャッシュにあれば十数秒でビルドが終わり、取り込んだ Recipe は `env_roundtrip.py` で envsim の出力と一致します。
+

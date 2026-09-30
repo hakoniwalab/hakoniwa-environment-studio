@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
 import env_citygml  # noqa: E402
+import env_cityworld  # noqa: E402
 import env_rules  # noqa: E402
 import env_schema  # noqa: E402
 import env_validate  # noqa: E402
@@ -459,16 +460,36 @@ def import_map(body: object) -> dict:
 
 def city_world_roots() -> list[Path]:
     """Where to look for Envsim builds: HAKONIWA_CITY_WORLD_ROOTS (separated
-    like PATH), else the business-pack workspace next to this repository."""
+    like PATH), else the business-pack workspace next to this repository;
+    and the City Worlds this Studio built (work/city-worlds)."""
     configured = os.environ.get("HAKONIWA_CITY_WORLD_ROOTS")
     if configured:
-        return [Path(item).expanduser().resolve() for item in configured.split(os.pathsep) if item]
-    return [(ROOT.parent / "hakoniwa-business-pack" / "work").resolve()]
+        roots = [Path(item).expanduser().resolve() for item in configured.split(os.pathsep) if item]
+    else:
+        roots = [(ROOT.parent / "hakoniwa-business-pack" / "work").resolve()]
+    return roots + [env_cityworld.WORK.resolve()]
+
+
+def _built(action):
+    """A City World build call, its errors as Studio errors."""
+    try:
+        return action()
+    except env_cityworld.BuildError as exc:
+        raise StudioError(str(exc), HTTPStatus(exc.status)) from exc
+    except OSError as exc:  # Envsim missing, or a file that cannot be written
+        raise StudioError(f"City World を作れません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
+
+
+def start_city_world_build(body: object) -> dict:
+    """Start an Envsim build of a selection from PLATEAU (env_cityworld.py);
+    body.root (the map page's folder) is searched first for a shared cache."""
+    extra = [Path(str(body["root"])).expanduser().resolve()] if isinstance(body, dict) and body.get("root") else []
+    return _built(lambda: env_cityworld.BUILDS.start(body, extra + city_world_roots()))
 
 
 def list_city_worlds(root: str | None) -> dict:
     """The Envsim builds (City Worlds and their CityGML) in a workspace."""
-    roots = [Path(root).expanduser().resolve()] if root else city_world_roots()
+    roots = [Path(root).expanduser().resolve(), env_cityworld.WORK.resolve()] if root else city_world_roots()
     try:
         builds = env_citygml.discover(roots)
     except DiagnosticError as exc:
@@ -683,6 +704,11 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("GET", ("map", "config"), lambda self, _: self._json(map_config())),
         ("POST", ("map", "import"), lambda self, _: self._json(import_map(self._body()))),
         ("GET", ("city-worlds",), lambda self, _: self._json(list_city_worlds(self._query("root")))),
+        ("POST", ("city-worlds", "build"), lambda self, _: self._json(start_city_world_build(self._body()))),
+        ("GET", ("city-worlds", "build", "*"), lambda self, parts: self._json(
+            _built(lambda: env_cityworld.BUILDS.status(_check_id(parts[2]))))),
+        ("POST", ("city-worlds", "build", "*", "cancel"), lambda self, parts: self._json(
+            _built(lambda: env_cityworld.BUILDS.cancel(_check_id(parts[2]))))),
         ("POST", ("city-worlds", "import"), lambda self, _: self._json(import_city_world(self._body()))),
         ("GET", ("recipes",), lambda self, _: self._json(list_recipes())),
         ("GET", ("recipes", "*"), lambda self, parts: self._json(read_recipe(parts[1]))),
