@@ -39,6 +39,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -277,6 +278,18 @@ def preview_glb(body: object) -> bytes:
     return env_generate.environment_glb(recipe)
 
 
+def preview_poses(body: object) -> dict:
+    """Where each object of an unsaved Recipe stands, heights included (terrain,
+    roads under it): what the 3D view needs when only poses changed, without
+    making and sending the whole GLB again. Axes as the GLB node: glTF."""
+    try:
+        recipe = _recipe_from_body(body, USER_RECIPES.resolve() / "preview.yaml")
+    except DiagnosticError as exc:
+        raise StudioError(f"3D を作れません: {exc}") from exc
+    return {"poses": {obj.id: {"translation": [obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m], "yaw_deg": obj.pose.yaw_deg}
+                      for obj in recipe.objects}}
+
+
 def validate_recipe(body: object) -> dict:
     """Schema, then MuJoCo checks of an unsaved Recipe, as {ok, diagnostics}:
     the problems are an answer here, not an error."""
@@ -460,6 +473,28 @@ def import_city_world(body: object) -> dict:
             "clipped": report.get("clipped", 0), "overlaps_left": report.get("overlaps_left", [])}
 
 
+def delete_recipe(recipe_id: str) -> dict:
+    """Move a saved Recipe to work/trash/<time>-<id>/, with what belongs only
+    to it: its visual assets (<id>.assets) and the map data it was imported
+    from (work/map-data/<id>). Nothing is erased: empty the trash by hand.
+    Examples (recipes/examples) cannot be deleted."""
+    found = _recipe_files().get(recipe_id)  # only a listed Recipe (also one whose name is no valid id)
+    if found is None:
+        raise StudioError(f"Recipe {recipe_id} not found", HTTPStatus.NOT_FOUND)
+    path, editable = found
+    if not editable:
+        raise StudioError(f"{recipe_id} は例の環境なので削除できません", HTTPStatus.FORBIDDEN)
+    trash = USER_RECIPES.resolve().parent / "trash" / f"{time.strftime('%Y%m%d-%H%M%S')}-{recipe_id}"
+    trash.mkdir(parents=True, exist_ok=False)
+    moved = []
+    for source in (path, path.parent / f"{path.stem}.assets", USER_RECIPES.resolve().parent / "map-data" / path.stem):
+        if source.exists():
+            target = trash / source.name if source.parent == path.parent else trash / "map-data"
+            shutil.move(str(source), str(target))
+            moved.append(str(target))
+    return {"id": recipe_id, "trash": str(trash), "moved": moved}
+
+
 def save_recipe(recipe_id: str, body: object) -> dict:
     """Check a Recipe and write it under work/recipes/.
 
@@ -534,10 +569,12 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("GET", ("recipes",), lambda self, _: self._json(list_recipes())),
         ("GET", ("recipes", "*"), lambda self, parts: self._json(read_recipe(parts[1]))),
         ("PUT", ("recipes", "*"), lambda self, parts: self._json(save_recipe(parts[1], self._body()))),
+        ("DELETE", ("recipes", "*"), lambda self, parts: self._json(delete_recipe(parts[1]))),
         ("POST", ("resolve-many",), lambda self, _: self._json(resolve_many_json(self._body()))),
         ("POST", ("resolve",), lambda self, _: self._json(resolve_json(self._body()))),
         ("POST", ("validate",), lambda self, _: self._json(validate_recipe(self._body()))),
         ("POST", ("terrain",), lambda self, _: self._json(terrain_json(self._body()))),
+        ("POST", ("poses",), lambda self, _: self._json(preview_poses(self._body()))),
         ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body()), "model/gltf-binary")),
     )
 
@@ -589,6 +626,9 @@ class StudioHandler(SimpleHTTPRequestHandler):
 
     def do_PUT(self) -> None:  # noqa: N802
         return self._api("PUT")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        return self._api("DELETE")
 
     def do_POST(self) -> None:  # noqa: N802
         return self._api("POST")

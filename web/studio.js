@@ -53,6 +53,7 @@ const state = {
   openedId: null, // the saved Recipe being edited, if any
   previewTimer: null,
   previewVersion: 0,
+  previewShape: null, // shapeKey() of the GLB in the 3D view
   validation: null, // {layout, result}: the server's check and the layout it covered
   validateTimer: null,
   terrain: { key: null, image: null }, // the ground's image on the plan, and what it shows
@@ -146,6 +147,7 @@ function render({ live = false } = {}) {
     renderRecipeList();
   }
   state.view3d?.setSelected(state.selection);
+  followPoses();
   schedulePreview();
   if (!live && !inspector.sliding && !state.plan.drag) checkpoint();
 }
@@ -252,7 +254,24 @@ async function ensure3d() {
   }
 }
 
+// Everything the GLB depends on except where objects stand: while this stays
+// the same, the 3D view moves its nodes instead of loading a new GLB.
+function shapeKey() {
+  const { size_m: size, terrain, objects } = recipe();
+  return JSON.stringify({ catalog: state.catalogId, size, terrain, objects: objects.map(({ pose, ...rest }) => rest) });
+}
+
+// Show moves at once (a drag follows the pointer); the heights (terrain, roads
+// under an object) stay as shown until the server's answer.
+function followPoses() {
+  if (!state.view3d || !state.current || viewMode() === "plan" || state.previewShape !== shapeKey()) return;
+  state.view3d.setPoses(Object.fromEntries(recipe().objects.map((obj) => [obj.id, {
+    translation: [obj.pose.x_m, undefined, -obj.pose.y_m], yaw_deg: obj.pose.yaw_deg || 0,
+  }])));
+}
+
 // Ask the server for the Recipe's GLB once editing pauses; a newer edit wins.
+// When only poses changed, ask for the poses (heights included) instead.
 function schedulePreview(delay = PREVIEW_DELAY_MS) {
   if (!state.view3d || !state.current || viewMode() === "plan") return;
   clearTimeout(state.previewTimer);
@@ -261,7 +280,13 @@ function schedulePreview(delay = PREVIEW_DELAY_MS) {
 
 async function refreshPreview() {
   const version = (state.previewVersion += 1);
+  const shape = shapeKey();
   try {
+    if (shape === state.previewShape) {
+      const { poses } = await api("POST", "poses", recipeBody());
+      if (version !== state.previewVersion) return;
+      if (state.view3d.setPoses(poses)) return;
+    }
     const response = await fetch("/api/glb", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(recipeBody()),
     });
@@ -270,6 +295,7 @@ async function refreshPreview() {
     if (version !== state.previewVersion) return;
     // Parsing is asynchronous too: a newer preview may finish first.
     await state.view3d.setGlb(buffer, recipe().size_m, () => version === state.previewVersion);
+    if (version === state.previewVersion) state.previewShape = shape;
     state.view3d.setSelected(state.selection);
   } catch (error) {
     setStatus(error.message, "error");
@@ -410,8 +436,28 @@ function renderCatalog() {
   }));
 }
 
+// Move a saved Recipe (and its visual assets, its imported map data) to the
+// trash (work/trash/); examples cannot be deleted.
+async function deleteRecipe(item) {
+  if (!window.confirm(`環境「${item.name || item.id}」（${item.id}）を削除しますか？\n`
+    + "見た目の GLB と取り込んだ地図データも一緒に work/trash/ へ移します（そこから戻せます）。")) return;
+  try {
+    const result = await api("DELETE", `recipes/${encodeURIComponent(item.id)}`, {});
+    const wasOpen = state.current?.id === item.id || state.openedId === item.id;
+    await loadRecipes();
+    if (wasOpen) {
+      state.saved = snapshot(); // nothing left to keep: do not ask about unsaved changes
+      const next = state.recipes.find((entry) => !entry.error);
+      if (next) await openRecipe(next.id); else newRecipe();
+    }
+    setStatus(`${item.id} を削除しました（${result.trash}）`, "ok");
+  } catch (error) {
+    setStatus(`${item.id} を削除できません: ${error.message}`, "error");
+  }
+}
+
 function renderRecipeList() {
-  $("#recipe-list").replaceChildren(...state.recipes.map((item) => el("li", {},
+  $("#recipe-list").replaceChildren(...state.recipes.map((item) => el("li", { class: "recipe-row" },
     el("button", {
       "aria-current": String(state.current?.id === item.id),
       onclick: () => {
@@ -422,7 +468,11 @@ function renderRecipeList() {
       },
     }, el("span", {}, item.id), el("span", { class: "meta" }, item.error ? "エラー"
       : `${item.size_m.east}×${item.size_m.north} m・${item.objects} 部品${item.terrain === "hfield" ? "・丘" : ""}${
-        item.editable ? "" : "・例"}`)))));
+        item.editable ? "" : "・例"}`)),
+    item.editable ? el("button", {
+      class: "secondary icon delete", title: `${item.id} を削除（work/trash/ へ移す）`, "aria-label": `${item.id} を削除`,
+      onclick: () => deleteRecipe(item),
+    }, "×") : null)));
 }
 
 // --- Editing ----------------------------------------------------------------------

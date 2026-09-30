@@ -26,7 +26,7 @@ AI エージェントが Environment Studio を外から扱うための約束事
 | `generate <recipe> --out-dir DIR` | `environment.glb` / `.xml` / `.json`（指紋付き） |
 | `tools/env_citygml.py (--citygml DIR --center LAT,LON --half-extent NS,EW \| --envsim-build DIR) --out R.yaml --json`、`--list ROOT` | CityGML（PLATEAU、または envsim の `osm2citygml.py` が地図データから作ったもの）から、建物・道路を部品にした Recipe を作る（#10）。結果は `{buildings, roads, skipped, notes, size_m}` |
 
-Studio を起動していれば、同じことを HTTP でもできます（`/api/catalogs/<id>`、`/api/resolve`、`/api/terrain`、`/api/validate`、`/api/glb`、`PUT /api/recipes/<id>`）。
+Studio を起動していれば、同じことを HTTP でもできます（`/api/catalogs/<id>`、`/api/resolve`、`/api/terrain`、`/api/validate`、`/api/glb`、`/api/poses`、`PUT /api/recipes/<id>`、`DELETE /api/recipes/<id>`（`work/trash/` へ移す。例は 403））。
 `/api/validate` は問題があっても HTTP 200 で `{ok, stage: "schema" | "physics", diagnostics}` を返します。
 
 ## 3. 診断

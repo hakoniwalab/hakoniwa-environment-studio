@@ -77,10 +77,32 @@ export class View3D {
     dispose(this.model); // the previous environment's GPU buffers, materials and textures
     this.model.clear();
     this.model.add(gltf.scene);
+    // Each object is one node (extras.object = its id): moving it needs no new GLB.
+    this.nodes = new Map();
+    gltf.scene.traverse((node) => {
+      const id = node.userData?.object;
+      if (id && !this.nodes.has(id)) this.nodes.set(id, node);
+    });
     const resized = !this.size || this.size.east !== size.east || this.size.north !== size.north;
     this.size = { ...size };
     this.applyHighlight();
     if (resized) this.overview();
+  }
+
+  // Move objects without a new GLB. poses: id -> {translation: [x, y, z]
+  // (glTF axes), yaw_deg}; a missing translation[1] keeps the height shown.
+  // Returns false when an object is not in the model (a new GLB is needed).
+  setPoses(poses) {
+    if (!this.nodes) return false;
+    let all = true;
+    for (const [id, pose] of Object.entries(poses)) {
+      const node = this.nodes.get(id);
+      if (!node) { all = false; continue; }
+      const [x, y, z] = pose.translation;
+      node.position.set(x, y ?? node.position.y, z);
+      node.rotation.set(0, (pose.yaw_deg * Math.PI) / 180, 0);
+    }
+    return all;
   }
 
   // Render only while the 3D view is shown.

@@ -70,6 +70,22 @@ class Terrain:
         a cell, never reach into the ground."""
         if self.kind != "hfield":
             return 0.0
+        # The Studio resolves the whole Recipe on every edit, and usually one
+        # object moved: remembered per grid (the same tuple while a DEM stays
+        # cached) and outline.
+        heights_id = id(self.heights)
+        if _UNDER.get("heights") is not self.heights:
+            _UNDER.clear()
+            _UNDER["heights"] = self.heights
+        key = (heights_id, self.size_east_m, self.size_north_m, tuple(polygon))
+        if key not in _UNDER:
+            if len(_UNDER) > 100_000:
+                _UNDER.clear()
+                _UNDER["heights"] = self.heights
+            _UNDER[key] = self._highest_under(polygon)
+        return _UNDER[key]
+
+    def _highest_under(self, polygon: list[tuple[float, float]]) -> float:
         import env_polygon
 
         dx = self.size_east_m / (self.ncol - 1)
@@ -103,6 +119,11 @@ class Terrain:
             if with_heights:
                 data["heights"] = [list(row) for row in self.heights]
         return data
+
+
+# highest_under's answers for the latest grid ("heights" holds that grid, so its
+# id stays its own).
+_UNDER: dict = {}
 
 
 def _inside(polygon, point) -> bool:
@@ -183,7 +204,7 @@ def _envsim_dem(params: dict, size_east: float, size_north: float, path: str,
         if len(_DEM_CACHE) >= 8:
             _DEM_CACHE.clear()
         _DEM_CACHE[key] = _sample_dem(hfield, ns_m, ew_m, size_east, size_north, nrow, ncol)
-    return nrow, ncol, [list(row) for row in _DEM_CACHE[key]]
+    return nrow, ncol, _DEM_CACHE[key]  # the same (immutable) grid every time: see _UNDER
 
 
 _DEM_CACHE: dict = {}
@@ -222,5 +243,7 @@ def make_terrain(settings: dict, params: dict, size_east: float, size_north: flo
     else:
         raise fail(f"{path}.generator", "not_one_of", "no generator for an hfield", expected=["envsim", "hills"],
                    actual=settings["generator"])
-    return Terrain("hfield", **base, nrow=nrow, ncol=ncol, heights=tuple(tuple(row) for row in heights),
+    if not isinstance(heights, tuple):
+        heights = tuple(tuple(row) for row in heights)
+    return Terrain("hfield", **base, nrow=nrow, ncol=ncol, heights=heights,
                    max_height_m=max(max(row) for row in heights))

@@ -147,6 +147,24 @@ class StudioServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("3D を作れません", error["error"])
 
+    def test_a_move_needs_only_the_poses_which_match_the_glb_nodes(self):
+        # A cone on a board: moving the board lifts the cone, so heights come from the server.
+        _, loaded = self.call("GET", "/api/recipes/drone-practice-field")
+        body = {**{key: loaded["recipe"][key] for key in ("name", "size_m", "terrain", "objects")}, "catalog_id": "starter"}
+        body["objects"][0]["pose"]["x_m"] += 0.5
+        status, answer = self.call("POST", "/api/poses", body)
+        self.assertEqual(status, 200, answer)
+        request = Request(f"http://127.0.0.1:{self.port}/api/glb", data=json.dumps(body).encode(), method="POST",
+                          headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=10) as response:
+            glb = response.read()
+        document = json.loads(glb[20:20 + int.from_bytes(glb[12:16], "little")])
+        nodes = {node["name"]: node for node in document["nodes"][1:]}
+        self.assertEqual(set(answer["poses"]), set(nodes))
+        for name, pose in answer["poses"].items():
+            for got, want in zip(pose["translation"], nodes[name]["translation"]):
+                self.assertAlmostEqual(got, want, places=9)
+
     @unittest.skipUnless(env_validate.available(), "MuJoCo is not installed")
     def test_the_studio_validates_an_unsaved_layout_with_mujoco(self):
         status, result = self.call("POST", "/api/validate", {
@@ -221,6 +239,31 @@ class StudioServerTest(unittest.TestCase):
         _, loaded = self.call("GET", "/api/recipes/tokyo-parts")
         self.assertEqual(loaded["recipe"]["objects"][0]["source"]["kind"], "citygml")
         self.assertEqual(self.call("POST", "/api/city-worlds/import", {"id": "x", "path": "/nowhere"})[0], 404)
+
+    def test_a_saved_recipe_is_deleted_into_the_trash_with_its_files(self):
+        _, loaded = self.call("GET", "/api/recipes/drone-practice-field")
+        body = {key: loaded["recipe"][key] for key in ("name", "size_m", "terrain", "objects")}
+        self.assertEqual(self.call("PUT", "/api/recipes/field-copy", {**body, "catalog_id": "starter"})[0], 200)
+        (self.user / "field-copy.assets").mkdir()
+        (self.user / "field-copy.assets/a.glb").write_bytes(b"glb")
+        map_data = self.user.parent / "map-data/field-copy"
+        map_data.mkdir(parents=True)
+        (map_data / "map.json").write_text("{}", encoding="utf-8")
+
+        status, result = self.call("DELETE", "/api/recipes/field-copy", {})
+        self.assertEqual(status, 200, result)
+        trash = Path(result["trash"])
+        self.assertEqual(trash.parent, (self.user.parent / "trash").resolve())
+        self.assertEqual(sorted(path.name for path in trash.iterdir()),
+                         ["field-copy.assets", "field-copy.yaml", "map-data"])
+        self.assertTrue((trash / "map-data/map.json").is_file())
+        self.assertFalse((self.user / "field-copy.yaml").exists() or map_data.exists())
+        _, listed = self.call("GET", "/api/recipes")
+        self.assertNotIn("field-copy", [item["id"] for item in listed])
+
+        self.assertEqual(self.call("DELETE", "/api/recipes/field-copy", {})[0], 404)
+        self.assertEqual(self.call("DELETE", "/api/recipes/drone-practice-field", {})[0], 403)  # an example
+        self.assertTrue((env_studio.EXAMPLE_RECIPES / "drone-practice-field.yaml").is_file())
 
     def test_an_invalid_recipe_is_rejected_and_not_saved(self):
         status, body = self.call("PUT", "/api/recipes/bad", {
