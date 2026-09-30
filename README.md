@@ -300,3 +300,13 @@ MVP は [Issue #1](https://github.com/hakoniwalab/hakoniwa-environment-studio/is
 - 最初から Booth Studio と共通 framework を抽出すること
 
 まず Environment Studio として一度縦に成立させ、Booth Studio との共通部分とドメイン差分が明確になった段階で共通化を判断します。
+
+## ライセンス
+
+このリポジトリのソフトウェア、Type・Catalog・Recipe、およびドキュメントは [MIT License](LICENSE) で提供します。
+
+次のものは、それぞれの条件に従います。このリポジトリの MIT License は、これらの権利を与えるものではありません。
+
+- ブラウザが読み込むライブラリ：[three.js](https://github.com/mrdoob/three.js)（MIT）、[Leaflet](https://github.com/Leaflet/Leaflet)（BSD-2-Clause）。リポジトリには含めず、実行時に unpkg から読み込みます。
+- 依存するリポジトリとパッケージ：[hakoniwa-envsim](https://github.com/hakoniwalab/hakoniwa-envsim)、hakoniwa-urban-mobility、MuJoCo、shapely などの Python パッケージ（`recipes/requirements/environment-studio.txt`）。
+- 地図から取り込んだデータ：OpenStreetMap のデータ（© OpenStreetMap contributors、ODbL）、地図タイル、PLATEAU のデータとテクスチャ。取り込んだデータは作業場所（`<ws>/map-data/`、`<ws>/recipes/`）に置かれ、Recipe の `geo` に出典が記録されます。利用・再配布するときは、それぞれの提供元の条件に従ってください。
