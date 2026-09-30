@@ -368,6 +368,10 @@ class LifecycleTest(unittest.TestCase):
         self.assertIn("already running", served.stderr)
         self.assertIn("env_studio.py stop", served.stderr)
         self.assertNotIn("Traceback", served.stderr)
+        # Asked for the browser: the running Studio is opened instead.
+        with mock.patch.object(env_studio.webbrowser, "open") as browser:
+            self.assertEqual(env_studio.serve(self.port, True), 0)
+        browser.assert_called_once_with(f"http://127.0.0.1:{self.port}/")
         self.assertEqual(self.run_tool("status").returncode, 0)
         self.assertEqual(self.run_tool("stop").returncode, 0)
         self.assertFalse((self.state / "studio.json").exists())

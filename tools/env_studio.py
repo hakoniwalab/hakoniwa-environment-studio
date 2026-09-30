@@ -959,13 +959,20 @@ def _port_in_use(port: int) -> str:
     health = _health(port)
     if health:
         return (f"Environment Studio is already running: http://127.0.0.1:{port}/ (pid {health['pid']}). "
-                f"Open it, or stop it first: {command_hint('stop')}"
+                f"Open it ({command_hint('start --open-browser')}), or stop it first: {command_hint('stop')}"
                 + ("" if health.get("instance") else " (or Ctrl+C in the terminal that runs it)"))
     return f"port {port} is in use by another program; stop it, or pass --port"
 
 
 def serve(port: int, open_browser: bool) -> int:
     if not _port_free(port):
+        running = _health(port)
+        if running and open_browser:
+            # Asked for the Studio in the browser: that one is it.
+            url = f"http://127.0.0.1:{port}/"
+            print(f"Environment Studio is already running: {url} (pid {running['pid']}); opening it")
+            webbrowser.open(url)
+            return 0
         print(f"ERROR: {_port_in_use(port)}", file=sys.stderr)
         return 1
     server = make_server(port)
