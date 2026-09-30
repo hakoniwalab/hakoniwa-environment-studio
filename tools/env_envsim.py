@@ -9,6 +9,7 @@ sys.path once, here, and nowhere else.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 
@@ -65,6 +66,31 @@ def osm2citygml():
     import osm2citygml as module
 
     return module
+
+
+# Public Overpass API instances (wiki.openstreetmap.org/wiki/Overpass_API), tried
+# in turn: the main one often answers 504 or 429 when it is busy.
+OVERPASS_ENDPOINTS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+)
+
+
+def fetch_overpass(box) -> dict:
+    """The box's buildings and roads from Overpass, by Envsim's osm2citygml:
+    HAKONIWA_OVERPASS_URL alone when it is set, else the public instances in
+    turn until one answers. Raises osm2citygml's OsmConversionError naming
+    what each said."""
+    osm = osm2citygml()
+    configured = os.environ.get("HAKONIWA_OVERPASS_URL")
+    errors = []
+    for endpoint in (configured,) if configured else OVERPASS_ENDPOINTS:
+        try:
+            return osm.fetch_overpass(box, endpoint)
+        except osm.OsmConversionError as exc:
+            errors.append(str(exc))
+    raise osm.OsmConversionError("; ".join(errors))
 
 
 def bounding_box(center: tuple[float, float], half_extent: tuple[float, float]) -> tuple[float, float, float, float]:

@@ -202,8 +202,10 @@ class CityWorldBuildTest(unittest.TestCase):
             fetched = []
 
             @classmethod
-            def fetch_overpass(cls, box):
-                cls.fetched.append(box)
+            def fetch_overpass(cls, box, endpoint=None):
+                cls.fetched.append(endpoint)
+                if endpoint == env_cityworld.env_envsim.OVERPASS_ENDPOINTS[0]:  # busy: the next one is asked
+                    raise cls.OsmConversionError("HTTP Error 504: Gateway Timeout")
                 return {"elements": [], "osm3s": {"timestamp_osm_base": "2026-10-01T00:00:00Z"}}
 
             @staticmethod
@@ -214,7 +216,8 @@ class CityWorldBuildTest(unittest.TestCase):
                         "attribution": "© OpenStreetMap contributors", "license": "ODbL-1.0"}
 
         with mock.patch.object(env_cityworld.env_envsim, "osm2citygml", lambda: FakeOsm), \
-                mock.patch.object(env_cityworld.env_envsim, "bounding_box", lambda center, half: (0, 0, 1, 1)):
+                mock.patch.object(env_cityworld.env_envsim, "bounding_box", lambda center, half: (0, 0, 1, 1)), \
+                mock.patch.dict("os.environ", {"HAKONIWA_OVERPASS_URL": ""}):
             status = self.wait(self.builds.start({"id": "osm-block", "selection": SELECTION, "source": "osm",
                                                   "map_data": "overpass"}, [])["id"])
         self.assertEqual(status["state"], "done")
@@ -225,13 +228,22 @@ class CityWorldBuildTest(unittest.TestCase):
         self.assertIn("dem: false", config)
         self.assertIn("terrain_uncovered_policy: constant", config)
         self.assertNotIn("api_base_url", config)
-        self.assertEqual(len(FakeOsm.fetched), 1)
+        self.assertEqual(FakeOsm.fetched, list(env_cityworld.env_envsim.OVERPASS_ENDPOINTS[:2]))
         self.assertTrue((job / "osm/map.json").is_file())
         request = json.loads((job / "job.json").read_text(encoding="utf-8"))["request"]
         self.assertEqual((request["source"], request["map_data"]["license"], request["map_data"]["buildings"]),
                          ("osm", "ODbL-1.0", 3))
         with mock.patch.object(env_cityworld, "BUILDS", self.builds):
             self.assertEqual([item["source"] for item in env_cityworld.list_jobs()], ["osm"])
+        # Every instance busy: the Studio says so, and nothing is left.
+        busy = type("Busy", (FakeOsm,), {"fetch_overpass": classmethod(
+            lambda cls, box, endpoint=None: (_ for _ in ()).throw(cls.OsmConversionError("HTTP Error 504")))})
+        with mock.patch.object(env_cityworld.env_envsim, "osm2citygml", lambda: busy), \
+                mock.patch.object(env_cityworld.env_envsim, "bounding_box", lambda center, half: (0, 0, 1, 1)), \
+                self.assertRaisesRegex(env_cityworld.BuildError, "混んでいます") as caught:
+            self.builds.start({"id": "busy", "selection": SELECTION, "source": "osm", "map_data": "overpass"}, [])
+        self.assertEqual(caught.exception.status, 502)
+        self.assertFalse((self.dir / "work/city-worlds/busy").exists())
         # An area without roads is refused before anything is built (Envsim's City World needs them).
         FakeOsm.run = staticmethod(lambda box, out_dir, name, **kw: (out_dir.mkdir(parents=True), {"buildings": 3, "roads": 0})[1])
         with mock.patch.object(env_cityworld.env_envsim, "osm2citygml", lambda: FakeOsm), \

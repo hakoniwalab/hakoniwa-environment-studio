@@ -314,15 +314,20 @@ def osm_citygml(folder: Path, center: tuple[float, float], half: tuple[float, fl
     geojson = body.get("geojson") if body.get("map_data") == "geojson" else None
     if body.get("map_data") == "geojson" and not isinstance(geojson, dict):
         raise BuildError("map_data geojson needs the GeoJSON (geojson)")
+    box = osm.Box.of(*env_envsim.bounding_box(center, half))
+    if geojson is None:
+        try:
+            data = env_envsim.fetch_overpass(box)
+        except osm.OsmConversionError as exc:
+            raise BuildError("OpenStreetMap の地図データを取得できません。Overpass API の公開サーバが混んでいます。"
+                             f"しばらくしてから、もう一度押してください（{exc}）", 502) from exc
+    else:
+        data = geojson
     try:
-        box = osm.Box.of(*env_envsim.bounding_box(center, half))
-        data = geojson if geojson is not None else osm.fetch_overpass(box)
         receipt = osm.run(box, folder, "map", overpass=geojson is None, osm_json=None if geojson else data,
                           geojson=geojson)
     except osm.OsmConversionError as exc:
-        raise BuildError(f"OpenStreetMap から作れません: {exc}", 502 if geojson is None else 400) from exc
-    except OSError as exc:  # Overpass did not answer
-        raise BuildError(f"OpenStreetMap（Overpass API）から取得できません: {exc}", 502) from exc
+        raise BuildError(f"OpenStreetMap から作れません: {exc}") from exc
     if not receipt.get("roads"):  # Envsim's City World needs roads (source.kind files: bldg and tran)
         raise BuildError("この範囲には、City World に使える道路がありません（OpenStreetMap の歩道・階段・トンネルは"
                          "道路にしません）。車道が入るように範囲を広げるか、動かしてください。")

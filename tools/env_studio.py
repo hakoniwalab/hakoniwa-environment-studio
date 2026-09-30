@@ -67,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
 import env_citygml  # noqa: E402
+import env_envsim  # noqa: E402
 import env_cityworld  # noqa: E402
 import env_plateau  # noqa: E402
 import env_urban  # noqa: E402
@@ -442,7 +443,7 @@ def import_map(body: object) -> dict:
         raise StudioError("the area to import: selection (or bbox)")
     geojson = body.get("geojson") if source == "geojson" else None
     try:
-        osm_json = None if geojson is not None else osm.fetch_overpass(bbox)
+        osm_json = None if geojson is not None else env_envsim.fetch_overpass(bbox)
         receipt = osm.run(bbox, data_dir, "map", overpass=source == "overpass", osm_json=osm_json, geojson=geojson)
         if not isinstance(chosen, dict):  # a bbox: its own centre and half extents
             selection = receipt["selection"]
