@@ -329,6 +329,10 @@ export class PlanView {
       // take the smallest part there.
       const part = inSelection || hit;
       this.onSelect([part.id]);
+      if (part.locked) {  // a layer under everything: dragging pans instead of moving it
+        this.drag = { mode: "pan", start: [event.clientX, event.clientY], view: { ...this.view } };
+        return;
+      }
       this.drag = {
         mode: "move", id: part.id, offset: [part.x - x, part.y - y], moved: false, start: [event.clientX, event.clientY],
         // A click (no drag) on an already selected part goes to the next one under it.

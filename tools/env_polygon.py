@@ -127,7 +127,43 @@ def convex_pieces(points: list[tuple[float, float]]) -> list[list[tuple[float, f
     """A simple counter-clockwise ring split into convex counter-clockwise pieces."""
     if is_convex(points):
         return [list(points)]
-    pieces = [list(triangle) for triangle in triangulate(points)]
+    return _merged(points, [list(triangle) for triangle in triangulate(points)])
+
+
+def holes_problem(outer: list[tuple[float, float]], holes: list[list[tuple[float, float]]]) -> str | None:
+    """Why holes do not fit a footprint (each strictly inside it, apart from
+    one another), or None."""
+    from shapely.geometry import Polygon
+
+    shape = Polygon(outer, holes)
+    if not shape.is_valid:
+        return "the holes must lie inside the footprint without touching it or one another"
+    return None
+
+
+def convex_pieces_with_holes(outer: list[tuple[float, float]],
+                             holes: list[list[tuple[float, float]]]) -> list[list[tuple[float, float]]]:
+    """A counter-clockwise ring with holes (courtyards) split into convex
+    counter-clockwise pieces that leave the holes open: a constrained Delaunay
+    triangulation (no new points) merged while convex (Hertel-Mehlhorn)."""
+    if not holes:
+        return convex_pieces(outer)
+    from shapely import constrained_delaunay_triangles
+    from shapely.geometry import Polygon
+
+    points = list(outer) + [point for hole in holes for point in hole]
+    index = {point: number for number, point in enumerate(points)}
+    triangles = []
+    for triangle in constrained_delaunay_triangles(Polygon(outer, holes)).geoms:
+        corners = [index[(x, y)] for x, y in list(triangle.exterior.coords)[:3]]
+        if signed_area([points[i] for i in corners]) < 0:
+            corners.reverse()
+        triangles.append(corners)
+    return [[points[i] for i in piece] for piece in _merged(points, triangles, indices=True)]
+
+
+def _merged(points, pieces, indices: bool = False):
+    """Hertel-Mehlhorn: join pieces sharing an edge while the result stays convex."""
     merged = True
     while merged:
         merged = False
@@ -141,7 +177,7 @@ def convex_pieces(points: list[tuple[float, float]]) -> list[list[tuple[float, f
                     break
             if merged:
                 break
-    return [[points[i] for i in piece] for piece in pieces]
+    return pieces if indices else [[points[i] for i in piece] for piece in pieces]
 
 
 def _join(first: list[int], second: list[int]) -> list[int] | None:

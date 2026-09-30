@@ -162,9 +162,7 @@ export function createInspector(host, app) {
       }));
     }
     if (kind === "polygon" || kind === "polyline") return pointsField(definition, value, set);
-    if (kind === "polygons") {  // a layer's outlines: they only draw it on the plan
-      return el("p", { class: "meta", title }, `${label}：${Array.isArray(value) ? value.length : 0} 個（上面図に描くだけ）`);
-    }
+    if (kind === "polygons") return polygonsField(definition, value, set);
     if (kind === "bool") {
       return el("label", { class: "field inline", title }, el("input", {
         type: "checkbox", checked: value, onchange: (event) => { set(event.target.checked); app.render(); },
@@ -215,6 +213,28 @@ export function createInspector(host, app) {
     text.addEventListener("input", () => text.setCustomValidity(""));
     return el("label", { class: "field", title: definition.description || "" },
       `${definition.label}（${summary}）`, text);
+  }
+
+  // Several outlines (a footprint's courtyards, a layer's outlines): how many,
+  // and (while few) the points as JSON to edit by hand; the server checks them.
+  function polygonsField(definition, value, set) {
+    const polygons = Array.isArray(value) ? value : [];
+    const title = definition.description || "";
+    if (polygons.length > 50) return el("p", { class: "meta", title }, `${definition.label}：${polygons.length} 個`);
+    const text = el("textarea", { rows: "3", spellcheck: "false", class: "points" }, JSON.stringify(polygons));
+    text.addEventListener("change", () => {
+      try {
+        const parsed = JSON.parse(text.value);
+        if (!Array.isArray(parsed)) throw new Error("[[[x, y], ...], ...] の形で書いてください");
+        set(parsed);
+        app.render();
+      } catch (error) {
+        text.setCustomValidity(error.message);
+        text.reportValidity();
+      }
+    });
+    text.addEventListener("input", () => text.setCustomValidity(""));
+    return el("label", { class: "field", title }, `${definition.label}（${polygons.length} 個）`, text);
   }
 
   // Fields for parameters a caller keeps: values[name] is the current value,

@@ -160,6 +160,7 @@ export class Parts {
       // Its envelope is not its shape (a footprint, a road along a line): the plan draws its solids.
       detailed: shape.layer === "surface" || shape.solids.some((solid) => solid.primitive === "prism"),
       snap: shape.snap !== false,
+      locked: shape.locked === true, // selected on the plan, never dragged (a City World layer)
       color: this.paramValue(part, "color") || "#b0b4ba",
     };
   }

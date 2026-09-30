@@ -45,7 +45,7 @@ types:
 | `id` / `label` / `description` | 識別子、表示名、説明（`describe-type` で人と AI が読む） |
 | `extends` / `abstract` | 単一継承。抽象の型は品目から直接使えない |
 | `params` | `kind`（length / angle / number / integer / color / enum / bool / text / polygon / polyline / polygons）、`unit`（length は m、angle は deg が既定）、`label`、`description`、`default`、`min` / `max` / `values`、`level` |
-| `behavior` | `surface`（`ground`：地面に立つ／`elevated`：地面から `z_m` の高さ）、`snap`、`friction`、`layer`（`object` が既定／`surface`：道路や標示。surface どうしは重なってよい） |
+| `behavior` | `surface`（`ground`：地面に立つ／`elevated`：地面から `z_m` の高さ）、`snap`、`friction`、`layer`（`object` が既定／`surface`：道路や標示。surface どうしは重なってよい）、`locked`（上面図でドラッグしない。選ぶと欄で数値を変えられる。街の層） |
 | `shapes` | 形状（3 章）。地形の型では代わりに `terrain` |
 | `terrain` | `kind`（flat / hfield）、`generator`、`color`、`friction`（4 章） |
 | `envelope` | 上面図の外形（既定は形状全部を収める中心合わせの箱） |
@@ -73,6 +73,7 @@ types:
 | `primitive` | `box`、`cylinder`（直立、`w` = `d` = 直径）、`wedge`（くさび：底面 `w × d`、ローカル +y に向かって 0 から `h` まで上がる）、`prism`（`points` の多角形を `h` だけ押し出す）、`ribbon`（`points` の折れ線に沿った幅 `w` の帯） |
 | `points` | prism / ribbon の点（`$footprint` のような polygon / polyline のパラメータ） |
 | `polygons` | prism を外形ごとに作る（`$outlines` のような polygons のパラメータ。部品の名前は `<名前>-1-…`、`<名前>-2-…`） |
+| `holes` | prism の穴（`$holes` のような polygons のパラメータ。中庭）。穴は外形の内側で、互いに離れていること（違反は `invalid_shape`）。穴を囲む凸の部品に分けます |
 | `w` / `d` / `h` | 大きさ（m） |
 | `x` / `y` / `z` | **形状の中心**（物体の底面の中心からの位置）。`z` の既定は `h / 2`（底面に立つ） |
 | `roll` / `pitch` / `yaw` | 中心まわりの傾き（度。yaw → pitch → roll の順に適用） |

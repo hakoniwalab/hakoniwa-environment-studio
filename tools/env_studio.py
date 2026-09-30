@@ -507,7 +507,8 @@ def import_city_world(body: object) -> dict:
     env_schema.save_yaml(recipe, target)
     return {"id": recipe_id, "path": str(target), "build": str(build), "size_m": recipe["size_m"],
             "buildings": report["buildings"], "roads": report["roads"], "skipped": report["skipped"],
-            "courtyards_filled": report["courtyards_filled"], "notes": report["notes"], "provider": report["provider"],
+            "courtyards": report["courtyards"], "courtyards_filled": report["courtyards_filled"],
+            "notes": report["notes"], "provider": report["provider"],
             "terrain": report["terrain"], "lod2_visuals": report.get("lod2_visuals", 0),
             "clipped": report.get("clipped", 0), "overlaps_left": report.get("overlaps_left", []),
             "passthrough": report.get("passthrough")}

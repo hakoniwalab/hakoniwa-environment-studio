@@ -153,10 +153,13 @@ export class View3D {
     return ray.intersectObject(terrain, true)[0]?.point.y ?? 0;
   }
 
-  // A driver at the south edge, eye 1.2 m above the ground there, looking north.
+  // A driver at the south edge of the ground (an Envsim terrain may cover less
+  // than the environment), eye 1.2 m above it, looking north.
   carView() {
     if (!this.size) return;
-    const z = this.size.north / 2 - 1;
+    const terrain = this.model.getObjectByName("terrain");
+    const south = terrain ? new THREE.Box3().setFromObject(terrain).max.z : this.size.north / 2;
+    const z = Math.min(this.size.north / 2, Number.isFinite(south) ? south : this.size.north / 2) - 1;
     const eye = this.groundAt(0, z) + CAR_EYE_M;
     this.look(new THREE.Vector3(0, eye, z), new THREE.Vector3(0, eye, z - this.size.north));
   }

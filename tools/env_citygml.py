@@ -162,6 +162,24 @@ def _clean_ring(points) -> list[tuple[float, float]] | None:
     return ring if env_polygon.is_simple(ring) else None
 
 
+MIN_HOLE_AREA_M2 = 1.0  # smaller courtyards (light wells) are filled
+
+
+def _holes(rings, outer, pose) -> tuple[list[list[list[float]]], int]:
+    """(holes relative to the pose, how many were filled) of a footprint's
+    interior rings: each kept when, at mm precision, it is simple, at least
+    MIN_HOLE_AREA_M2 and lies inside the outline apart from the others kept."""
+    kept, filled = [], 0
+    for points in rings:
+        ring = _clean_ring(points)
+        if ring is None or abs(env_polygon.signed_area(ring)) < MIN_HOLE_AREA_M2 \
+                or env_polygon.holes_problem(outer, [*kept, ring]):
+            filled += 1
+            continue
+        kept.append(ring)
+    return [[[_mm(x - pose["x_m"]), _mm(y - pose["y_m"])] for x, y in ring] for ring in kept], filled
+
+
 def _road_pieces(polygon, tiled: bool):
     """(id suffix, polygon) of a road surface: itself, or its ROAD_TILE_M tiles
     (aligned to the origin) when it lies on DEM terrain."""
@@ -201,7 +219,7 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     geodesy, extract, roads_probe = envsim_modules()
     lat0, lon0 = center
     ns_m, ew_m = half_extent
-    report = {"buildings": 0, "roads": 0, "courtyards_filled": 0, "skipped": [], "notes": []}
+    report = {"buildings": 0, "roads": 0, "courtyards": 0, "courtyards_filled": 0, "skipped": [], "notes": []}
     objects, used, sources = [], set(), []
     crs_seen, providers = set(), set()
     reach_e, reach_n = ew_m, ns_m
@@ -233,8 +251,6 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
                 report["skipped"].append({"source": record["id"], "kind": "building",
                                           "reason": "its LOD1 footprint is not a simple polygon"})
                 continue
-            if record.get("interior_rings"):
-                report["courtyards_filled"] += 1
             crs_seen.add(record.get("source_crs", "EPSG:6697"))
             # Heights above the ground: CityGML from osm2citygml says where its
             # base is (base_m); otherwise (PLATEAU altitudes) the building's own
@@ -244,6 +260,9 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
             height = min(max(_mm(record["zmax"] - ground), 1.0), 500.0)
             base = _mm(min(max(record["zmin"] - ground, 0.0), height - 0.5)) if base_m is not None else 0.0
             pose, footprint = _placed(ring)
+            holes, filled = _holes(record.get("interior_rings") or [], ring, pose)
+            report["courtyards"] += len(holes)
+            report["courtyards_filled"] += filled
             reach_e = max(reach_e, *(abs(x) for x, _ in ring))
             reach_n = max(reach_n, *(abs(y) for _, y in ring))
             provider = info["gen"].get("source_provider") or ("plateau" if "6697" in record.get("source_crs", "6697")
@@ -260,7 +279,8 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
             grounds[part_id] = (path, ground, int(str(record.get("source_crs", "EPSG:6697")).split(":")[-1]))
             part = {"id": part_id, "item": items["building"], "pose": pose,
                     "params": {"footprint": footprint, "height_m": height,
-                               **({"min_height_m": base} if base > 0 else {})},
+                               **({"min_height_m": base} if base > 0 else {}),
+                               **({"holes": holes} if holes else {})},
                     "source": source_record}
             if passthrough is not None:  # its assets' frame: Envsim's height of its ground
                 part["anchor"] = {"x_m": pose["x_m"], "y_m": pose["y_m"],
@@ -372,7 +392,8 @@ def _world_footprint(obj):
     from shapely.geometry import Polygon
 
     x, y = obj["pose"]["x_m"], obj["pose"]["y_m"]
-    return Polygon([(x + px, y + py) for px, py in obj["params"]["footprint"]])
+    return Polygon([(x + px, y + py) for px, py in obj["params"]["footprint"]],
+                   [[(x + px, y + py) for px, py in hole] for hole in obj["params"].get("holes", [])])
 
 
 def _height_range(obj) -> tuple[float, float]:
@@ -412,19 +433,23 @@ def clip_overlaps(objects: list[dict], building_item: str) -> tuple[int, list[di
                                  "reason": "clipping would split the building"})
                     continue
                 rest = pieces[0]
-            if rest.geom_type != "Polygon" or rest.is_empty or rest.interiors \
-                    or rest.area < MIN_KEPT_SHARE * originals[small["id"]]:
+            if rest.geom_type != "Polygon" or rest.is_empty or rest.area < MIN_KEPT_SHARE * originals[small["id"]]:
                 left.append({"a": small["id"], "b": large["id"], "area_m2": round(overlap, 3),
-                             "reason": "clipping would leave too little or a hole"})
+                             "reason": "clipping would leave too little"})
                 continue
             x, y = small["pose"]["x_m"], small["pose"]["y_m"]
             ring = _clean_ring([(px - x, py - y) for px, py in list(rest.exterior.coords)[:-1]])
-            if ring is None:
+            holes = [_clean_ring([(px - x, py - y) for px, py in list(hole.coords)[:-1]]) for hole in rest.interiors]
+            if ring is None or None in holes or (holes and env_polygon.holes_problem(ring, holes)):
                 left.append({"a": small["id"], "b": large["id"], "area_m2": round(overlap, 3),
-                             "reason": "the clipped outline is not a simple polygon"})
+                             "reason": "the clipped outline is not a simple polygon with courtyards"})
                 continue
             small["params"]["footprint"] = [[_mm(px), _mm(py)] for px, py in ring]
-            shapes[small["id"]] = Polygon([(x + px, y + py) for px, py in ring])
+            small["params"].pop("holes", None)
+            if holes:  # its own courtyards, and any the clipping opened
+                small["params"]["holes"] = [[[_mm(px), _mm(py)] for px, py in hole] for hole in holes]
+            shapes[small["id"]] = Polygon([(x + px, y + py) for px, py in ring],
+                                          [[(x + px, y + py) for px, py in hole] for hole in holes])
             tags = small["source"].setdefault("tags", {})
             tags["clipped_by"] = ", ".join(filter(None, [tags.get("clipped_by"), large["source"]["id"]]))
             tags["clipped_m2"] = f"{float(tags.get('clipped_m2', 0)) + overlap:.3f}"

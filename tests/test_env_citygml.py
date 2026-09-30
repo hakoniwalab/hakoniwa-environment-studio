@@ -110,13 +110,25 @@ class OsmPartsTest(unittest.TestCase):
         self.assertEqual((source["tags"]["name"], source["tags"]["osm:height"], source["tags"]["source_id"]),
                          ("L", "12", "101"))
 
-    def test_a_canopy_stays_raised_and_courtyards_are_filled(self):
+    def test_a_canopy_stays_raised_and_courtyards_stay_open(self):
         canopy = self.objects["osm_w103"]["params"]
         self.assertEqual((canopy["height_m"], canopy["min_height_m"]), (6.0, 5.5))
         school = self.objects["osm_r300"]
         area = abs(env_polygon.signed_area([tuple(p) for p in school["params"]["footprint"]]))
         self.assertAlmostEqual(area, 400.0, delta=0.5)
-        self.assertEqual(self.report["courtyards_filled"], 1)
+        (hole,) = school["params"]["holes"]
+        self.assertAlmostEqual(abs(env_polygon.signed_area([tuple(p) for p in hole])), 100.0, delta=0.5)
+        self.assertEqual((self.report["courtyards"], self.report["courtyards_filled"]), (1, 0))
+        # The courtyard is open: its solids cover the ring only, and a drone fits in it.
+        parsed = env_schema.parse_recipe(self.recipe, ROOT / "work/osm.yaml")
+        obj = next(item for item in parsed.objects if item.id == "osm_r300")
+        self.assertAlmostEqual(sum(abs(env_polygon.signed_area(list(solid.points)))
+                                   for solid in obj.solids), 300.0, delta=0.5)
+        middle = env_schema.placed(obj, [(0.0, 0.0)])[0]
+        self.assertFalse(any(env_polygon.convex_overlap(env_schema.placed(obj, solid.outline()),
+                                                         [(middle[0] - 1, middle[1] - 1), (middle[0] + 1, middle[1] - 1),
+                                                          (middle[0] + 1, middle[1] + 1), (middle[0] - 1, middle[1] + 1)])
+                             for solid in obj.solids))
 
     def test_buildings_stay_whole_and_the_environment_grows(self):
         warehouse = self.world(self.objects["osm_w105"])

@@ -275,8 +275,8 @@ types:
       - {name: slab, primitive: prism, points: $outline, h: 0.02}
 
   # A building from its footprint (a map outline, #10): the outline raised to
-  # its height with a flat roof (from min_height_m: a canopy or a skyway).
-  # Concave outlines are split into convex pieces.
+  # its height with a flat roof (from min_height_m: a canopy or a skyway),
+  # courtyards left open. Concave outlines are split into convex pieces.
   - id: building_footprint
     extends: object
     label: 建物（外形）
@@ -292,10 +292,12 @@ types:
                      description: "Where it starts above the ground: > 0 for a canopy (a roof on posts) or a bridge between buildings."}
       visual: {kind: text, label: 見た目（GLB）, default: "", level: placement,
                description: "A GLB shown instead of the extruded footprint (its CityGML LOD2 look, textures included), in the part's frame; absolute or relative to the Recipe."}
+      holes: {kind: polygons, label: 穴（中庭）, default: [], level: placement,
+              description: "Courtyards open to the sky, [[[x, y], ...], ...] in the object's frame; each inside the footprint, apart from the others."}
       collision: {kind: text, label: 当たり判定（MJCF）, default: "", level: placement,
                   description: "The building's own colliders (Envsim's P0-P3 geoms, as Envsim wrote them) used in the generated MuJoCo world instead of the extruded footprint; needs the object's anchor. The footprint still places it and checks overlaps."}
     shapes:
-      - {name: body, primitive: prism, points: $footprint, h: $height_m - $min_height_m,
+      - {name: body, primitive: prism, points: $footprint, holes: $holes, h: $height_m - $min_height_m,
          z: ($height_m + $min_height_m) / 2}
 
   # A layer of a City World as Envsim built it (its road network, road
@@ -317,7 +319,7 @@ types:
                description: "The layer's GLB (Envsim's, unchanged), in the object's frame; absolute or relative to the Recipe."}
       collision: {kind: text, label: 当たり判定（MJCF）, default: "", level: placement,
                   description: "The layer's colliders as Envsim wrote them (bridges), if any; needs the object's anchor."}
-    behavior: {layer: surface}
+    behavior: {layer: surface, locked: true}
     shapes:
       - {name: area, primitive: prism, polygons: $outlines, h: 0.01, collide: false}
 

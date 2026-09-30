@@ -228,7 +228,10 @@ async function importWorld(build) {
     const items = [
       `大きさ ${result.size_m.east} m × ${result.size_m.north} m（${result.provider}、地面：${result.terrain === "dem" ? "City World の地形（DEM）" : "平ら"}）`,
       `建物 ${result.buildings}（LOD2 の見た目付き ${result.lod2_visuals ?? 0}）、道路 ${result.roads}`,
-      ...(result.courtyards_filled ? [`中庭を埋めた建物 ${result.courtyards_filled}`] : []),
+      ...(result.passthrough ? [`envsim の原本をそのまま使用：当たり判定 ${result.passthrough.colliders} 棟、`
+        + `${result.passthrough.terrain ? "地形、" : ""}層 ${result.passthrough.layers.join("・") || "なし"}`] : []),
+      ...(result.courtyards ? [`中庭（穴） ${result.courtyards}`] : []),
+      ...(result.courtyards_filled ? [`小さい・形の崩れた中庭を埋めた数 ${result.courtyards_filled}`] : []),
       ...(result.clipped ? [`元データで重なっていた外形を切り取った建物 ${result.clipped}`] : []),
       ...(result.overlaps_left?.length ? [`切り取れずに残った重なり ${result.overlaps_left.length} 組（検証で確認してください）`] : []),
       ...result.notes.filter((note) => !note.includes("were clipped")),

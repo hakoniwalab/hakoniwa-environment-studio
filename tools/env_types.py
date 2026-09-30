@@ -61,8 +61,8 @@ TYPE_KEYS = {"id", "label", "description", "abstract", "extends", "id_prefix", "
              "envelope", "terrain"}
 PARAM_KEYS = {"kind", "level", "label", "description", "unit", "default", "min", "max", "values"}
 SHAPE_KEYS = {"name", "primitive", "w", "d", "h", "x", "y", "z", "roll", "pitch", "yaw", "color", "collide",
-              "visible", "when", "points", "polygons"}
-BEHAVIOR_KEYS = {"surface", "snap", "friction", "layer"}
+              "visible", "when", "points", "polygons", "holes"}
+BEHAVIOR_KEYS = {"surface", "snap", "friction", "layer", "locked"}
 # Largest size or position accepted, in metres (a sanity bound).
 MAX_M = 100_000.0
 
@@ -207,10 +207,10 @@ _POINTS_CACHE: dict = {}
 
 
 def _polygons(value, path: str) -> list[list[list[float]]]:
-    """Several outlines (a "polygons" parameter), each a polygon as _points checks it."""
-    if not isinstance(value, list) or not value:
-        raise fail(path, "wrong_type", "must be a non-empty list of polygons", expected="[[[x, y], ...], ...]",
-                   actual=value if not isinstance(value, list) else [])
+    """Several outlines (a "polygons" parameter: a layer's outlines, a
+    footprint's holes), each a polygon as _points checks it; may be empty."""
+    if not isinstance(value, list):
+        raise fail(path, "wrong_type", "must be a list of polygons", expected="[[[x, y], ...], ...]", actual=value)
     if len(value) > MAX_POLYGONS:
         raise fail(path, "out_of_range", f"at most {MAX_POLYGONS} polygons", expected=f"<= {MAX_POLYGONS}",
                    actual=len(value))
@@ -471,12 +471,15 @@ class Shape:
     snap: bool
     friction: float
     layer: str = "object"
+    # The editor does not drag it on the plan (a City World layer under
+    # everything): it is selected there and moved by its numbers.
+    locked: bool = False
 
     def as_json(self) -> dict:
         return {
             "solids": [solid.as_json() for solid in self.solids], "envelope": self.envelope,
             "bottom_m": self.bottom_m, "height_m": self.height_m, "surface": self.surface, "snap": self.snap,
-            "friction": self.friction, "layer": self.layer,
+            "friction": self.friction, "layer": self.layer, **({"locked": True} if self.locked else {}),
         }
 
 
@@ -753,7 +756,13 @@ def _resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
             height = size("h")
             z = number("z", height / 2)
             if primitive == "prism":
-                solids += _prism_solids(name, points, number("x"), number("y"), z, height, common)
+                holes = []
+                if "holes" in shape:  # courtyards: left open (the pieces go round them)
+                    holes = [[tuple(point) for point in hole] for hole in
+                             _polygons(evaluate(shape["holes"], params, f"{where}.holes"), f"{where}.holes")]
+                    if holes and env_polygon.holes_problem(points, holes):
+                        raise fail(f"{where}.holes", "invalid_shape", env_polygon.holes_problem(points, holes))
+                solids += _prism_solids(name, points, number("x"), number("y"), z, height, common, holes)
             else:
                 solids += _ribbon_solids(name, points, size("w"), number("x"), z, height, common)
             continue
@@ -780,11 +789,12 @@ def _resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
         surface=behavior.get("surface", "ground"),
         snap=bool(evaluate(behavior.get("snap", True), params, f"{path}.snap")),
         friction=friction, layer=behavior.get("layer", "object"),
+        locked=bool(evaluate(behavior.get("locked", False), params, f"{path}.locked")),
     )
 
 
-def _prism_solids(name, points, dx, dy, z, height, common) -> list[Solid]:
-    pieces = env_polygon.convex_pieces(points)
+def _prism_solids(name, points, dx, dy, z, height, common, holes=()) -> list[Solid]:
+    pieces = env_polygon.convex_pieces_with_holes(points, list(holes)) if holes else env_polygon.convex_pieces(points)
     solids = []
     for number, piece in enumerate(pieces, 1):
         xs, ys = [x for x, _ in piece], [y for _, y in piece]
