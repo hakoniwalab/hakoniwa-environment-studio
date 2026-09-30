@@ -162,8 +162,11 @@ export class PlanView {
     const nodes = [];
     const { minX, maxX, minY, maxY } = this.area;
     if (this.terrain) {
+      // Over the grid's own area when it has one (an Envsim terrain), else the environment.
+      const grid = this.terrain.grid;
+      const [x0, x1, y0, y1] = grid ? [-grid.east / 2, grid.east / 2, -grid.north / 2, grid.north / 2] : [minX, maxX, minY, maxY];
       nodes.push(svg("image", {
-        href: this.terrain.href, x: minX, y: -maxY, width: maxX - minX, height: maxY - minY,
+        href: this.terrain.href, x: x0, y: -y1, width: x1 - x0, height: y1 - y0,
         preserveAspectRatio: "none", class: "terrain",
       }));
     }

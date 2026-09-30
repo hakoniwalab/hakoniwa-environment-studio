@@ -275,10 +275,11 @@ class StudioServerTest(unittest.TestCase):
         shutil.copyfile(self._tiny_glb(), self.user / "town.assets/house.glb")
         footprint["params"]["visual"] = "town.assets/house.glb"
         status, saved = self.call("PUT", "/api/recipes/town", {**body, "objects": [footprint]})
-        self.assertEqual((status, saved["copied_visuals"]), (200, 0), saved)  # its own assets: nothing to copy
+        self.assertEqual((status, saved["copied_assets"]), (200, 0), saved)  # its own assets: nothing to copy
 
         status, copy = self.call("PUT", "/api/recipes/town-2", {**body, "objects": [footprint]})
-        self.assertEqual((status, copy["copied_visuals"], copy["visuals"]), (200, 1, {"house": "town-2.assets/house.glb"}))
+        self.assertEqual((status, copy["copied_assets"], copy["assets"]),
+                         (200, 1, {"objects": {"house": {"visual": "town-2.assets/house.glb"}}, "terrain": {}}))
         written = yaml.safe_load((self.user / "town-2.yaml").read_text(encoding="utf-8"))
         self.assertEqual(written["objects"][0]["params"]["visual"], "town-2.assets/house.glb")
         self.assertEqual(self.call("DELETE", "/api/recipes/town", {})[0], 200)

@@ -89,6 +89,11 @@ export function createInspector(host, app) {
       el("p", { class: "meta" }, view.surface === "elevated"
         ? `地面から ${view.z} m 上に置きます` : "地面の上に立ちます（丘の上では足元の高さに合わせます）"),
       assumedLine(entry, part),
+      anchorLine(part),
+      entry?.type === "city_layer" ? el("button", {
+        class: "secondary", title: "道路網の外形を、1 本ずつ編集できる道路（面）の部品にします。envsim の見た目（地形に沿った道路）の代わりに、平らな面を地面に置きます。",
+        onclick: () => app.explode(part),
+      }, "個別の道路部品に分解") : null,
       ...paramSection(entry, part),
       el("h2", {}, "動かす"),
       el("div", { class: "move-row" }, el("span", { class: "meta" }, "寄せる"),
@@ -157,6 +162,9 @@ export function createInspector(host, app) {
       }));
     }
     if (kind === "polygon" || kind === "polyline") return pointsField(definition, value, set);
+    if (kind === "polygons") {  // a layer's outlines: they only draw it on the plan
+      return el("p", { class: "meta", title }, `${label}：${Array.isArray(value) ? value.length : 0} 個（上面図に描くだけ）`);
+    }
     if (kind === "bool") {
       return el("label", { class: "field inline", title }, el("input", {
         type: "checkbox", checked: value, onchange: (event) => { set(event.target.checked); app.render(); },
@@ -233,6 +241,18 @@ export function createInspector(host, app) {
         class: "secondary", onclick: () => { delete part.params; app.render(); },
       }, "品目の値に戻す") : null,
     ];
+  }
+
+  // An object made by hakoniwa-envsim keeps Envsim's own look and colliders:
+  // exact where they were made, moved with it (and up or down with the ground) otherwise.
+  function anchorLine(part) {
+    const anchor = part.anchor;
+    if (!anchor) return null;
+    const moved = Math.abs(part.pose.x_m - anchor.x_m) > 1e-9 || Math.abs(part.pose.y_m - anchor.y_m) > 1e-9
+      || Math.abs((((part.pose.yaw_deg ?? 0) - (anchor.yaw_deg ?? 0)) % 360 + 540) % 360 - 180) > 1e-9;
+    return el("p", { class: "meta" }, moved
+      ? "envsim の原本（見た目・当たり判定）を、動かした分だけ移して使っています（地面の高さの差だけ上下します）。"
+      : "envsim の原本（見た目・当たり判定）を、そのままの位置・形で使っています。");
   }
 
   // What the item is and where it comes from.

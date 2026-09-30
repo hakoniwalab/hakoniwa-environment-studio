@@ -35,6 +35,7 @@ import argparse
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -286,8 +287,44 @@ def preview_poses(body: object) -> dict:
         recipe = _recipe_from_body(body, USER_RECIPES.resolve() / "preview.yaml")
     except DiagnosticError as exc:
         raise StudioError(f"3D を作れません: {exc}") from exc
-    return {"poses": {obj.id: {"translation": [obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m], "yaw_deg": obj.pose.yaw_deg}
-                      for obj in recipe.objects}}
+    poses = {}
+    for obj in recipe.objects:
+        # A node showing an asset stands where the GLB puts it (env_generate.asset_frame).
+        x, y, z, yaw = (env_generate.asset_frame(recipe, obj) if obj.visual is not None
+                        else (obj.pose.x_m, obj.pose.y_m, obj.pose.z_m, obj.pose.yaw_deg))
+        poses[obj.id] = {"translation": [x, z, -y], "yaw_deg": yaw}
+    return {"poses": poses}
+
+
+def explode_layer(body: object) -> dict:
+    """The road parts a City World layer (a city-layer object, Envsim's road
+    network) becomes: one road-area per outline, cut into tiles on a height
+    field as an import does. Body: an unsaved Recipe and {object: id}."""
+    try:
+        recipe = _recipe_from_body(body, USER_RECIPES.resolve() / "explode.yaml")
+    except DiagnosticError as exc:
+        raise StudioError(f"分解できません: {exc}") from exc
+    obj = next((item for item in recipe.objects if item.id == body.get("object")), None)
+    if obj is None or obj.type != "city_layer":
+        raise StudioError(f"{body.get('object')!r} は街の層（city-layer）ではありません", HTTPStatus.NOT_FOUND)
+    from shapely.geometry import Polygon
+
+    turn = math.radians(obj.pose.yaw_deg)
+    cos, sin = math.cos(turn), math.sin(turn)
+    used = {item.id for item in recipe.objects}
+    tiled = recipe.terrain.kind == "hfield"
+    parts = []
+    for number, outline in enumerate(obj.params["outlines"], 1):
+        world = [(obj.pose.x_m + x * cos - y * sin, obj.pose.y_m + x * sin + y * cos) for x, y in outline]
+        for suffix, piece in env_citygml._road_pieces(Polygon(world), tiled):
+            ring = env_citygml._clean_ring(list(piece.exterior.coords)[:-1])
+            if ring is None:
+                continue
+            pose, points = env_citygml._placed(ring)
+            parts.append({"id": env_citygml._part_id(f"{obj.id}-{number}{suffix}", used),
+                          "item": env_citygml.ITEMS["road"], "pose": pose, "params": {"outline": points},
+                          "source": {**(obj.source or {}), "note": f"from {obj.id}"}})
+    return {"objects": parts}
 
 
 def validate_recipe(body: object) -> dict:
@@ -443,7 +480,9 @@ def import_city_world(body: object) -> dict:
     """Make a Recipe of parts from an Envsim build (its selection, the
     buildings it extracted, its roads) and save it under work/recipes/.
 
-    Body: {id, path, name?, terrain?, catalog_id?, overwrite?}.
+    Body: {id, path, name?, terrain?, catalog_id?, overwrite?, visuals?,
+    passthrough?}: visuals false leaves out the LOD2 looks, passthrough false
+    makes everything from CityGML instead of using Envsim's own outputs.
     """
     if not isinstance(body, dict) or not body.get("path"):
         raise StudioError("the request body must be {id, path}")
@@ -459,8 +498,8 @@ def import_city_world(body: object) -> dict:
         catalog = _catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID)
         recipe, report = env_citygml.convert_build(
             build, catalog=_catalog_reference(catalog, directory), name=body.get("name") or None,
-            terrain_item=body.get("terrain") or "city-ground",
-            recipe_path=None if body.get("visuals") is False else target)
+            terrain_item=body.get("terrain") or "city-ground", recipe_path=target,
+            visuals=body.get("visuals") is not False, passthrough=body.get("passthrough") is not False)
         env_schema.parse_recipe(recipe, target)
     except DiagnosticError as exc:
         raise StudioError(f"City World から作れません: {exc}") from exc
@@ -470,7 +509,8 @@ def import_city_world(body: object) -> dict:
             "buildings": report["buildings"], "roads": report["roads"], "skipped": report["skipped"],
             "courtyards_filled": report["courtyards_filled"], "notes": report["notes"], "provider": report["provider"],
             "terrain": report["terrain"], "lod2_visuals": report.get("lod2_visuals", 0),
-            "clipped": report.get("clipped", 0), "overlaps_left": report.get("overlaps_left", [])}
+            "clipped": report.get("clipped", 0), "overlaps_left": report.get("overlaps_left", []),
+            "passthrough": report.get("passthrough")}
 
 
 def _asset_users(path: Path) -> list[str]:
@@ -488,34 +528,58 @@ def _asset_users(path: Path) -> list[str]:
     return users
 
 
-def _own_visuals(objects: object, directory: Path, recipe_id: str) -> tuple[list[Path], dict[str, str]]:
-    """Give a Recipe saved under a new id its own copies of the visual assets
-    it shares with another saved Recipe (their <id>.assets), so deleting one
-    never breaks the other: each GLB inside `directory` but outside
-    <recipe_id>.assets is copied there and the param rewritten. Paths
-    elsewhere (absolute, outside work/recipes) stay. Returns the new files and
-    the rewritten params ({object id: path})."""
+def _own_assets(data: dict, directory: Path, recipe_id: str) -> tuple[list[Path], dict]:
+    """Give a Recipe saved under a new id its own copies of the assets it
+    shares with another saved Recipe (that one's <id>.assets): the objects'
+    visual GLBs and colliders, the terrain's files (its folder whole: the
+    receipt names the hfield beside it). So deleting one never breaks the
+    other. Each asset inside `directory` but outside <recipe_id>.assets is
+    copied there (to the same place inside) and the param rewritten; paths
+    elsewhere (absolute, outside work/recipes) stay. Returns the new files
+    and folders, and the rewritten params: {"objects": {id: {param: path}},
+    "terrain": {param: path}}."""
     own = directory / f"{recipe_id}.assets"
-    copied, rewritten = [], {}
-    for obj in objects if isinstance(objects, list) else []:
-        params = obj.get("params") if isinstance(obj, dict) else None
-        text = str((params or {}).get("visual") or "").strip()
-        if not text:
-            continue
+    created: list[Path] = []
+    rewritten: dict = {"objects": {}, "terrain": {}}
+
+    def adopt(text: str, whole_folder: bool) -> str | None:
         source = Path(text).expanduser()
         source = (source if source.is_absolute() else directory / source).resolve()
         if not source.is_file() or not source.is_relative_to(directory) or source.is_relative_to(own):
-            continue
-        own.mkdir(parents=True, exist_ok=True)
-        target, n = own / source.name, 1
+            return None
+        parts = source.relative_to(directory).parts
+        inner = Path(*parts[1:]) if len(parts) > 1 and parts[0].endswith(".assets") else Path(source.name)
+        if whole_folder and len(inner.parts) > 1:
+            folder = own / inner.parent
+            if not folder.exists():
+                shutil.copytree(source.parent, folder)
+                created.append(folder)
+            return f"{own.name}/{inner.as_posix()}"
+        target, n = own / inner, 1
         while target.exists() and target.read_bytes() != source.read_bytes():
             n += 1
-            target = own / f"{source.stem}-{n}{source.suffix}"
+            target = own / inner.with_name(f"{inner.stem}-{n}{inner.suffix}")
         if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
-            copied.append(target)
-        params["visual"] = rewritten[str(obj.get("id"))] = f"{own.name}/{target.name}"
-    return copied, rewritten
+            created.append(target)
+        return f"{own.name}/{target.relative_to(own).as_posix()}"
+
+    for obj in data.get("objects") if isinstance(data.get("objects"), list) else []:
+        params = obj.get("params") if isinstance(obj, dict) else None
+        for name in ("visual", "collision"):
+            text = str((params or {}).get(name) or "").strip()
+            path = adopt(text, False) if text else None
+            if path:
+                params[name] = rewritten["objects"].setdefault(str(obj.get("id")), {})[name] = path
+    terrain = data.get("terrain") if isinstance(data.get("terrain"), dict) else {}
+    params = terrain.get("params") if isinstance(terrain.get("params"), dict) else {}
+    for name in ("dem", "visual"):
+        text = str(params.get(name) or "").strip()
+        path = adopt(text, True) if text else None
+        if path:
+            params[name] = rewritten["terrain"][name] = path
+    return created, rewritten
 
 
 def delete_recipe(recipe_id: str) -> dict:
@@ -560,17 +624,17 @@ def save_recipe(recipe_id: str, body: object) -> dict:
             **({"description": data.pop("description")} if "description" in data else {}),
             "catalog": _catalog_reference(_catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID), directory),
             **data}
-    copied, rewritten = _own_visuals(data.get("objects"), directory, recipe_id)
+    copied, rewritten = _own_assets(data, directory, recipe_id)
     try:
         recipe = env_schema.parse_recipe(data, target)
     except DiagnosticError as exc:
         for extra in copied:
-            extra.unlink(missing_ok=True)
+            shutil.rmtree(extra) if extra.is_dir() else extra.unlink(missing_ok=True)
         raise StudioError(f"Recipe を保存できません: {exc}") from exc
     directory.mkdir(parents=True, exist_ok=True)
     env_schema.save_yaml(data, target)
     return {"id": recipe_id, "editable": True, "path": str(target), "objects": len(recipe.objects),
-            "copied_visuals": len(copied), "visuals": rewritten}
+            "copied_assets": len(copied), "assets": rewritten}
 
 
 class StudioHandler(SimpleHTTPRequestHandler):
@@ -628,6 +692,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("POST", ("validate",), lambda self, _: self._json(validate_recipe(self._body()))),
         ("POST", ("terrain",), lambda self, _: self._json(terrain_json(self._body()))),
         ("POST", ("poses",), lambda self, _: self._json(preview_poses(self._body()))),
+        ("POST", ("explode",), lambda self, _: self._json(explode_layer(self._body()))),
         ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body()), "model/gltf-binary")),
     )
 

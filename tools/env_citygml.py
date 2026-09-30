@@ -12,6 +12,13 @@ Recipe of parts (docs/citygml-parts.md):
   footprint's centroid lies in the selection);
 * one road-area object per tran:Road LOD1 surface, clipped to the selection.
 
+From an Envsim build (a City World), what Envsim made is passed through
+unchanged, so importing and generating again loses nothing: its terrain
+(hfield and GLB), each building's colliders (its P0-P3 geoms, by gml:id) and
+its layers (the road network, road markings, bridges) as city-layer objects.
+Each carries an anchor: where it was made, so it stays exactly there until
+it is moved (docs/citygml-parts.md).
+
 Each part keeps where it came from (gml:id, source file, OSM tags when the
 CityGML came from OpenStreetMap) in its `source`, so later stages can attach
 the same building's LOD2 geometry and move it with the part.
@@ -47,7 +54,7 @@ from env_diagnostics import DiagnosticError, fail  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "catalogs/starter/catalog.yaml"
 CONVERTER_VERSION = "1"
-ITEMS = {"building": "building-footprint", "road": "road-area"}
+ITEMS = {"building": "building-footprint", "road": "road-area", "layer": "city-layer"}
 # Footprint points closer than this are merged (as osm2citygml): no other point
 # moves, so walls neighbours share stay shared.
 MIN_STEP_M = 0.001
@@ -178,7 +185,8 @@ def _road_pieces(polygon, tiled: bool):
 def convert(source: Path, center: tuple[float, float], half_extent: tuple[float, float], *,
             catalog: str = "", name: str | None = None, terrain_item: str = "city-ground",
             items: dict | None = None, prepared: dict[Path, list[dict]] | None = None,
-            dem: Path | None = None, visuals: dict | None = None) -> tuple[dict, dict]:
+            dem: Path | None = None, visuals: dict | None = None,
+            passthrough: dict | None = None) -> tuple[dict, dict]:
     """(Recipe mapping, report) of the CityGML under `source` for a selection
     centred on (lat, lon) with (north_south, east_west) half extents.
 
@@ -186,7 +194,9 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     (its <name>-lod1.json records, by source file), so large mesh files are
     only streamed for their attributes. `dem` (an Envsim terrain-receipt.json)
     makes the ground that City World's terrain (item city-dem). `visuals`
-    ({asset_dir, base_dir, textures}) gives each building part its LOD2 look."""
+    ({asset_dir, base_dir, textures}) gives each building part its LOD2 look.
+    `passthrough` (from envsim_outputs, with asset_dir and base_dir) passes
+    Envsim's own outputs through: anchors, colliders, layers, the terrain."""
     items = {**ITEMS, **(items or {})}
     geodesy, extract, roads_probe = envsim_modules()
     lat0, lon0 = center
@@ -197,6 +207,8 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     reach_e, reach_n = ew_m, ns_m
     seen_ids: set[str] = set()
     grounds: dict[str, tuple[Path, float, int]] = {}  # part id -> (CityGML file, ground altitude, EPSG)
+    terrain_sha = passthrough.get("terrain_sha256") if passthrough else None
+    road_outlines: list[list[list[float]]] = []  # the road network layer's outlines (passthrough)
 
     for path in (list(prepared) if prepared is not None else _files(source, "*bldg*_op.gml")):
         sources.append({"path": str(path.resolve()), "sha256": _sha256(path)})
@@ -246,10 +258,15 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
                 source_record["tags"] = tags
             part_id = _part_id(record["id"], used)
             grounds[part_id] = (path, ground, int(str(record.get("source_crs", "EPSG:6697")).split(":")[-1]))
-            objects.append({"id": part_id, "item": items["building"], "pose": pose,
-                            "params": {"footprint": footprint, "height_m": height,
-                                       **({"min_height_m": base} if base > 0 else {})},
-                            "source": source_record})
+            part = {"id": part_id, "item": items["building"], "pose": pose,
+                    "params": {"footprint": footprint, "height_m": height,
+                               **({"min_height_m": base} if base > 0 else {})},
+                    "source": source_record}
+            if passthrough is not None:  # its assets' frame: Envsim's height of its ground
+                part["anchor"] = {"x_m": pose["x_m"], "y_m": pose["y_m"],
+                                  "z_m": round(ground - passthrough["altitude_offset_m"], 9), "yaw_deg": 0.0,
+                                  **({"terrain": terrain_sha} if terrain_sha else {})}
+            objects.append(part)
             report["buildings"] += 1
 
     for path in _files(source, "*tran*_op.gml"):
@@ -265,7 +282,8 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
             if polygon.area < MIN_ROAD_AREA_M2:
                 continue
             gml_id = road_id.rsplit("-", 2)[0]
-            for suffix, piece in _road_pieces(polygon, tiled=dem is not None):
+            as_layer = passthrough is not None and "roads" in passthrough["layers"]
+            for suffix, piece in _road_pieces(polygon, tiled=dem is not None and not as_layer):
                 # Envsim gives MuJoCo axes (x north, y west); back to east / north.
                 shape = piece.simplify(ROAD_SIMPLIFY_M)
                 tolerance = 2 * ROAD_SIMPLIFY_M
@@ -274,6 +292,10 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
                 ring = _clean_ring([(-y, x) for x, y in list(shape.exterior.coords)[:-1]])
                 if ring is None:
                     report["skipped"].append({"source": road_id + suffix, "kind": "road", "reason": "not a simple polygon"})
+                    continue
+                if as_layer:  # drawn by the road network layer (Envsim's roads are the terrain)
+                    road_outlines.append([[_mm(x), _mm(y)] for x, y in ring])
+                    report["roads"] += 1
                     continue
                 pose, outline = _placed(ring)
                 objects.append({"id": _part_id(road_id + suffix, used),
@@ -290,6 +312,8 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     if visuals is not None:
         report["lod2_visuals"] = attach_visuals(objects, grounds, center, visuals.get("textures") or {},
                                                 visuals["asset_dir"], visuals["base_dir"])
+    if passthrough is not None:
+        report["passthrough"] = pass_through(objects, passthrough, road_outlines, used, items["layer"])
     # The environment holds every whole building (centred on the selection).
     def size(half: float, reach: float) -> float:
         # The selection, or (only where a building reaches past it) 0.1 m steps beyond.
@@ -318,7 +342,9 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
         "catalog": catalog,
         "geo": geo,
         "size_m": {"east": size_east, "north": size_north},
-        "terrain": {"item": "city-dem", "params": {"dem": str(dem)}} if dem is not None else {"item": terrain_item},
+        "terrain": ({"item": "city-dem", "params": passthrough["terrain_params"]}
+                    if passthrough and passthrough.get("terrain_params") else
+                    {"item": "city-dem", "params": {"dem": str(dem)}} if dem is not None else {"item": terrain_item}),
         "objects": objects,
     }
     report["size_m"] = recipe["size_m"]
@@ -564,6 +590,162 @@ def attach_visuals(objects: list[dict], grounds: dict[str, tuple[Path, float, in
     return count
 
 
+# --- Envsim's own outputs, passed through --------------------------------------------
+#
+# A City World Envsim built already holds its accurate parts: the terrain's
+# hfield and GLB, each building's colliders (P0-P3, named by gml:id) and its
+# layers' GLBs. They are copied beside the Recipe as they are and placed from
+# each object's anchor (env_generate.asset_frame), so an unedited import
+# generates Envsim's own world again (tools/env_roundtrip.py checks it).
+
+GML_UUID = re.compile(r"bldg_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def envsim_outputs(build: Path) -> dict | None:
+    """What an Envsim build made for its City World: the altitude its heights
+    are relative to, the buildings' MJCF, the terrain files and the other
+    layers' GLBs (and MJCF). None when it built no City World."""
+    receipt_path = build / "world" / "city-world-receipt.json"
+    if not receipt_path.is_file():
+        return None
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    components = receipt.get("components", {})
+    offset = float(receipt.get("coordinate_frame", {}).get("origin", {}).get("altitude_offset_m", 0.0))
+    terrain_dir = build / "components" / "terrain"
+    terrain = None
+    if (terrain_dir / "terrain-receipt.json").is_file() and (terrain_dir / "terrain.hf").is_file():
+        terrain = {"receipt": terrain_dir / "terrain-receipt.json", "hf": terrain_dir / "terrain.hf",
+                   "xml": terrain_dir / "terrain.xml", "glb": terrain_dir / "terrain.glb"}
+    buildings_xml = Path(components["buildings_xml"]) if components.get("buildings_xml") else None
+    extra_mjcf = [Path(path) for path in components.get("extra_mjcf", [])]
+    layers = {}
+    for glb in components.get("glb_geometry_counts", {}):
+        glb = Path(glb)
+        name = glb.parent.name  # components/<layer>/<layer>.glb
+        if name in ("terrain", "buildings") or not glb.is_file():
+            continue
+        xml = next((path for path in extra_mjcf if path.parent == glb.parent and path.is_file()), None)
+        layers[name] = {"glb": glb, "xml": xml}
+    return {"altitude_offset_m": offset, "terrain": terrain, "layers": layers,
+            "buildings_xml": buildings_xml if buildings_xml and buildings_xml.is_file() else None}
+
+
+def split_colliders(mjcf: Path, wanted: set[str]) -> dict[str, tuple[list, list]]:
+    """(meshes, worldbody elements) of each wanted gml:id in Envsim's buildings
+    MJCF, elements as written: its top-level geoms and bodies name the
+    building (geom_<id>, body_<id>, p1_surface_<id>_..., roof_<id>_...)."""
+    root = ET.parse(mjcf).getroot()
+    asset = root.find("asset")
+    meshes = {element.get("name"): element for element in (asset if asset is not None else [])}
+    found: dict[str, tuple[list, list]] = {}
+    world = root.find("worldbody")
+    for element in (world if world is not None else []):
+        name = element.get("name") or ""
+        match = GML_UUID.search(name)
+        gml_id = match.group(0) if match and match.group(0) in wanted else max(
+            (candidate for candidate in wanted if candidate in name), key=len, default=None)
+        if gml_id is None:
+            continue
+        used, bodies = found.setdefault(gml_id, ([], []))
+        bodies.append(element)
+        for node in element.iter():
+            mesh = meshes.get(node.get("mesh")) if node.get("mesh") else None
+            if mesh is not None and mesh not in used:
+                used.append(mesh)
+    return found
+
+
+def _write_fragment(path: Path, model: str, meshes: list, bodies: list) -> None:
+    root = ET.Element("mujoco", {"model": model})
+    if meshes:
+        ET.SubElement(root, "asset").extend(meshes)
+    ET.SubElement(root, "worldbody").extend(bodies)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+
+
+def _glb_outline(glb: Path) -> list[list[float]]:
+    """A layer's extent on the plan: the box of its GLB's positions (glTF: x
+    east, z = -north), in metres."""
+    import env_generate
+
+    document, _binary = env_generate.read_glb(glb.read_bytes())
+    lows, highs = [], []
+    for mesh in document.get("meshes", []):
+        for primitive in mesh["primitives"]:
+            accessor = document["accessors"][primitive["attributes"]["POSITION"]]
+            if "min" in accessor:
+                lows.append(accessor["min"])
+                highs.append(accessor["max"])
+    if not lows:
+        return [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]]
+    west, east = min(low[0] for low in lows), max(high[0] for high in highs)
+    south, north = -max(high[2] for high in highs), -min(low[2] for low in lows)
+    west, east, south, north = _mm(west), _mm(max(east, west + 0.01)), _mm(south), _mm(max(north, south + 0.01))
+    return [[west, south], [east, south], [east, north], [west, north]]
+
+
+def copy_terrain(terrain: dict, asset_dir: Path, base_dir: Path) -> tuple[dict, str]:
+    """(terrain params, hfield sha256) of an Envsim terrain copied beside the
+    Recipe as it is (its receipt pointing at the copies)."""
+    import shutil
+
+    target = asset_dir / "terrain"
+    target.mkdir(parents=True, exist_ok=True)
+    receipt = json.loads(terrain["receipt"].read_text(encoding="utf-8"))
+    shutil.copyfile(terrain["hf"], target / "terrain.hf")
+    receipt["hfield"] = {**receipt.get("hfield", {}), "path": "terrain.hf"}
+    if terrain["xml"].is_file():
+        shutil.copyfile(terrain["xml"], target / "terrain.xml")
+        receipt["mjcf"] = "terrain.xml"
+    (target / "terrain-receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n",
+                                                 encoding="utf-8")
+    params = {"dem": Path(os.path.relpath(target / "terrain-receipt.json", base_dir)).as_posix()}
+    if terrain["glb"].is_file():
+        shutil.copyfile(terrain["glb"], target / "terrain.glb")
+        params["visual"] = Path(os.path.relpath(target / "terrain.glb", base_dir)).as_posix()
+    return params, _sha256(target / "terrain.hf")
+
+
+def pass_through(objects: list[dict], passthrough: dict, road_outlines: list, used: set[str], layer_item: str) -> dict:
+    """Attach Envsim's colliders to the building parts (the first part of each
+    gml:id) and add its layers as city-layer objects; returns what was done."""
+    asset_dir, base_dir = passthrough["asset_dir"], passthrough["base_dir"]
+    relative = lambda path: Path(os.path.relpath(path, base_dir)).as_posix()  # noqa: E731
+    report = {"colliders": 0, "layers": [], "terrain": bool(passthrough.get("terrain_params"))}
+    if passthrough.get("buildings_xml"):
+        by_gml: dict[str, dict] = {}
+        for obj in objects:
+            if "anchor" in obj and obj.get("source", {}).get("id"):
+                by_gml.setdefault(obj["source"]["id"].split("__part_")[0], obj)
+        for gml_id, (meshes, bodies) in split_colliders(passthrough["buildings_xml"], set(by_gml)).items():
+            obj = by_gml[gml_id]
+            target = asset_dir / f"{obj['id']}.xml"
+            _write_fragment(target, obj["id"], meshes, bodies)
+            obj["params"]["collision"] = relative(target)
+            report["colliders"] += 1
+    anchor = {"x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "yaw_deg": 0.0,
+              **({"terrain": passthrough["terrain_sha256"]} if passthrough.get("terrain_sha256") else {})}
+    import shutil
+
+    for name, layer in sorted(passthrough["layers"].items()):
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        glb = asset_dir / f"layer-{name}.glb"
+        shutil.copyfile(layer["glb"], glb)
+        outlines = road_outlines if name == "roads" and road_outlines else [_glb_outline(layer["glb"])]
+        params = {"outlines": outlines, "visual": relative(glb)}
+        if layer["xml"] is not None:
+            xml = asset_dir / f"layer-{name}.xml"
+            shutil.copyfile(layer["xml"], xml)
+            params["collision"] = relative(xml)
+        objects.append({"id": _part_id(name, used), "item": layer_item, "pose": {"x_m": 0.0, "y_m": 0.0, "yaw_deg": 0.0},
+                        "params": params, "anchor": dict(anchor),
+                        "source": {"provider": "hakoniwa-envsim", "kind": "city-world-layer", "id": name,
+                                   "note": layer["glb"].name}})
+        report["layers"].append(name)
+    return report
+
+
 # --- Envsim builds already in a workspace ----------------------------------------
 
 def read_envsim_build(build: Path) -> dict:
@@ -656,17 +838,27 @@ def asset_dir_for(recipe_path: Path) -> Path:
     return recipe_path.parent / f"{recipe_path.stem}.assets"
 
 
-def convert_build(build: Path, use_dem: bool = True, recipe_path: Path | None = None, **options) -> tuple[dict, dict]:
+def convert_build(build: Path, use_dem: bool = True, recipe_path: Path | None = None, *, visuals: bool = True,
+                  passthrough: bool = True, **options) -> tuple[dict, dict]:
     """Parts of an Envsim build: its selection, its extracted buildings, its
-    roads, (when it has one and `use_dem`) its DEM terrain as the ground, and
-    (given `recipe_path`) each building's LOD2 look as a visual asset."""
+    roads, (when it has one and `use_dem`) its DEM terrain as the ground, and,
+    given `recipe_path` (assets are written beside it): each building's LOD2
+    look (`visuals`) and Envsim's own outputs passed through (`passthrough`:
+    colliders, layers, the terrain's own files)."""
     info = read_envsim_build(build)
-    visuals = None
+    looks = passed = None
     if recipe_path is not None:
-        visuals = {"asset_dir": asset_dir_for(recipe_path), "base_dir": recipe_path.parent,
-                   "textures": build_textures(build)}
+        asset_dir = asset_dir_for(recipe_path)
+        if visuals:
+            looks = {"asset_dir": asset_dir, "base_dir": recipe_path.parent, "textures": build_textures(build)}
+        outputs = envsim_outputs(build) if passthrough else None
+        if outputs is not None:
+            passed = {**outputs, "asset_dir": asset_dir, "base_dir": recipe_path.parent}
+            if use_dem and outputs["terrain"] is not None and info["dem"] is not None:
+                passed["terrain_params"], passed["terrain_sha256"] = copy_terrain(outputs["terrain"], asset_dir,
+                                                                                  recipe_path.parent)
     recipe, report = convert(info["source"], info["center"], info["half_extent"], prepared=info["prepared"],
-                             dem=info["dem"] if use_dem else None, visuals=visuals, **options)
+                             dem=info["dem"] if use_dem else None, visuals=looks, passthrough=passed, **options)
     report["build"] = str(build)
     return recipe, report
 
@@ -689,6 +881,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--terrain", default="city-ground")
     parser.add_argument("--flat", action="store_true", help="with --envsim-build: flat ground even when it has a DEM")
     parser.add_argument("--no-visuals", action="store_true", help="with --envsim-build: LOD1 boxes only (no LOD2 GLBs)")
+    parser.add_argument("--no-passthrough", action="store_true",
+                        help="with --envsim-build: make everything from CityGML instead of using Envsim's own outputs")
     parser.add_argument("--name")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--json", action="store_true")
@@ -709,8 +903,8 @@ def main(argv: list[str] | None = None) -> int:
         catalog = Path(os.path.relpath(args.catalog.resolve(), out.parent)).as_posix()
         if args.envsim_build:
             recipe, report = convert_build(args.envsim_build.resolve(), use_dem=not args.flat, catalog=catalog,
-                                           name=args.name, terrain_item=args.terrain,
-                                           recipe_path=None if args.no_visuals else out)
+                                           name=args.name, terrain_item=args.terrain, recipe_path=out,
+                                           visuals=not args.no_visuals, passthrough=not args.no_passthrough)
         else:
             if not args.center or not args.half_extent:
                 parser.error("--citygml needs --center and --half-extent")

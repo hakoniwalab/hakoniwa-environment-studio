@@ -70,14 +70,14 @@ types:
     extends: terrain
     label: 地形データ（DEM）
     description: >-
-      The terrain of a City World built by hakoniwa-envsim (its hfield from
-      PLATEAU DEM), relative to its lowest point; the environment's size
-      decides how much of it is used (the edge heights continue outside it).
+      The terrain of a City World built by hakoniwa-envsim: its own hfield,
+      grid and heights unchanged (relative to its lowest point), over the
+      area Envsim built it for; the generated MuJoCo world uses the same file.
     params:
       dem: {kind: text, label: 地形データ（terrain-receipt.json）, default: "", level: placement,
-            description: "Path to components/terrain/terrain-receipt.json of an Envsim build (absolute, or relative to the Recipe)."}
-      resolution_m: {kind: length, label: 格子の間隔, default: 1.0, min: 0.25, max: 10, level: item,
-                     description: Spacing of the height samples (coarser when the environment is large).}
+            description: "Path to the terrain-receipt.json of an Envsim build (absolute, or relative to the Recipe)."}
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: placement,
+               description: "The terrain's own GLB (Envsim's terrain.glb) shown instead of a mesh of the grid; absolute or relative to the Recipe."}
     terrain: {kind: hfield, generator: envsim, color: $color, friction: $friction}
 
   # --- Structures and obstacles ---------------------------------------------------
@@ -291,10 +291,35 @@ types:
       min_height_m: {kind: length, label: 下端の高さ, default: 0.0, min: 0, max: 499, level: placement,
                      description: "Where it starts above the ground: > 0 for a canopy (a roof on posts) or a bridge between buildings."}
       visual: {kind: text, label: 見た目（GLB）, default: "", level: placement,
-               description: "A GLB shown instead of the extruded footprint (its CityGML LOD2 look, textures included), in the part's frame; absolute or relative to the Recipe. Collisions stay the footprint."}
+               description: "A GLB shown instead of the extruded footprint (its CityGML LOD2 look, textures included), in the part's frame; absolute or relative to the Recipe."}
+      collision: {kind: text, label: 当たり判定（MJCF）, default: "", level: placement,
+                  description: "The building's own colliders (Envsim's P0-P3 geoms, as Envsim wrote them) used in the generated MuJoCo world instead of the extruded footprint; needs the object's anchor. The footprint still places it and checks overlaps."}
     shapes:
       - {name: body, primitive: prism, points: $footprint, h: $height_m - $min_height_m,
          z: ($height_m + $min_height_m) / 2}
+
+  # A layer of a City World as Envsim built it (its road network, road
+  # markings, bridges): its GLB (and colliders, when Envsim made some) passed
+  # through unchanged. The outlines only draw it on the plan; it collides with
+  # nothing of its own (Envsim's roads are the terrain).
+  - id: city_layer
+    extends: object
+    label: 街の層（envsim）
+    description: >-
+      A layer of an Envsim City World (for example its road network) used as
+      Envsim built it; outlines draw it on the plan.
+    id_prefix: layer
+    params:
+      color: {kind: color, label: 上面図の色, default: "#4a4d52", level: placement}
+      outlines: {kind: polygons, label: 外形, default: [[[-1, -1], [1, -1], [1, 1], [-1, 1]]], level: placement,
+                 description: "What it covers on the plan, [[[x, y], ...], ...] in the object's frame."}
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: placement,
+               description: "The layer's GLB (Envsim's, unchanged), in the object's frame; absolute or relative to the Recipe."}
+      collision: {kind: text, label: 当たり判定（MJCF）, default: "", level: placement,
+                  description: "The layer's colliders as Envsim wrote them (bridges), if any; needs the object's anchor."}
+    behavior: {layer: surface}
+    shapes:
+      - {name: area, primitive: prism, polygons: $outlines, h: 0.01, collide: false}
 
   # Posts at both ends (and the middle when long) carrying a rail.
   - id: guard_rail

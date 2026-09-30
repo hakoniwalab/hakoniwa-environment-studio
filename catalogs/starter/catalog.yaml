@@ -93,6 +93,10 @@ items:
     type: building_footprint
     name: 建物（外形・地図から）
 
+  - id: city-layer
+    type: city_layer
+    name: 街の層（envsim の道路網など）
+
   - id: stop-line
     type: road_marking
     name: 停止線

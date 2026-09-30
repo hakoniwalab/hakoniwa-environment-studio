@@ -39,10 +39,13 @@ TYPES_SCHEMA = "hakoniwa.environment-types/v1"
 DEFAULT_TYPES = Path(__file__).resolve().parents[1] / "types"
 ID_PATTERN = env_rules.ID_PATTERN
 COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
-PARAM_KINDS = {"length", "angle", "number", "integer", "color", "enum", "bool", "text", "polygon", "polyline"}
-UNITS = {"length": "m", "angle": "deg", "polygon": "m", "polyline": "m"}
+PARAM_KINDS = {"length", "angle", "number", "integer", "color", "enum", "bool", "text", "polygon", "polyline",
+               "polygons"}
+UNITS = {"length": "m", "angle": "deg", "polygon": "m", "polyline": "m", "polygons": "m"}
 # Points a polygon (footprint) or polyline (centre line) parameter may hold.
 MAX_POINTS = 2000
+# Polygons a "polygons" parameter may hold (a City World's road network outlines).
+MAX_POLYGONS = 20000
 LEVELS = ("type", "item", "placement")
 SURFACES = {"ground", "elevated"}
 PRIMITIVES = {"box", "cylinder", "wedge", "prism", "ribbon"}
@@ -53,12 +56,12 @@ TERRAIN_KINDS = {"flat", "hfield"}
 # Terrain generators the engine provides (env_terrain.py), with the parameter
 # names each one reads.
 TERRAIN_GENERATORS = {"flat": set(), "hills": {"max_height_m", "hills", "radius_m", "seed", "resolution_m"},
-                      "envsim": {"dem", "resolution_m"}}
+                      "envsim": {"dem", "visual"}}
 TYPE_KEYS = {"id", "label", "description", "abstract", "extends", "id_prefix", "params", "behavior", "shapes",
              "envelope", "terrain"}
 PARAM_KEYS = {"kind", "level", "label", "description", "unit", "default", "min", "max", "values"}
 SHAPE_KEYS = {"name", "primitive", "w", "d", "h", "x", "y", "z", "roll", "pitch", "yaw", "color", "collide",
-              "visible", "when", "points"}
+              "visible", "when", "points", "polygons"}
 BEHAVIOR_KEYS = {"surface", "snap", "friction", "layer"}
 # Largest size or position accepted, in metres (a sanity bound).
 MAX_M = 100_000.0
@@ -203,6 +206,17 @@ _CACHE_SIZE = 20000
 _POINTS_CACHE: dict = {}
 
 
+def _polygons(value, path: str) -> list[list[list[float]]]:
+    """Several outlines (a "polygons" parameter), each a polygon as _points checks it."""
+    if not isinstance(value, list) or not value:
+        raise fail(path, "wrong_type", "must be a non-empty list of polygons", expected="[[[x, y], ...], ...]",
+                   actual=value if not isinstance(value, list) else [])
+    if len(value) > MAX_POLYGONS:
+        raise fail(path, "out_of_range", f"at most {MAX_POLYGONS} polygons", expected=f"<= {MAX_POLYGONS}",
+                   actual=len(value))
+    return [_points("polygon", polygon, f"{path}[{index}]") for index, polygon in enumerate(value)]
+
+
 def _points_checked(kind: str, value, path: str) -> list[list[float]]:
     closed = kind == "polygon"
     need = 3 if closed else 2
@@ -266,6 +280,8 @@ class Param:
                 raise fail(path, "wrong_type", "must be text", expected="text", actual=value)
         elif self.kind in ("polygon", "polyline"):
             return _points(self.kind, value, path)
+        elif self.kind == "polygons":
+            return _polygons(value, path)
         if self.values is not None and value not in self.values:
             raise fail(path, "not_one_of", "must be one of the choices", expected=list(self.values), actual=value)
         if self.min is not None and value < self.min:
@@ -596,8 +612,8 @@ def _compiled(env_type: EnvType, where: str) -> EnvType:
         path = f"{where}.shapes[{index}]"
         shape = mapping(shape, path)
         only(shape, SHAPE_KEYS, path)
-        # A prism takes points and h; a ribbon points, w and h; the others w, d and h.
-        for key in ("primitive", "h", *(("w", "d") if "points" not in shape else ())):
+        # A prism takes points (or polygons) and h; a ribbon points, w and h; the others w, d and h.
+        for key in ("primitive", "h", *(("w", "d") if "points" not in shape and "polygons" not in shape else ())):
             if key not in shape:
                 raise fail(f"{path}.{key}", "missing_field", f"a shape needs {key}")
         shapes.append({key: compiled(value, f"{path}.{key}") for key, value in shape.items()})
@@ -716,6 +732,16 @@ def _resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
         common = {"color": color.lower(),
                   "collide": bool(evaluate(shape.get("collide", True), params, f"{where}.collide")),
                   "visible": bool(evaluate(shape.get("visible", True), params, f"{where}.visible"))}
+        if primitive == "prism" and "polygons" in shape:  # one prism per outline: <name>-1, <name>-2, ...
+            if any(number(key) for key in ("roll", "pitch", "yaw")):
+                raise fail(where, "invalid_shape", "a prism is not tilted or turned (its points are)")
+            height = size("h")
+            z = number("z", height / 2)
+            outlines = _polygons(evaluate(shape["polygons"], params, f"{where}.polygons"), f"{where}.polygons")
+            for number_, outline in enumerate(outlines, 1):
+                solids += _prism_solids(f"{name}-{number_}", [tuple(point) for point in outline],
+                                        number("x"), number("y"), z, height, common)
+            continue
         if primitive in ("prism", "ribbon"):
             if "points" not in shape:
                 raise fail(f"{where}.points", "missing_field", f"a {primitive} needs points")

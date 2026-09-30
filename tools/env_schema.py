@@ -37,7 +37,13 @@ MAX_SIZE_M = 10_000.0
 CIRCLE_SEGMENTS = env_rules.CIRCLE_SEGMENTS
 ITEM_KEYS = {"id", "type", "extends", "name", "description", "category", "params", "source", "assumed"}
 RECIPE_KEYS = {"schema", "name", "description", "catalog", "size_m", "terrain", "objects", "geo"}
-OBJECT_KEYS = {"id", "item", "pose", "params", "source"}
+OBJECT_KEYS = {"id", "item", "pose", "params", "source", "anchor"}
+# Where an object's assets (its visual GLB, its colliders) were made for: the
+# pose it had then and the height of its frame (Envsim's z), and the terrain
+# (sha256 of Envsim's hfield) that height belongs to. While the object stays
+# at its anchor on that terrain, the assets are used exactly where they were
+# made; moved, they move with it (see env_generate.asset_frame).
+ANCHOR_KEYS = {"x_m", "y_m", "z_m", "yaw_deg", "terrain"}
 # Provenance of a Recipe made from map data (#10): where its origin is on the
 # Earth and where the data came from. Kept as it is; it does not change the world.
 GEO_KEYS = {"provider", "origin", "bbox_deg", "projection", "attribution", "license", "data_timestamp", "query"}
@@ -103,6 +109,11 @@ class EnvObject:
     # the generated GLB shows instead of the solids; collisions stay the solids.
     visual: Path | None = None
     visual_sha256: str | None = None
+    # Its own colliders (Envsim's MJCF for it), used instead of the solids in
+    # the generated world; the solids still place it and check overlaps.
+    collision: Path | None = None
+    collision_sha256: str | None = None
+    anchor: dict | None = None
 
     @property
     def solids(self):
@@ -148,6 +159,44 @@ def _source(value, path: str) -> dict:
     if "tags" in value:
         source["tags"] = _scalar_tags(value["tags"], f"{path}.tags")
     return source
+
+
+def _anchor(value, path: str) -> dict:
+    value = mapping(value, path)
+    only(value, ANCHOR_KEYS, path)
+    anchor = {}
+    for key in ("x_m", "y_m", "z_m", "yaw_deg"):
+        number = value.get(key, 0.0 if key == "yaw_deg" else None)
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+            raise fail(f"{path}.{key}", "wrong_type", "must be a number", expected="number", actual=number)
+        anchor[key] = float(number)
+    if "terrain" in value:
+        if not isinstance(value["terrain"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["terrain"]):
+            raise fail(f"{path}.terrain", "wrong_type", "the sha256 of the terrain's hfield", expected="64 hex digits",
+                       actual=value["terrain"])
+        anchor["terrain"] = value["terrain"]
+    return anchor
+
+
+def _asset(params: dict, name: str, path: str, base_dir: Path | None, kind: str) -> tuple[Path | None, str | None]:
+    """(file, sha256) of an asset parameter (a GLB or an MJCF fragment), or (None, None)."""
+    text = str(params.get(name) or "").strip()
+    if not text:
+        return None, None
+    import hashlib
+
+    asset = Path(text).expanduser()
+    if not asset.is_absolute() and base_dir is not None:
+        asset = (base_dir / asset).resolve()
+    try:
+        data = asset.read_bytes()
+    except OSError as exc:
+        raise fail(f"{path}.params.{name}", "unknown_reference", f"cannot read the {kind} asset: {exc}", actual=text) from exc
+    if kind == "GLB" and data[:4] != b"glTF":
+        raise fail(f"{path}.params.{name}", "wrong_type", "a visual asset is a GLB file", actual=text)
+    if kind == "MJCF" and b"<mujoco" not in data[:512]:
+        raise fail(f"{path}.params.{name}", "wrong_type", "a collision asset is a MuJoCo (MJCF) file", actual=text)
+    return asset, hashlib.sha256(data).hexdigest()
 
 
 def _geo(value, path: str) -> dict:
@@ -382,25 +431,17 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
         yaw = 0
     resolved = problems.check(resolve_placement, item, value.get("params", {}), f"{path}.params")
     source = problems.check(_source, value["source"], f"{path}.source") if "source" in value else None
+    anchor = problems.check(_anchor, value["anchor"], f"{path}.anchor") if "anchor" in value else None
     problems.raise_if_errors()
     params, shape = resolved
-    visual = visual_sha = None
-    if str(params.get("visual") or "").strip():
-        visual = Path(str(params["visual"])).expanduser()
-        if not visual.is_absolute() and base_dir is not None:
-            visual = (base_dir / visual).resolve()
-        try:
-            data = visual.read_bytes()
-        except OSError as exc:
-            raise fail(f"{path}.params.visual", "unknown_reference", f"cannot read the visual asset: {exc}",
-                       actual=str(params["visual"])) from exc
-        if data[:4] != b"glTF":
-            raise fail(f"{path}.params.visual", "wrong_type", "a visual asset is a GLB file", actual=str(params["visual"]))
-        import hashlib
-
-        visual_sha = hashlib.sha256(data).hexdigest()
+    visual, visual_sha = _asset(params, "visual", path, base_dir, "GLB")
+    collision, collision_sha = _asset(params, "collision", path, base_dir, "MJCF")
+    if collision is not None and anchor is None:
+        raise fail(f"{path}.params.collision", "missing_field",
+                   "colliders are placed from the object's anchor (where they were made for)", expected="anchor")
     obj = EnvObject(id=object_id, item=item.id, type=item.type.id, pose=Pose(x, y, 0.0, float(yaw) % 360.0),
-                    params=params, shape=shape, source=source, visual=visual, visual_sha256=visual_sha)
+                    params=params, shape=shape, source=source, visual=visual, visual_sha256=visual_sha,
+                    collision=collision, collision_sha256=collision_sha, anchor=anchor)
     # Set on the terrain: its base at the highest ground under its outline
     # (plus its own height above the terrain when elevated). On a height field
     # it keeps HFIELD_CLEARANCE_M above that: the sampled height (bilinear,
@@ -564,6 +605,8 @@ def resolved_json(recipe: Recipe) -> dict:
             "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
             "params": obj.params, **obj.shape.as_json(), **({"source": obj.source} if obj.source else {}),
             **({"visual_sha256": obj.visual_sha256} if obj.visual_sha256 else {}),
+            **({"collision_sha256": obj.collision_sha256} if obj.collision_sha256 else {}),
+            **({"anchor": obj.anchor} if obj.anchor else {}),
         } for obj in recipe.objects],
         **({"geo": recipe.geo} if recipe.geo else {}),
     }

@@ -20,6 +20,14 @@ whose top is z = 0 for flat ground).
 environment_mjcf(validation=True) gives the world env_validate.py checks:
 objects become free bodies (MuJoCo does not collide bodies fixed to the world)
 and fixed boundary boxes stand just outside the environment's edges.
+
+Assets made elsewhere are passed through unchanged (a City World imported
+from hakoniwa-envsim keeps Envsim's accuracy): an Envsim terrain is its own
+hfield file and GLB; an object's `visual` GLB and `collision` MJCF (Envsim's
+P0-P3 geoms for a building) are placed by asset_frame(): exactly where they
+were made while the object stays at its anchor, moved with it otherwise. An
+object with its own colliders has them instead of its solids in the world
+(env_validate still checks the solids, which place it).
 """
 
 from __future__ import annotations
@@ -184,11 +192,12 @@ def terrain_mesh(terrain: env_terrain.Terrain):
         positions, normals, indices = _box_mesh(terrain.size_east_m, terrain.size_north_m, 0.02)
         return [(x, y, z - 0.01) for x, y, z in positions], normals, indices
     nrow, ncol, heights = terrain.nrow, terrain.ncol, terrain.heights
-    dx, dy = terrain.size_east_m / (ncol - 1), terrain.size_north_m / (nrow - 1)
+    half_e, half_n = terrain.grid_half_east, terrain.grid_half_north
+    dx, dy = 2 * half_e / (ncol - 1), 2 * half_n / (nrow - 1)
     positions, normals, indices = [], [], []
     for row in range(nrow):
         for col in range(ncol):
-            positions.append((-terrain.half_east + col * dx, terrain.half_north - row * dy, heights[row][col]))
+            positions.append((-half_e + col * dx, half_n - row * dy, heights[row][col]))
             # Normal from central differences (rows run south).
             hx = (heights[row][min(col + 1, ncol - 1)] - heights[row][max(col - 1, 0)]) / (
                 dx * (min(col + 1, ncol - 1) - max(col - 1, 0)))
@@ -309,9 +318,9 @@ class _GlbBuilder:
             self.gltf["accessors"].append({"bufferView": self._view(chunk, view.get("target")), **copied})
             return len(self.gltf["accessors"]) - 1
 
-        def material(index: int | None) -> int:
-            if index is None:
-                return self.material("#c9c3b6")
+        def material(index: int | None, colored: bool) -> int:
+            if index is None:  # vertex colours (Envsim's terrain and roads) show as they are on white
+                return self.material("#ffffff" if colored else "#c9c3b6")
             source = document["materials"][index]
             texture = source.get("pbrMetallicRoughness", {}).get("baseColorTexture")
             if texture is not None:
@@ -328,11 +337,15 @@ class _GlbBuilder:
         primitives = []
         for mesh in document.get("meshes", []):
             for primitive in mesh["primitives"]:
-                primitives.append({
+                copied = {
                     "attributes": {name: accessor(index) for name, index in sorted(primitive["attributes"].items())},
-                    "indices": accessor(primitive["indices"]),
-                    "material": material(primitive.get("material")),
-                })
+                    "material": material(primitive.get("material"), "COLOR_0" in primitive["attributes"]),
+                }
+                if "indices" in primitive:
+                    copied["indices"] = accessor(primitive["indices"])
+                if "mode" in primitive:
+                    copied["mode"] = primitive["mode"]
+                primitives.append(copied)
         return primitives
 
     def _primitive(self, mesh, color: str) -> dict:
@@ -395,15 +408,55 @@ def read_glb(data: bytes) -> tuple[dict, bytes]:
     return document, binary
 
 
+# --- Assets made elsewhere -------------------------------------------------------------
+
+def _unmoved(obj: env_schema.EnvObject) -> bool:
+    anchor = obj.anchor
+    return (abs(obj.pose.x_m - anchor["x_m"]) < 1e-9 and abs(obj.pose.y_m - anchor["y_m"]) < 1e-9
+            and abs((obj.pose.yaw_deg - anchor["yaw_deg"] + 180.0) % 360.0 - 180.0) < 1e-9)
+
+
+def asset_frame(recipe: env_schema.Recipe, obj: env_schema.EnvObject) -> tuple[float, float, float, float]:
+    """(x, y, z, yaw) in the environment of the frame an object's assets were
+    made in (its visual GLB, its colliders).
+
+    Without an anchor it is the object's pose. With one, and on the terrain
+    the anchor names (the same Envsim hfield), the assets stay exactly where
+    they were made while the object stays at its anchor: z is the anchor's
+    (Envsim's height of that frame). Moved, they turn and move with it and
+    rise or sink by how much the ground under its outline differs between
+    the anchor and the new place. On another terrain (a flat ground chosen
+    instead), the frame stands on the ground under the object."""
+    pose, anchor = obj.pose, obj.anchor
+    if anchor is None:
+        return pose.x_m, pose.y_m, pose.z_m, pose.yaw_deg
+    yaw = pose.yaw_deg - anchor["yaw_deg"]
+    hfield = recipe.terrain.hfield
+    if not (anchor.get("terrain") and hfield and hfield["sha256"] == anchor["terrain"]):
+        return pose.x_m, pose.y_m, pose.z_m, yaw
+    if _unmoved(obj):
+        return anchor["x_m"], anchor["y_m"], anchor["z_m"], 0.0
+    at_anchor = env_schema.replace(obj, pose=env_schema.Pose(anchor["x_m"], anchor["y_m"], 0.0, anchor["yaw_deg"]))
+    rise = (recipe.terrain.highest_under(env_schema.footprint(obj))
+            - recipe.terrain.highest_under(env_schema.footprint(at_anchor)))
+    return pose.x_m, pose.y_m, anchor["z_m"] + rise, yaw
+
+
 def environment_glb(recipe: env_schema.Recipe) -> bytes:
     builder = _GlbBuilder()
-    builder.node(TERRAIN_GEOM, [(terrain_mesh(recipe.terrain), recipe.terrain.color)], (0.0, 0.0, 0.0), 0.0,
-                 {"terrain": recipe.terrain_item, "kind": recipe.terrain.kind})
+    terrain = recipe.terrain
+    extras = {"terrain": recipe.terrain_item, "kind": terrain.kind}
+    if terrain.visual is not None:  # Envsim's own terrain GLB, as it is
+        builder.node(TERRAIN_GEOM, None, (0.0, 0.0, 0.0), 0.0, {**extras, "visual": terrain.visual.name},
+                     primitives=builder.asset_primitives(terrain.visual.read_bytes()))
+    else:
+        builder.node(TERRAIN_GEOM, [(terrain_mesh(terrain), terrain.color)], (0.0, 0.0, 0.0), 0.0, extras)
     for obj in recipe.objects:
         extras = {"object": obj.id, "item": obj.item, "type": obj.type}
         placement = ((obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m), obj.pose.yaw_deg)
-        if obj.visual is not None:  # its LOD2 look (textures included) instead of the solids
-            builder.node(obj.id, None, *placement, {**extras, "visual": obj.visual.name},
+        if obj.visual is not None:  # its own look (LOD2 with textures, an Envsim layer) instead of the solids
+            x, y, z, yaw = asset_frame(recipe, obj)
+            builder.node(obj.id, None, (x, z, -y), yaw, {**extras, "visual": obj.visual.name},
                          primitives=builder.asset_primitives(obj.visual.read_bytes()))
             continue
         pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
@@ -413,9 +466,21 @@ def environment_glb(recipe: env_schema.Recipe) -> bytes:
 
 # --- MuJoCo -------------------------------------------------------------------------
 
-def _terrain_geom(root: ET.Element, world: ET.Element, terrain: env_terrain.Terrain) -> None:
+# Envsim's MuJoCo frame (x north, y west) turned into this one (x east, y north): +90 degrees about z.
+ENVSIM_FRAME_QUAT = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
+
+
+def _terrain_geom(root: ET.Element, world: ET.Element, terrain: env_terrain.Terrain,
+                  hfield_file: str | None = None) -> None:
     rgba = _numbers((*hex_rgb(terrain.color), 1.0))
     friction = _numbers((terrain.friction, 0.005, 0.0001))
+    if terrain.hfield:  # Envsim's hfield file itself, in its frame
+        ET.SubElement(root.find("asset"), "hfield", {
+            "name": "terrain", "file": hfield_file or terrain.hfield["path"],
+            "size": " ".join(repr(float(value)) for value in terrain.hfield["size"])})
+        ET.SubElement(world, "geom", {"name": TERRAIN_GEOM, "type": "hfield", "hfield": "terrain", "pos": "0 0 0",
+                                      "quat": _numbers(ENVSIM_FRAME_QUAT), "rgba": rgba, "friction": friction})
+        return
     if terrain.kind == "hfield":
         flat = [h for row in terrain.heights for h in row]
         low, high = min(flat), max(flat)
@@ -453,8 +518,86 @@ def _add_boundaries(world: ET.Element, half_east: float, half_north: float, top_
                                       "pos": _numbers((*centre, h / 2 - 50.0)), "size": _numbers((*half, h / 2))})
 
 
-def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False) -> str:
-    """The MuJoCo world: the terrain and each object's solids (see the module doc)."""
+_FRAGMENTS: dict = {}
+
+
+def _fragment(obj: env_schema.EnvObject) -> tuple[list, list]:
+    """(asset children, worldbody children) of an object's collision MJCF,
+    read once per content."""
+    key = obj.collision_sha256
+    if key not in _FRAGMENTS:
+        if len(_FRAGMENTS) > 4096:
+            _FRAGMENTS.clear()
+        root = ET.parse(obj.collision).getroot()
+        _FRAGMENTS[key] = (list(root.find("asset") if root.find("asset") is not None else []),
+                           list(root.find("worldbody") if root.find("worldbody") is not None else []))
+    return _FRAGMENTS[key]
+
+
+def euler_quaternion(degrees, sequence: str = "xyz") -> tuple[float, float, float, float]:
+    """MuJoCo's euler (degrees, its default eulerseq "xyz"): lower-case axes
+    turn with the frame (each rotation multiplied on the right), upper-case
+    axes stay fixed (on the left)."""
+    q = (1.0, 0.0, 0.0, 0.0)
+    for angle, axis in zip(degrees, sequence):
+        half = math.radians(angle) / 2
+        c, s = math.cos(half), math.sin(half)
+        r = (c, s if axis in "xX" else 0.0, s if axis in "yY" else 0.0, s if axis in "zZ" else 0.0)
+        q = _qmul(q, r) if axis.islower() else _qmul(r, q)
+    return q
+
+
+def _qmul(a, b):
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return (aw * bw - ax * bx - ay * by - az * bz, aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw)
+
+
+# Attributes of an Envsim fragment that name something (made unique per object).
+_NAMED = ("name", "mesh", "material", "texture", "hfield", "class", "childclass")
+
+
+def _copied(element: ET.Element, prefix: str) -> ET.Element:
+    """A fragment element for this world: names prefixed with the object's id
+    (a building copied twice stays two), euler degrees as a quaternion (this
+    world compiles angles in radians); every number else as Envsim wrote it."""
+    copy = ET.Element(element.tag, dict(element.attrib))
+    for key in _NAMED:
+        if key in copy.attrib:
+            copy.set(key, f"{prefix}/{copy.get(key)}")
+    if "euler" in copy.attrib:
+        copy.set("quat", " ".join(repr(value) for value in euler_quaternion(
+            [float(value) for value in copy.attrib.pop("euler").split()])))
+    if "axisangle" in copy.attrib:
+        x, y, z, angle = (float(value) for value in copy.get("axisangle").split())
+        copy.set("axisangle", " ".join(repr(value) for value in (x, y, z, math.radians(angle))))
+    for child in element:
+        copy.append(_copied(child, prefix))
+    return copy
+
+
+def _add_collision(asset: ET.Element, world: ET.Element, recipe: env_schema.Recipe, obj: env_schema.EnvObject) -> None:
+    """An object's own colliders: Envsim's geoms as written (in Envsim's frame),
+    carried from the anchor's frame to asset_frame()."""
+    x, y, z, yaw = asset_frame(recipe, obj)
+    anchor = obj.anchor
+    body = ET.SubElement(world, "body", {"name": BODY_PREFIX + obj.id, "pos": _numbers((x, y, z)),
+                                         "quat": _numbers(quaternion(0, 0, yaw))})
+    frame = ET.SubElement(body, "body", {"name": f"{obj.id}/envsim-frame",
+                                         "pos": _numbers((-anchor["x_m"], -anchor["y_m"], -anchor["z_m"])),
+                                         "quat": _numbers(ENVSIM_FRAME_QUAT)})
+    assets, bodies = _fragment(obj)
+    for element in assets:
+        asset.append(_copied(element, obj.id))
+    for element in bodies:
+        frame.append(_copied(element, obj.id))
+
+
+def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfield_file: str | None = None) -> str:
+    """The MuJoCo world: the terrain and each object's solids (see the module
+    doc). `hfield_file` is how the world names an Envsim terrain's hfield
+    file (by default its absolute path)."""
     root = ET.Element("mujoco", {"model": f"environment-{recipe.path.stem}"})
     ET.SubElement(root, "compiler", {"angle": "radian"})  # every rotation is written as a quaternion
     ET.SubElement(root, "option", {"gravity": "0 0 0" if validation else "0 0 -9.81"})
@@ -463,11 +606,14 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False) -> 
     asset = ET.SubElement(root, "asset")
     world = ET.SubElement(root, "worldbody")
     ET.SubElement(world, "light", {"name": "sun", "directional": "true", "pos": "0 0 50", "dir": "-0.3 0.2 -1"})
-    _terrain_geom(root, world, recipe.terrain)
+    _terrain_geom(root, world, recipe.terrain, hfield_file)
     if validation:
         top = max([recipe.terrain.max_height_m] + [obj.pose.z_m + obj.shape.height_m for obj in recipe.objects])
         _add_boundaries(world, recipe.terrain.half_east, recipe.terrain.half_north, top)
     for obj in recipe.objects:
+        if obj.collision is not None and not validation:
+            _add_collision(asset, world, recipe, obj)
+            continue
         body = ET.SubElement(world, "body", {
             "name": BODY_PREFIX + obj.id, "pos": _numbers((obj.pose.x_m, obj.pose.y_m, obj.pose.z_m)),
             "quat": _numbers(quaternion(0, 0, obj.pose.yaw_deg)),
@@ -478,8 +624,8 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False) -> 
             ET.SubElement(body, "inertial", {"pos": "0 0 0", "mass": "1", "diaginertia": "1 1 1"})
         friction = _numbers((obj.shape.friction, 0.005, 0.0001))
         for solid in obj.solids:
-            if validation and not solid.collide:
-                continue
+            if (validation or obj.visual is not None) and not solid.collide:
+                continue  # its GLB is its look (a layer's outlines only draw it on the plan)
             attributes = {"name": geom_name(obj.id, solid.name), "rgba": _numbers((*hex_rgb(solid.color), 1.0)),
                           "pos": _numbers((solid.x_m, solid.y_m, solid.z_m)),
                           "quat": _numbers(quaternion(solid.roll_deg, solid.pitch_deg, solid.yaw_deg)),
@@ -543,7 +689,13 @@ def generate(recipe: env_schema.Recipe, out_dir: Path) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = {"glb": out_dir / "environment.glb", "mjcf": out_dir / "environment.xml", "manifest": out_dir / "environment.json"}
     paths["glb"].write_bytes(environment_glb(recipe))
-    paths["mjcf"].write_text(environment_mjcf(recipe), encoding="utf-8")
+    hfield_file = None
+    if recipe.terrain.hfield:  # the world loads Envsim's hfield file itself, copied beside it
+        source = Path(recipe.terrain.hfield["path"])
+        paths["hfield"] = out_dir / "environment-terrain.hf"
+        paths["hfield"].write_bytes(source.read_bytes())
+        hfield_file = paths["hfield"].name
+    paths["mjcf"].write_text(environment_mjcf(recipe, hfield_file=hfield_file), encoding="utf-8")
     files = {kind: {"path": paths[kind].name, "sha256": hashlib.sha256(paths[kind].read_bytes()).hexdigest()}
              for kind in ("glb", "mjcf")}
     paths["manifest"].write_text(json.dumps(manifest(recipe, files), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

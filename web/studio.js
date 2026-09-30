@@ -353,7 +353,7 @@ async function refreshTerrain() {
   try {
     const ground = await api("POST", "terrain", { catalog_id: state.catalogId, terrain, size_m: size });
     if (state.terrain.key !== key) return;
-    state.terrain.image = { href: terrainImage(ground) };
+    state.terrain.image = { href: terrainImage(ground), grid: ground.grid_m }; // an Envsim terrain covers its own area
     render({ live: true });
   } catch (error) {
     setStatus(error.message, "error");
@@ -514,6 +514,25 @@ function deleteSelected() {
   render();
 }
 
+// A City World layer (Envsim's road network) into road parts one can edit
+// one by one: flat surfaces on the ground instead of Envsim's look (one undo step).
+async function explodeLayer(obj) {
+  if (!window.confirm(`「${obj.id}」を個別の道路部品に分解しますか？\n`
+    + "envsim の見た目（地形に沿った道路）の代わりに、1 本ずつ編集できる平らな道路（面）を地面に置きます。")) return;
+  try {
+    const { objects } = await api("POST", "explode", { ...recipeBody(), object: obj.id });
+    await catalog.prime(objects);
+    const index = recipe().objects.findIndex((entry) => entry.id === obj.id);
+    if (index < 0) return;
+    recipe().objects.splice(index, 1, ...objects);
+    state.selection = [];
+    render();
+    setStatus(`${obj.id} を ${objects.length} 個の道路部品にしました`, "ok");
+  } catch (error) {
+    setStatus(`${obj.id} を分解できません: ${error.message}`, "error");
+  }
+}
+
 function duplicateSelected() {
   const chosen = selectedObjects();
   if (!chosen.length) return;
@@ -649,10 +668,13 @@ async function saveRecipe() {
   recipe().name = $("#recipe-name").value.trim() || id;
   try {
     const saved = await api("PUT", `recipes/${id}`, recipeBody());
-    // Saved under a new ID, the Recipe got its own copies of the visual GLBs.
-    for (const [objectId, path] of Object.entries(saved.visuals || {})) {
+    // Saved under a new ID, the Recipe got its own copies of its assets (GLBs, colliders, terrain files).
+    for (const [objectId, params] of Object.entries(saved.assets?.objects || {})) {
       const obj = objectById(objectId);
-      if (obj) obj.params = { ...obj.params, visual: path };
+      if (obj) obj.params = { ...obj.params, ...params };
+    }
+    if (Object.keys(saved.assets?.terrain || {}).length) {
+      recipe().terrain = { ...recipe().terrain, params: { ...recipe().terrain.params, ...saved.assets.terrain } };
     }
     state.current.id = id;
     state.current.editable = true;
@@ -660,7 +682,7 @@ async function saveRecipe() {
     state.saved = snapshot();
     await loadRecipes();
     render();
-    setStatus(`保存しました（${saved.path}${saved.copied_visuals ? `・見た目 ${saved.copied_visuals} 件をコピー` : ""}）`, "ok");
+    setStatus(`保存しました（${saved.path}${saved.copied_assets ? `・資産 ${saved.copied_assets} 件をコピー` : ""}）`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -684,6 +706,7 @@ const inspector = createInspector($("#inspector"), {
   rename: (obj, id) => renameObject(obj, id),
   duplicate: () => duplicateSelected(),
   remove: () => deleteSelected(),
+  explode: (obj) => explodeLayer(obj),
   slide: (direction) => slideSelected(direction),
   move: (dx, dy) => moveSelected(dx, dy),
   applyPoses: (poses) => applyPoses(poses),

@@ -38,6 +38,16 @@ class Terrain:
     ncol: int = 0
     heights: tuple[tuple[float, ...], ...] = ()  # metres, rows north to south
     max_height_m: float = 0.0
+    # The area the grid covers, centred on the origin, when it is not the whole
+    # environment (an Envsim terrain covers the area Envsim built it for; a
+    # building reaching past it widens the environment, not the grid).
+    grid_east_m: float = 0.0
+    grid_north_m: float = 0.0
+    # An Envsim terrain: its hfield as MuJoCo loads it ({path, sha256, size,
+    # nrow, ncol}), so the generated world uses the file itself; and its GLB.
+    hfield: dict | None = None
+    visual: Path | None = None
+    visual_sha256: str | None = None
 
     @property
     def half_east(self) -> float:
@@ -47,14 +57,23 @@ class Terrain:
     def half_north(self) -> float:
         return self.size_north_m / 2
 
+    @property
+    def grid_half_east(self) -> float:
+        return (self.grid_east_m or self.size_east_m) / 2
+
+    @property
+    def grid_half_north(self) -> float:
+        return (self.grid_north_m or self.size_north_m) / 2
+
     def height_at(self, x: float, y: float) -> float:
-        """The ground height under (x, y); bilinear between grid points, 0 outside."""
+        """The ground height under (x, y); bilinear between grid points; beyond
+        the grid (an environment wider than an Envsim terrain) its edge continues."""
         if self.kind != "hfield":
             return 0.0
-        if abs(x) > self.half_east or abs(y) > self.half_north:
-            return 0.0
-        col = (x + self.half_east) / self.size_east_m * (self.ncol - 1)
-        row = (self.half_north - y) / self.size_north_m * (self.nrow - 1)
+        half_e, half_n = self.grid_half_east, self.grid_half_north
+        x, y = min(max(x, -half_e), half_e), min(max(y, -half_n), half_n)
+        col = (x + half_e) / (2 * half_e) * (self.ncol - 1)
+        row = (half_n - y) / (2 * half_n) * (self.nrow - 1)
         c0, r0 = min(int(col), self.ncol - 2), min(int(row), self.nrow - 2)
         fc, fr = col - c0, row - r0
         h = self.heights
@@ -77,7 +96,7 @@ class Terrain:
         if _UNDER.get("heights") is not self.heights:
             _UNDER.clear()
             _UNDER["heights"] = self.heights
-        key = (heights_id, self.size_east_m, self.size_north_m, tuple(polygon))
+        key = (heights_id, self.grid_half_east, self.grid_half_north, tuple(polygon))
         if key not in _UNDER:
             if len(_UNDER) > 100_000:
                 _UNDER.clear()
@@ -88,36 +107,45 @@ class Terrain:
     def _highest_under(self, polygon: list[tuple[float, float]]) -> float:
         import env_polygon
 
-        dx = self.size_east_m / (self.ncol - 1)
-        dy = self.size_north_m / (self.nrow - 1)
+        half_e, half_n = self.grid_half_east, self.grid_half_north
+        dx = 2 * half_e / (self.ncol - 1)
+        dy = 2 * half_n / (self.nrow - 1)
         xs, ys = [x for x, _ in polygon], [y for _, y in polygon]
-        c_lo = max(0, math.floor((min(xs) + self.half_east) / dx))
-        c_hi = min(self.ncol - 2, math.floor((max(xs) + self.half_east) / dx))
-        r_lo = max(0, math.floor((self.half_north - max(ys)) / dy))
-        r_hi = min(self.nrow - 2, math.floor((self.half_north - min(ys)) / dy))
+        c_lo = max(0, math.floor((min(xs) + half_e) / dx))
+        c_hi = min(self.ncol - 2, math.floor((max(xs) + half_e) / dx))
+        r_lo = max(0, math.floor((half_n - max(ys)) / dy))
+        r_hi = min(self.nrow - 2, math.floor((half_n - min(ys)) / dy))
         convex = env_polygon.counter_clockwise(list(polygon))
         best = None
         h = self.heights
         for row in range(r_lo, r_hi + 1):
-            north_top = self.half_north - row * dy
+            north_top = half_n - row * dy
             for col in range(c_lo, c_hi + 1):
-                west = -self.half_east + col * dx
+                west = -half_e + col * dx
                 cell = [(west, north_top - dy), (west + dx, north_top - dy), (west + dx, north_top), (west, north_top)]
                 if not env_polygon.convex_overlap(cell, convex, tolerance=0.0) and not _inside(convex, cell[0]):
                     continue
                 top = max(h[row][col], h[row][col + 1], h[row + 1][col], h[row + 1][col + 1])
                 best = top if best is None else max(best, top)
-        if best is None:  # outside the grid: the ground continues at 0
-            return 0.0
+        if best is None:  # wholly beyond the grid: its nearest edge continues
+            h = self.heights
+            best = max(max(h[row][col], h[row][col + 1], h[row + 1][col], h[row + 1][col + 1])
+                       for row in range(min(r_lo, self.nrow - 2), max(r_hi, 0) + 1)
+                       for col in range(min(c_lo, self.ncol - 2), max(c_hi, 0) + 1))
         return best
 
     def as_json(self, with_heights: bool = True) -> dict:
         data = {"kind": self.kind, "color": self.color, "friction": self.friction,
                 "size_m": {"east": self.size_east_m, "north": self.size_north_m}}
         if self.kind == "hfield":
-            data.update(nrow=self.nrow, ncol=self.ncol, max_height_m=self.max_height_m)
+            data.update(nrow=self.nrow, ncol=self.ncol, max_height_m=self.max_height_m,
+                        grid_m={"east": 2 * self.grid_half_east, "north": 2 * self.grid_half_north})
+            if self.hfield:
+                data["hfield_sha256"] = self.hfield["sha256"]
             if with_heights:
                 data["heights"] = [list(row) for row in self.heights]
+        if self.visual_sha256:
+            data["visual_sha256"] = self.visual_sha256
         return data
 
 
@@ -170,13 +198,12 @@ def _hills(params: dict, size_east: float, size_north: float, path: str) -> tupl
     return nrow, ncol, heights
 
 
-def _envsim_dem(params: dict, size_east: float, size_north: float, path: str,
-                base_dir: Path | None) -> tuple[int, int, list[list[float]]]:
-    """The ground of a City World that hakoniwa-envsim built (its terrain
-    hfield, from PLATEAU DEM): `dem` names its terrain-receipt.json (absolute,
-    or relative to the Recipe). Sampled with Envsim's own reader every
-    `resolution_m` (coarser when the grid would exceed MAX_GRID), relative to
-    its lowest point; outside the DEM the edge heights continue."""
+def _envsim_terrain(params: dict, base: dict, path: str, base_dir: Path | None) -> "Terrain":
+    """The ground of a City World that hakoniwa-envsim built: `dem` names its
+    terrain-receipt.json (absolute, or relative to the Recipe). Its hfield is
+    used as it is: the same grid over the area Envsim built it for, heights
+    as MuJoCo computes them from the file (relative to its lowest point), so
+    the generated world can load the file itself. `visual` is its GLB."""
     text = str(params.get("dem") or "").strip()
     if not text:
         raise fail(f"{path}.dem", "missing_field", "the terrain-receipt.json of an Envsim City World",
@@ -190,43 +217,78 @@ def _envsim_dem(params: dict, size_east: float, size_north: float, path: str,
         if not hfield.is_absolute():
             hfield = receipt_path.parent / hfield
         data = hfield.read_bytes()
-    except (OSError, ValueError, KeyError) as exc:
+        ns_m, ew_m = float(receipt["half_extent_m"]["north_south"]), float(receipt["half_extent_m"]["east_west"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise fail(f"{path}.dem", "unknown_reference", f"cannot read the Envsim terrain: {exc}", actual=text) from exc
-    if receipt["hfield"].get("sha256") and hashlib.sha256(data).hexdigest() != receipt["hfield"]["sha256"]:
+    sha = hashlib.sha256(data).hexdigest()
+    if receipt["hfield"].get("sha256") and sha != receipt["hfield"]["sha256"]:
         raise fail(f"{path}.dem", "invalid_shape", "the hfield file differs from its receipt (sha256)", actual=str(hfield))
-    ns_m, ew_m = float(receipt["half_extent_m"]["north_south"]), float(receipt["half_extent_m"]["east_west"])
-    resolution = max(float(params.get("resolution_m", 1.0)), max(size_east, size_north) / (MAX_GRID - 1))
-    nrow, ncol = _grid(size_east, size_north, resolution, path)
-    # Sampling is slow (one Envsim call per point) and every request resolves the
-    # Recipe again: kept per terrain file content and grid.
-    key = (hashlib.sha256(data).hexdigest(), ns_m, ew_m, size_east, size_north, nrow, ncol)
+    key = (sha, ns_m, ew_m, receipt_path.resolve())
     if key not in _DEM_CACHE:
         if len(_DEM_CACHE) >= 8:
             _DEM_CACHE.clear()
-        _DEM_CACHE[key] = _sample_dem(hfield, ns_m, ew_m, size_east, size_north, nrow, ncol)
-    return nrow, ncol, _DEM_CACHE[key]  # the same (immutable) grid every time: see _UNDER
+        _DEM_CACHE[key] = _read_envsim_hfield(hfield, data, receipt, receipt_path, ns_m, ew_m, path)
+    nrow, ncol, heights, size = _DEM_CACHE[key]
+    visual = visual_sha = None
+    if str(params.get("visual") or "").strip():
+        visual = Path(str(params["visual"])).expanduser()
+        if not visual.is_absolute() and base_dir is not None:
+            visual = (base_dir / visual).resolve()
+        try:
+            glb = visual.read_bytes()
+        except OSError as exc:
+            raise fail(f"{path}.visual", "unknown_reference", f"cannot read the terrain's GLB: {exc}",
+                       actual=str(params["visual"])) from exc
+        if glb[:4] != b"glTF":
+            raise fail(f"{path}.visual", "wrong_type", "the terrain's look is a GLB file", actual=str(params["visual"]))
+        visual_sha = hashlib.sha256(glb).hexdigest()
+    return Terrain("hfield", **base, nrow=nrow, ncol=ncol, heights=heights,
+                   max_height_m=max(max(row) for row in heights), grid_east_m=2 * ew_m, grid_north_m=2 * ns_m,
+                   hfield={"path": str(hfield.resolve()), "sha256": sha, "size": size, "nrow": ncol, "ncol": nrow},
+                   visual=visual, visual_sha256=visual_sha)
 
 
+# Envsim terrains read (the file content, area and receipt): every request
+# resolves the Recipe again.
 _DEM_CACHE: dict = {}
 
 
-def _sample_dem(hfield: Path, ns_m: float, ew_m: float, size_east: float, size_north: float,
-                nrow: int, ncol: int) -> tuple:
+def _read_envsim_hfield(hfield: Path, data: bytes, receipt: dict, receipt_path: Path, ns_m: float, ew_m: float,
+                        path: str) -> tuple:
+    """(nrow, ncol, heights, MuJoCo size) of an Envsim hfield in this module's
+    grid order. Envsim writes it in its MuJoCo frame (x north, y west): data
+    row r lies at y = -size_y + r * step (row 0 the east edge), column c at
+    x = -size_x + c * step (column 0 the south edge). So this grid's row (from
+    the north) is the data's column from the last, and its column (from the
+    west) the data's row from the last. Heights are what MuJoCo makes of the
+    file: (value - lowest) / (highest - lowest) * size_z."""
     import env_envsim  # Envsim's reader (imported only for this generator)
 
     _geodesy, _extract, probe = env_envsim.pipeline()
     rows, cols, samples = probe.read_hfield(hfield)
-    offset = min(samples)
-    heights = []
-    for row in range(nrow):
-        north = size_north / 2 - row / (nrow - 1) * size_north
-        line = []
-        for col in range(ncol):
-            east = -size_east / 2 + col / (ncol - 1) * size_east
-            # Envsim's hfield axes are MuJoCo's city frame: x = north, y = -east.
-            line.append(round(probe.terrain_height(north, -east, samples, rows, cols, ns_m, ew_m) - offset, 4))
-        heights.append(tuple(line))
-    return tuple(heights)
+    size = None
+    mjcf = receipt.get("mjcf")
+    if mjcf:  # the size Envsim wrote (its z scale is the rounded height span)
+        mjcf_path = Path(mjcf) if Path(mjcf).is_absolute() else receipt_path.parent / mjcf
+        try:
+            import xml.etree.ElementTree as ET
+
+            element = ET.parse(mjcf_path).getroot().find("asset/hfield")
+            size = tuple(float(value) for value in element.get("size").split())
+        except (OSError, ET.ParseError, AttributeError, ValueError):
+            size = None
+    low, high = min(samples), max(samples)
+    if size is None or len(size) != 4:
+        size = (ns_m, ew_m, max(high - low, 1e-6), 1.0)
+    if abs(size[0] - ns_m) > 1e-6 or abs(size[1] - ew_m) > 1e-6:
+        raise fail(f"{path}.dem", "invalid_shape", "the hfield's size differs from its receipt's area",
+                   expected=[ns_m, ew_m], actual=list(size[:2]))
+    span = high - low
+    heights = tuple(
+        tuple(((samples[(rows - 1 - col) * cols + (cols - 1 - row)] - low) / span * size[2]) if span > 0 else 0.0
+              for col in range(rows))
+        for row in range(cols))
+    return cols, rows, heights, size
 
 
 def make_terrain(settings: dict, params: dict, size_east: float, size_north: float, path: str,
@@ -239,7 +301,7 @@ def make_terrain(settings: dict, params: dict, size_east: float, size_north: flo
     if settings["generator"] == "hills":
         nrow, ncol, heights = _hills(params, size_east, size_north, path)
     elif settings["generator"] == "envsim":
-        nrow, ncol, heights = _envsim_dem(params, size_east, size_north, path, base_dir)
+        return _envsim_terrain(params, base, path, base_dir)
     else:
         raise fail(f"{path}.generator", "not_one_of", "no generator for an hfield", expected=["envsim", "hills"],
                    actual=settings["generator"])

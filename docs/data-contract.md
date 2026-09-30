@@ -44,7 +44,7 @@ types:
 |---|---|
 | `id` / `label` / `description` | 識別子、表示名、説明（`describe-type` で人と AI が読む） |
 | `extends` / `abstract` | 単一継承。抽象の型は品目から直接使えない |
-| `params` | `kind`（length / angle / number / integer / color / enum / bool / text / polygon / polyline）、`unit`（length は m、angle は deg が既定）、`label`、`description`、`default`、`min` / `max` / `values`、`level` |
+| `params` | `kind`（length / angle / number / integer / color / enum / bool / text / polygon / polyline / polygons）、`unit`（length は m、angle は deg が既定）、`label`、`description`、`default`、`min` / `max` / `values`、`level` |
 | `behavior` | `surface`（`ground`：地面に立つ／`elevated`：地面から `z_m` の高さ）、`snap`、`friction`、`layer`（`object` が既定／`surface`：道路や標示。surface どうしは重なってよい） |
 | `shapes` | 形状（3 章）。地形の型では代わりに `terrain` |
 | `terrain` | `kind`（flat / hfield）、`generator`、`color`、`friction`（4 章） |
@@ -52,7 +52,7 @@ types:
 
 子の型で `params: {name: null}` と書くと、親のパラメータを外します。
 
-`polygon`（建物の外形など）と `polyline`（道路の中心線など）は、物体のローカル座標（m）の点の並び `[[x, y], ...]` です。polygon は 3 点以上で、辺が交差・接触してはいけません（`invalid_shape`）。向きは問わず、反時計回りにそろえて保存します。閉じる点の重複や一直線上の点は取り除きます。点は最大 2000 個です。
+`polygon`（建物の外形など）と `polyline`（道路の中心線など）は、物体のローカル座標（m）の点の並び `[[x, y], ...]` です。polygon は 3 点以上で、辺が交差・接触してはいけません（`invalid_shape`）。向きは問わず、反時計回りにそろえて保存します。閉じる点の重複や一直線上の点は取り除きます。点は最大 2000 個です。`polygons` は polygon の並び `[[[x, y], ...], ...]`（最大 20000 個。街の層の外形）です。
 
 ### 2.1 パラメータの level
 
@@ -72,6 +72,7 @@ types:
 |---|---|
 | `primitive` | `box`、`cylinder`（直立、`w` = `d` = 直径）、`wedge`（くさび：底面 `w × d`、ローカル +y に向かって 0 から `h` まで上がる）、`prism`（`points` の多角形を `h` だけ押し出す）、`ribbon`（`points` の折れ線に沿った幅 `w` の帯） |
 | `points` | prism / ribbon の点（`$footprint` のような polygon / polyline のパラメータ） |
+| `polygons` | prism を外形ごとに作る（`$outlines` のような polygons のパラメータ。部品の名前は `<名前>-1-…`、`<名前>-2-…`） |
 | `w` / `d` / `h` | 大きさ（m） |
 | `x` / `y` / `z` | **形状の中心**（物体の底面の中心からの位置）。`z` の既定は `h / 2`（底面に立つ） |
 | `roll` / `pitch` / `yaw` | 中心まわりの傾き（度。yaw → pitch → roll の順に適用） |
@@ -95,12 +96,12 @@ types:
 
 `hills` 生成器は `max_height_m`・`hills`（丘の数）・`radius_m`・`seed`・`resolution_m`（格子の間隔）を読み、乱数の種で決まる場所にガウス型の丘を置きます。**同じパラメータからは必ず同じ地形**ができるので、Recipe に格子データを持たずに済み、AI も再現できます。
 
-`envsim` 生成器は、hakoniwa-envsim がビルドした City World の地形（PLATEAU の DEM から作った hfield）を読みます（地面の品目 `city-dem`、型 `dem_terrain`）。
+`envsim` 生成器は、hakoniwa-envsim がビルドした City World の地形（PLATEAU の DEM から作った hfield）を**そのまま**使います（地面の品目 `city-dem`、型 `dem_terrain`）。
 
-- `dem`：その `components/terrain/terrain-receipt.json`（絶対パスか Recipe からの相対パス）
-- `resolution_m`：格子の間隔（既定 1 m。格子が 1001 点を超えるときは粗くする）
+- `dem`：その `terrain-receipt.json`（絶対パスか Recipe からの相対パス）
+- `visual`：地形の見た目の GLB（envsim の `terrain.glb`）。あれば、格子から作るメッシュの代わりに生成する GLB に入れます
 
-高さは envsim 自身の読み取り関数で標本化し、いちばん低い点を 0 にします。DEM の範囲の外（環境を広げた分）は、端の高さを延ばします。receipt の SHA-256 と地形ファイルが食い違うときは `invalid_shape` です。
+格子は envsim の hfield と同じ点・同じ範囲（receipt の half extent）で、標本化し直しません。高さは MuJoCo がそのファイルから計算する値（いちばん低い点を 0 とし、`terrain.xml` の z の大きさを掛けたもの）です。生成する MuJoCo の世界も、同じ hfield ファイルを envsim の座標系のまま（z 軸まわりに 90°回して）読みます。環境が地形より広いとき（はみ出す建物で広げた分）、配置では端の高さが続きます。receipt の SHA-256 と地形ファイルが食い違うときは `invalid_shape` です。
 
 格子の並びは MuJoCo と同じです：行 0 が北の端（+y）、最後の行が南の端、列 0 が西の端（-x）、最後の列が東の端（`tests/test_env_generate.py` で MuJoCo と照合）。
 
@@ -141,6 +142,15 @@ objects:
 
 - `geo`：`provider`、`origin {lat_deg, lon_deg}`（原点 = 環境の中心）、`bbox_deg {south, west, north, east}`、`projection`、`attribution`、`license`、`data_timestamp`、`query`
 - 物体の `source`：`provider`、`kind`（way / relation / feature）、`id`、`tags`
+
+hakoniwa-envsim の City World から取り込んだ物体は、envsim が作った資産をそのまま持ちます（[citygml-parts.md](citygml-parts.md) 7 章）。
+
+- `params.visual`：見た目の GLB。`params.collision`：当たり判定の MJCF（envsim が書いたままの geom。建物の P0〜P3 など）。どちらも Recipe からの相対パスで、SHA-256 を `resolve` の出力と生成物の指紋に入れます。
+- `anchor {x_m, y_m, z_m, yaw_deg, terrain}`：資産が作られた位置（取り込んだときの pose と、その座標系の envsim の高さ）と、その高さが属する地形（envsim の hfield の SHA-256）。`collision` には必須です。
+  - 物体が anchor の位置・向きのままで、地形がその hfield なら、資産は作られた位置にそのまま出ます（envsim の出力と同じ。`tools/env_roundtrip.py` で照合できます）。
+  - 動かすと、資産は物体と一緒に回転・移動し、外形の下の地面の高さが変わった分だけ上下します。
+  - 別の地形（平らな地面など）では、資産の座標系は物体の下の地面に立ちます。
+- `collision` を持つ物体は、生成する MuJoCo の世界では外形の代わりにその当たり判定を使います。配置と Studio の検証（重なり・はみ出し）は外形で行います。
 
 `pose` は `x_m`・`y_m`・`yaw_deg` だけです。高さは地形から決まり（4 章）、`elevated` の物体は `params.z_m` で持ち上げます。`params` は型が `placement` とした値だけ書けます。
 

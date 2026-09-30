@@ -1,5 +1,6 @@
 // The ground on the plan: an image of the terrain's heights (lighter is
-// higher), one pixel per grid point, stretched over the environment.
+// higher), one pixel per grid point, stretched over the grid's area (the
+// environment, or an Envsim terrain's own area).
 
 export function terrainImage(ground) {
   const canvas = document.createElement("canvas");
