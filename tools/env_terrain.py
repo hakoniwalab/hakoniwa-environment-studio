@@ -63,27 +63,37 @@ class Terrain:
         return top * (1 - fr) + bottom * fr
 
     def highest_under(self, polygon: list[tuple[float, float]]) -> float:
-        """The highest ground under a convex outline (its corners, edges and the
-        grid points inside), so an object set on it never reaches into it."""
+        """The highest ground under a convex outline, never under MuJoCo's
+        surface: the highest corner of every grid cell the outline touches
+        (MuJoCo triangulates each cell, so its surface never rises above the
+        cell's corners). An object set on it may float by the relief inside
+        a cell, never reach into the ground."""
         if self.kind != "hfield":
             return 0.0
-        step = min(self.size_east_m / (self.ncol - 1), self.size_north_m / (self.nrow - 1))
-        points = list(polygon)
-        for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1]):
-            count = max(1, int(math.hypot(x2 - x1, y2 - y1) / step) + 1)
-            points += [(x1 + (x2 - x1) * i / count, y1 + (y2 - y1) * i / count) for i in range(count)]
+        import env_polygon
+
+        dx = self.size_east_m / (self.ncol - 1)
+        dy = self.size_north_m / (self.nrow - 1)
         xs, ys = [x for x, _ in polygon], [y for _, y in polygon]
-        c_lo = max(0, math.floor((min(xs) + self.half_east) / self.size_east_m * (self.ncol - 1)))
-        c_hi = min(self.ncol - 1, math.ceil((max(xs) + self.half_east) / self.size_east_m * (self.ncol - 1)))
-        r_lo = max(0, math.floor((self.half_north - max(ys)) / self.size_north_m * (self.nrow - 1)))
-        r_hi = min(self.nrow - 1, math.ceil((self.half_north - min(ys)) / self.size_north_m * (self.nrow - 1)))
+        c_lo = max(0, math.floor((min(xs) + self.half_east) / dx))
+        c_hi = min(self.ncol - 2, math.floor((max(xs) + self.half_east) / dx))
+        r_lo = max(0, math.floor((self.half_north - max(ys)) / dy))
+        r_hi = min(self.nrow - 2, math.floor((self.half_north - min(ys)) / dy))
+        convex = env_polygon.counter_clockwise(list(polygon))
+        best = None
+        h = self.heights
         for row in range(r_lo, r_hi + 1):
+            north_top = self.half_north - row * dy
             for col in range(c_lo, c_hi + 1):
-                x = -self.half_east + col / (self.ncol - 1) * self.size_east_m
-                y = self.half_north - row / (self.nrow - 1) * self.size_north_m
-                if _inside(polygon, (x, y)):
-                    points.append((x, y))
-        return max(self.height_at(x, y) for x, y in points)
+                west = -self.half_east + col * dx
+                cell = [(west, north_top - dy), (west + dx, north_top - dy), (west + dx, north_top), (west, north_top)]
+                if not env_polygon.convex_overlap(cell, convex, tolerance=0.0) and not _inside(convex, cell[0]):
+                    continue
+                top = max(h[row][col], h[row][col + 1], h[row + 1][col], h[row + 1][col + 1])
+                best = top if best is None else max(best, top)
+        if best is None:  # outside the grid: the ground continues at 0
+            return 0.0
+        return best
 
     def as_json(self, with_heights: bool = True) -> dict:
         data = {"kind": self.kind, "color": self.color, "friction": self.friction,

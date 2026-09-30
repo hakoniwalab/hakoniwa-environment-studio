@@ -267,7 +267,9 @@ class DemTerrainTest(unittest.TestCase):
     def test_objects_stand_on_it_and_the_world_is_valid(self):
         cone = {"id": "cone", "item": "traffic-cone", "pose": {"x_m": 0, "y_m": 20, "yaw_deg": 0}}
         parsed = env_schema.parse_recipe(self.recipe([cone]), self.dir / "r.yaml")
-        self.assertAlmostEqual(parsed.objects[0].pose.z_m, 5.0 + 0.19 * 0.1 + env_schema.HFIELD_CLEARANCE_M, delta=0.002)
+        # On the highest corner of the grid cells under it (1 m cells: the corner at y = 21 is 5.1 m),
+        # never under MuJoCo's triangles.
+        self.assertAlmostEqual(parsed.objects[0].pose.z_m, 5.1 + env_schema.HFIELD_CLEARANCE_M, delta=0.002)
         if env_validate.available():
             self.assertEqual([item.as_json() for item in env_validate.check(parsed)], [])
 

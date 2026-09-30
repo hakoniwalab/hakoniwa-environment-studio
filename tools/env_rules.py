@@ -6,9 +6,8 @@ checked when imported.
   EPSILON_M           floating-point slack when comparing against a tolerance
   SURFACE_GAP_M       what stands on a road floats this far above it: exactly
                       touching meshes make MuJoCo report a deep sideways overlap
-  HFIELD_CLEARANCE_M  what stands on a height field keeps this above the sampled
-                      ground (bilinear sampling can sit a few mm under MuJoCo's
-                      triangles)
+  HFIELD_CLEARANCE_M  what stands on a height field keeps this above the highest
+                      corner of the cells under it (a margin for float rounding)
   CIRCLE_SEGMENTS     sides of the polygon standing for a circle (browser too)
 """
 
