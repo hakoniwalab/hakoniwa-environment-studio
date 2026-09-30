@@ -28,6 +28,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -68,7 +70,7 @@ def plateau_cache(roots: list[Path]) -> Path:
 # docs/hakoniwa-build-reference.md), with the City World Web UI's defaults.
 BUILD_OPTIONS = {
     "building_physics_level": (3, (0, 1, 2, 3)),
-    "building_collider_reduction": ("convex-decompose", ("safe", "coplanar-union", "convex-decompose", "tolerant-planar")),
+    "building_collider_reduction": ("safe", ("safe", "coplanar-union", "convex-decompose", "tolerant-planar")),
     "terrain_uncovered_policy": ("error", ("error", "constant")),
 }
 
@@ -194,6 +196,93 @@ def _check_offline(job: Path, job_id: str, center, half) -> None:
                          "チェックを外して別の ID で作ってください（ダウンロード済みの CityGML は使い回します）。")
 
 
+# How far a build is, as the City World Web UI shows it (Business Pack
+# tools/remote_operation/city_world/generation.py _forward_build_progress):
+# Envsim's [HAKO_PROGRESS] events as a percentage, a phase, and a message.
+_BUILD_PHASES = {
+    "geometry_extract": (35, "建物形状を抽出しています"),
+    "building_collision": (42, "建物Colliderを生成しています"),
+    "terrain": (43, "地形生成を開始しています"),
+    "building_mjcf": (52, "建物Physicsを生成しています"),
+    "building_visual": (56, "建物Visualを生成しています"),
+    "building_glb": (72, "建物GLBを書き出しています"),
+    "roads": (76, "道路と地形のVisualを生成しています"),
+    "road_markings": (79, "LOD3路面標示を生成しています"),
+    "bridges_visual": (81, "橋梁Visualを生成しています"),
+    "bridges_physics": (83, "橋梁Physicsを生成しています"),
+    "compose": (86, "City Worldを統合しています"),
+    "dataset_validation": (88, "Dataset Capabilityを検証しています"),
+    # After Envsim (build_job below).
+    "collider_visualization": (92, "Collider表示用GLBを生成しています"),
+    "packaging": (96, "検証・ZIP作成をしています"),
+}
+_SOURCE_ACTIONS = {
+    "cache-reused": "共有キャッシュを再利用しました",
+    "offline-reused": "ローカルデータを再利用しました",
+    "downloaded": "ダウンロードしました",
+    "cache-populated": "ダウンロードして共有キャッシュへ保存しました",
+}
+
+
+def progress_step(event: dict) -> tuple[int, str] | None:
+    """(percent, message) of one [HAKO_PROGRESS] event, or None."""
+    phase = event.get("phase")
+    current, total = int(event.get("current", 0) or 0), int(event.get("total", 0) or 0)
+    class_id = str(event.get("class_id", "P?"))
+    if phase == "source_download":
+        action = _SOURCE_ACTIONS.get(event.get("mode"), "取得またはキャッシュ再利用を確認しています")
+        return 15, f"PLATEAU {event.get('feature', 'source')}ソース: {action}（{current}/{total}）"
+    if phase == "terrain_extract":
+        return (43 if total == 0 else 43 + int(3 * current / total)), f"DEMソースを並列抽出しています（{current}/{total}）"
+    if phase == "terrain_gap_fill":
+        return (47 if total == 0 else 47 + int(current >= total)), f"DEMの小さな欠損を補間しています（{current}/{total}）"
+    if phase == "texture_download":
+        if total == 0:
+            return 70, "選択範囲に建物テクスチャはありません"
+        return 56 + int(14 * current / total), f"建物テクスチャを取得・再利用しています（{current}/{total}）"
+    if phase == "geometry_extract_files":
+        return 35, f"建物GMLを並列抽出しています（{current}/{total}）"
+    if phase == "building_glb_batches":
+        return 72, f"建物GLBのmaterial/meshを構築しています（{current}/{total}）"
+    if phase == "building_glb_textures":
+        return 72, f"建物GLB用テクスチャを並列デコードしています（{current}/{total}）"
+    if phase == "building_glb_export":
+        return 72, "建物GLBバイナリを書き出しています"
+    if phase == "building_physics_surfaces":
+        return 52, f"LOD2建物面をColliderへ変換しています（GML {current}/{total}）"
+    if phase in ("building_physics_exact_reduction", "building_physics_tolerant_reduction"):
+        label = "厳密統合" if phase == "building_physics_exact_reduction" else "5cm許容統合"
+        return 52, f"建物Colliderを{label}しています（{class_id} {current}/{total}, {int(event.get('colliders', 0))}個）"
+    if phase == "building_physics_tolerant_groups":
+        return 52, f"建物Colliderを5cm許容統合しています（{class_id} 建物面群 {current}/{total}）"
+    if phase == "building_physics_exact_groups":
+        return 52, f"建物Colliderを厳密統合しています（{class_id} 平面群 {current}/{total}）"
+    if phase == "building_physics_assemble":
+        return 52, "建物ColliderのMJCF要素を構築しています"
+    if phase == "building_physics_write":
+        return 52, "建物PhysicsのMJCFを書き出しています"
+    if phase in _BUILD_PHASES:
+        return _BUILD_PHASES[phase]
+    return None
+
+
+def build_progress(lines: list[str]) -> dict:
+    """{percent, phase, message} of a build log: the latest step, the
+    percentage never going back (as the Web UI keeps it)."""
+    progress = {"percent": 10, "phase": None, "message": "PLATEAU catalogとソースを確認しています"}
+    for line in lines:
+        if not line.startswith("[HAKO_PROGRESS] "):
+            continue
+        try:
+            event = json.loads(line.split(" ", 1)[1])
+        except ValueError:
+            continue
+        step = progress_step(event) if isinstance(event, dict) else None
+        if step is not None:
+            progress = {"percent": max(step[0], progress["percent"]), "phase": event["phase"], "message": step[1]}
+    return progress
+
+
 class Builds:
     """The City World builds this Studio started (one runs at a time)."""
 
@@ -257,14 +346,7 @@ class Builds:
         if job is None and not log.is_file():
             raise BuildError(f"City World {job_id} is not being built", 404)
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.is_file() else []
-        progress = None
-        for line in reversed(lines):
-            if line.startswith("[HAKO_PROGRESS]"):
-                try:
-                    progress = json.loads(line.split(" ", 1)[1])
-                except (IndexError, ValueError):
-                    progress = None
-                break
+        progress = build_progress(lines)
         code = job["process"].poll() if job else None
         built = (folder / "build" / "download-manifest.json").is_file() and (
             folder / "build" / "world" / "city-world-receipt.json").is_file()
@@ -273,8 +355,10 @@ class Builds:
         elif code == 0 or (job is None and built):
             state = "done" if built else "failed"
         else:
-            state = "failed"
+            state = "canceled" if job is not None and job.get("canceled") else "failed"
         errors = [line for line in lines if line.startswith("ERROR") or "Traceback" in line][-5:]
+        if state == "done":
+            progress = {"percent": 100, "phase": "ready", "message": "City Worldができました"}
         return {"id": job_id, "state": state, "returncode": code, "progress": progress,
                 "elapsed_s": round(time.time() - job["started"], 1) if job else None,
                 "build": str(folder / "build") if built else None, "errors": errors,
@@ -284,12 +368,18 @@ class Builds:
         job = self.jobs.get(job_id)
         if job is None:
             raise BuildError(f"City World {job_id} is not being built", 404)
-        if job["process"].poll() is None:
-            job["process"].terminate()
+        process = job["process"]
+        if process.poll() is None:
+            job["canceled"] = True
+            # The build runs in its own session (Envsim's hako.py and its workers under it): stop them all.
             try:
-                job["process"].wait(timeout=10)
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                job["process"].kill()
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            except ProcessLookupError:
+                pass
         return self.status(job_id)
 
 
@@ -309,9 +399,8 @@ def collider_view(job: Path, mjcf: Path, envsim: Path | None = None) -> None:
 
 
 def build_job(job: Path, offline: bool = False, envsim: Path | None = None) -> int:
-    """Run Envsim's build of a job (its hakoniwa-envsim-build.yaml), then its viewer files."""
-    import shutil
-
+    """Run Envsim's build of a job (its hakoniwa-envsim-build.yaml), then its
+    viewer files and its ZIP."""
     envsim = envsim or env_envsim.root()
     command = [sys.executable, str(envsim / "tools" / "hako.py"), "--config",
                str(job / "hakoniwa-envsim-build.yaml"), *(["--offline"] if offline else []), "build"]
@@ -328,9 +417,143 @@ def build_job(job: Path, offline: bool = False, envsim: Path | None = None) -> i
     except (OSError, subprocess.CalledProcessError) as exc:
         print(f"ERROR: the collider view could not be made: {exc}", flush=True)
         return 1
-    print("[HAKO_PROGRESS] " + json.dumps({"phase": "collider_visualization", "current": 1, "total": 1}), flush=True)
-    print(f"OK: viewer files: {job / 'viewer'}", flush=True)
+    print("[HAKO_PROGRESS] " + json.dumps({"phase": "packaging"}), flush=True)
+    try:
+        package(job)
+    except (OSError, BuildError) as exc:
+        print(f"ERROR: the ZIP could not be made: {exc}", flush=True)
+        return 1
+    print(f"OK: viewer files: {job / 'viewer'}, ZIP: {artifact_path(job)}", flush=True)
     return 0
+
+
+# The ZIP of a City World, with the City World Web UI's fixed entries.
+ZIP_ENTRIES = {
+    "visual/city-world.glb": "city-world.glb",
+    "physics/city-world.xml": "city-world.xml",
+    "validation/dataset-validation.json": "dataset-validation.json",
+    "receipt/city-world-receipt.json": "city-world-receipt.json",
+}
+
+
+def artifact_path(job: Path) -> Path:
+    return job / "artifacts" / f"city-world-{job.name}.zip"
+
+
+def package(job: Path) -> Path:
+    """artifacts/city-world-<id>.zip of a built job (written aside, then moved in)."""
+    import zipfile
+
+    world = job / "build" / "world"
+    missing = [name for name in ZIP_ENTRIES.values() if not (world / name).is_file()]
+    if missing:
+        raise BuildError(f"City World {job.name} has no {', '.join(missing)}", 404)
+    target = artifact_path(job)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(".zip.partial")
+    with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for entry, name in ZIP_ENTRIES.items():
+            archive.write(world / name, entry,
+                          compress_type=zipfile.ZIP_STORED if name.endswith(".glb") else zipfile.ZIP_DEFLATED)
+    partial.replace(target)
+    return target
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def collider_counts(job: Path) -> dict | None:
+    """The colliders of a build, as the Web UI's result shows them: the total
+    and per component (the World receipt), and the buildings' per physics class
+    and geom type (Envsim's building-physics-application.json)."""
+    counts = _read_json(job / "build" / "world" / "city-world-receipt.json").get("components", {}).get("mjcf_geom_counts")
+    if not isinstance(counts, dict):
+        return None
+    physics = _read_json(job / "build" / "components" / "buildings" / "building-physics-application.json")
+    by_class = physics.get("collider_geom_counts", {}).get("by_class", {})
+    by_type = physics.get("collider_geom_types", {}).get("by_class", {})
+    classes = ("P0", "P1", "P2", "P3")
+    return {
+        "total": int(counts.get("total", 0)),
+        "by_component": {str(key): int(value) for key, value in counts.items() if key != "total"},
+        "by_physics_class": {name: int(by_class.get(name, 0)) for name in classes} if physics else None,
+        "building_by_geom_type": {kind: sum(int(by_type.get(name, {}).get(kind, 0)) for name in classes)
+                                  for kind in ("box", "mesh")} if physics else None,
+    }
+
+
+def _size(path: Path) -> int:
+    return path.stat().st_size if path.is_file() else 0
+
+
+def list_jobs() -> list[dict]:
+    """The City Worlds this Studio built (city-worlds/<id>/ with a World and its
+    viewer files), newest first, with what the Web UI's result list shows."""
+    jobs = []
+    for receipt in WORK.glob("*/build/world/city-world-receipt.json"):
+        job = receipt.parents[2]
+        visual, colliders = job / "viewer" / "city-world.glb", job / "viewer" / "city-world-colliders.glb"
+        if not visual.is_file() or BUILDS.running() == job.name:
+            continue
+        request = _read_json(job / "job.json").get("request", {})
+        options = build_options(request.get("options")) if isinstance(request.get("options"), dict) else {}
+        artifact = artifact_path(job)
+        jobs.append({
+            "job_id": job.name, "path": str(job), "build": str(job / "build"),
+            "selection": request.get("selection"),
+            "building_physics_level": options.get("building_physics_level"),
+            "building_collider_reduction": options.get("building_collider_reduction"),
+            "terrain_uncovered_policy": options.get("terrain_uncovered_policy"),
+            "colliders": collider_counts(job),
+            "collider_available": colliders.is_file(),
+            "visual_size_bytes": _size(visual), "collider_size_bytes": _size(colliders) or None,
+            "size_bytes": _size(artifact) or sum(_size(item) for item in (job / "build" / "world").iterdir()),
+            "artifact_available": artifact.is_file(),
+            "updated_at_msec": int(receipt.stat().st_mtime * 1000),
+        })
+    return sorted(jobs, key=lambda item: (-item["updated_at_msec"], item["job_id"]))
+
+
+def cache_summary(cache: Path) -> dict:
+    """The shared PLATEAU cache: where, and how many files of what size."""
+    objects = [item for item in (cache / "objects").glob("*/*")
+               if item.is_file() and not item.name.endswith(".cache.json")]
+    return {"path": str(cache), "object_count": len(objects), "size_bytes": sum(item.stat().st_size for item in objects)}
+
+
+def job_file(job_id: str, name: str) -> Path:
+    """A file of a built City World for the page: its viewer GLBs or its ZIP
+    (made now when a build before the ZIP existed has none)."""
+    job = WORK / job_id
+    if not (job / "build" / "world" / "city-world-receipt.json").is_file():
+        raise BuildError(f"City World {job_id} はありません", 404)
+    if name == "artifact.zip":
+        path = artifact_path(job)
+        return path if path.is_file() else package(job)
+    if name not in ("city-world.glb", "city-world-colliders.glb"):
+        raise BuildError(f"no file {name}", 404)
+    path = job / "viewer" / name
+    if not path.is_file():
+        raise BuildError(f"City World {job_id} has no {name}", 404)
+    return path
+
+
+def delete_job(job_id: str) -> dict:
+    """Delete a built City World (its folder: ZIP, GLB, MJCF, intermediate
+    files). The shared CityGML cache stays."""
+    job = WORK / job_id
+    if not (job / "job.json").is_file():
+        raise BuildError(f"City World {job_id} はありません", 404)
+    if BUILDS.running() == job_id:
+        raise BuildError(f"City World {job_id} を作っているところです（中止してから削除してください）", 409)
+    shutil.rmtree(job)
+    BUILDS.jobs.pop(job_id, None)
+    return {"deleted": job_id, "path": str(job)}
 
 
 def main(argv: list[str] | None = None) -> int:

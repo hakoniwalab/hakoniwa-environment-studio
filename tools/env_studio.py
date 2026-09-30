@@ -539,6 +539,29 @@ def list_city_worlds(root: str | None) -> dict:
             "export_dir": str(EXPORT_DIR) if EXPORT_DIR else None}
 
 
+def list_built_city_worlds() -> dict:
+    """The City Worlds this Studio built from PLATEAU (the map page's result
+    list), each with whether it is in the export folder, and the shared cache."""
+    jobs = env_cityworld.list_jobs()
+    written = env_urban.exported(EXPORT_DIR) if EXPORT_DIR else {}
+    for job in jobs:
+        found = written.get(str(Path(job["build"]).resolve()))
+        job["exported"] = {"id": found["id"], "title": found["title"]} if found else None
+    return {"jobs": jobs, "shared_cache": env_cityworld.cache_summary(env_cityworld.plateau_cache(city_world_roots())),
+            "export_dir": str(EXPORT_DIR) if EXPORT_DIR else None}
+
+
+def delete_built_city_world(job_id: str) -> dict:
+    """Delete a City World this Studio built. One in the export folder stays
+    until its export is removed: the export names this build's files."""
+    written = env_urban.exported(EXPORT_DIR) if EXPORT_DIR else {}
+    found = written.get(str((env_cityworld.WORK / job_id / "build").resolve()))
+    if found:
+        raise StudioError(f"{job_id} は書き出し先に {found['id']} として書き出してあります。先に「書き出しを消す」を"
+                          "押してください（書き出したものがこの City World のファイルを使っています）。", HTTPStatus.CONFLICT)
+    return _built(lambda: env_cityworld.delete_job(job_id))
+
+
 def _export_dir() -> Path:
     if EXPORT_DIR is None:
         raise StudioError("書き出し先が指定されていません（env_studio.py start --export-dir で起動してください）",
@@ -772,6 +795,18 @@ class StudioHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _file(self, path: Path) -> None:
+        """A file as it is (a City World's GLB may be hundreds of MB: streamed)."""
+        types = {".glb": "model/gltf-binary", ".zip": "application/zip"}
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", types.get(path.suffix, "application/octet-stream"))
+        self.send_header("Content-Length", str(path.stat().st_size))
+        if path.suffix == ".zip":
+            self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+        self.end_headers()
+        with path.open("rb") as stream:
+            shutil.copyfileobj(stream, self.wfile)
+
     def _body(self) -> object:
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -800,6 +835,11 @@ class StudioHandler(SimpleHTTPRequestHandler):
             _built(lambda: env_cityworld.BUILDS.status(_check_id(parts[2]))))),
         ("POST", ("city-worlds", "build", "*", "cancel"), lambda self, parts: self._json(
             _built(lambda: env_cityworld.BUILDS.cancel(_check_id(parts[2]))))),
+        ("GET", ("city-worlds", "jobs"), lambda self, _: self._json(list_built_city_worlds())),
+        ("GET", ("city-worlds", "jobs", "*", "*"), lambda self, parts: self._file(
+            _built(lambda: env_cityworld.job_file(_check_id(parts[2]), parts[3])))),
+        ("POST", ("city-worlds", "jobs", "*", "delete"), lambda self, parts: self._json(
+            delete_built_city_world(_check_id(parts[2])))),
         ("POST", ("city-worlds", "import"), lambda self, _: self._json(import_city_world(self._body()))),
         ("POST", ("city-worlds", "export"), lambda self, _: self._json(export_city_world(self._body()))),
         ("POST", ("exports", "*", "delete"), lambda self, parts: self._json(remove_export(parts[1]))),

@@ -1,0 +1,701 @@
+// The map page's PLATEAU mode: the Business Pack City World Web UI
+// (tools/remote_operation/city_world/web/city-world-ui.js) on the Studio's
+// server instead of its Worker. Diagnose the selection (POST
+// /api/plateau/inspect), generate a City World with hakoniwa-envsim (POST
+// /api/city-worlds/build, followed by GET /api/city-worlds/build/<id>), and
+// look at the results (GET /api/city-worlds/jobs): the area on the map, the
+// colliders, a 3D viewer of the Visual and Collider GLBs, the ZIP, delete.
+// The Studio adds writing a result to the export folder and taking it in as
+// parts to edit.
+
+import { $, api, el } from "./dom.js";
+
+const capabilityLabels = {
+  building: "Building", terrain: "Terrain", road: "Road",
+  road_markings: "Road markings", bridge: "Bridge",
+};
+const progressPhaseLabels = {
+  source_download: "PLATEAUソース",
+  geometry_extract: "建物形状抽出",
+  geometry_extract_files: "建物形状抽出",
+  building_collision: "建物Collider",
+  terrain: "地形",
+  terrain_extract: "DEM抽出",
+  terrain_gap_fill: "DEM欠損補間",
+  building_mjcf: "建物Physics",
+  building_physics_surfaces: "建物Physics面変換",
+  building_physics_exact_reduction: "建物Collider厳密統合",
+  building_physics_exact_groups: "建物Collider厳密統合",
+  building_physics_tolerant_reduction: "建物Collider 5cm許容統合",
+  building_physics_tolerant_groups: "建物Collider 5cm許容統合",
+  building_physics_assemble: "建物Physics構築",
+  building_physics_write: "建物Physics書出し",
+  building_visual: "建物Visual",
+  texture_download: "建物テクスチャ",
+  building_glb: "建物GLB",
+  building_glb_textures: "建物GLBテクスチャ処理",
+  building_glb_batches: "建物GLB構築",
+  building_glb_export: "建物GLB書出し",
+  roads: "道路Visual",
+  road_markings: "LOD3路面標示",
+  bridges_visual: "橋梁Visual",
+  bridges_physics: "橋梁Physics",
+  compose: "City World統合",
+  dataset_validation: "Capability検証",
+  world_generated: "生成完了確認",
+  collider_visualization: "Collider表示生成",
+  packaging: "検証・ZIP作成",
+};
+const LARGE_VISUAL_PREVIEW_BYTES = 256 * 1024 * 1024;
+const prefectureSlugs = {
+  "01": "hokkaido", "02": "aomori", "03": "iwate", "04": "miyagi", "05": "akita",
+  "06": "yamagata", "07": "fukushima", "08": "ibaraki", "09": "tochigi", "10": "gunma",
+  "11": "saitama", "12": "chiba", "13": "tokyo", "14": "kanagawa", "15": "niigata",
+  "16": "toyama", "17": "ishikawa", "18": "fukui", "19": "yamanashi", "20": "nagano",
+  "21": "gifu", "22": "shizuoka", "23": "aichi", "24": "mie", "25": "shiga",
+  "26": "kyoto", "27": "osaka", "28": "hyogo", "29": "nara", "30": "wakayama",
+  "31": "tottori", "32": "shimane", "33": "okayama", "34": "hiroshima", "35": "yamaguchi",
+  "36": "tokushima", "37": "kagawa", "38": "ehime", "39": "kochi", "40": "fukuoka",
+  "41": "saga", "42": "nagasaki", "43": "kumamoto", "44": "oita", "45": "miyazaki",
+  "46": "kagoshima", "47": "okinawa",
+};
+const BUILD_KEY = "hakoniwa-environment-city-world-build";
+const ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+// The Web UI's job id, in the Studio's id characters (a "." becomes "_").
+function generatedJobId(selection, inspected) {
+  const codes = [...new Set(inspected.municipalities.map((item) => item.city_code))].sort();
+  const cityCode = codes[0] ?? "00000";
+  const prefecture = prefectureSlugs[cityCode.slice(0, 2)] ?? `pref${cityCode.slice(0, 2)}`;
+  const center = selection.center;
+  const multiple = codes.length > 1 ? "-multi" : "";
+  return `${prefecture}-${cityCode}${multiple}-lat${center.latitude.toFixed(3)}-lon${center.longitude.toFixed(3)}`
+    .replaceAll(".", "_");
+}
+
+function progressText(progress) {
+  const phase = progressPhaseLabels[progress.phase] ?? progress.phase;
+  const heading = phase ? `${phase} — ` : "";
+  return `${progress.percent}% — ${heading}${progress.message}`;
+}
+
+function formatBytes(value) {
+  if (value < 1000) return `${value} B`;
+  if (value < 1_000_000) return `${(value / 1000).toFixed(1)} KB`;
+  return `${(value / 1_000_000).toFixed(1)} MB`;
+}
+
+function capabilityPresentation(capability) {
+  if (capability.dataset_status !== "available") return { style: "unavailable", symbol: "—", title: "Not available" };
+  if (capability.generation_status !== "candidate") return { style: "limited", symbol: "△", title: "Limited" };
+  return { style: "candidate", symbol: "✓", title: "Available" };
+}
+
+function disposeObject(root) {
+  root.traverse((object) => {
+    if (object.geometry) object.geometry.dispose();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials.filter(Boolean)) {
+      for (const value of Object.values(material)) {
+        if (value?.isTexture) value.dispose();
+      }
+      material.dispose();
+    }
+  });
+}
+
+// page: {map, exportDir, selection(), selectionIsValid(), selectionBounds(),
+// applySelection(selection), setStatus(message, kind), importWorld(build, id), toOsm()}.
+export function plateauMode(page) {
+  const { map } = page;
+  const elements = Object.fromEntries([
+    "physics-level", "terrain-uncovered-policy", "coplanar-union", "convex-decompose", "tolerant-planar",
+    "inspect", "generate", "cancel", "mesh-summary", "overall", "municipality", "capabilities", "generation",
+    "build-id", "build-offline", "build-register", "build-register-field", "build-import", "to-osm",
+    "artifact-select", "artifact-path", "artifact-detail", "cache-info", "download", "view3d", "delete-artifact",
+    "export-artifact", "import-artifact", "viewer-visual", "viewer-collider", "viewer-panel", "viewer-status",
+    "viewer-canvas", "log",
+  ].map((id) => [id, document.getElementById(id)]));
+  elements["build-register-field"].hidden = !page.exportDir;
+  elements["export-artifact"].hidden = !page.exportDir;
+
+  let inspecting = false;
+  let generating = false;
+  let canceling = false;
+  let lastAvailable = null;
+  let generatedJobs = [];
+  let idEdited = false;
+  let viewerRuntime = null;
+  let viewerModels = { visual: null, collider: null };
+  let viewerJobId = null;
+  let viewerLoadSequence = 0;
+
+  const generatedRectangle = L.rectangle([[0, 0], [0, 0]], {
+    color: "#e06b23", weight: 5, opacity: 0, fill: false, dashArray: "10 7", interactive: false,
+  }).addTo(map);
+  const diagnosticMeshLayer = L.layerGroup().addTo(map);
+
+  function writeLog(value) {
+    elements.log.textContent += `${JSON.stringify(value, null, 2)}\n`;
+    elements.log.scrollTop = elements.log.scrollHeight;
+  }
+
+  async function call(method, path, body) {
+    writeLog({ request: `${method} /api/${path}`, ...(body === undefined ? {} : { body }) });
+    try {
+      const result = await api(method, path, body);
+      writeLog({ response: `${method} /api/${path}`, result });
+      return result;
+    } catch (error) {
+      writeLog({ response: `${method} /api/${path}`, error: error.message });
+      throw error;
+    }
+  }
+
+  function colliderReduction() {
+    return elements["tolerant-planar"].checked ? "tolerant-planar"
+      : elements["convex-decompose"].checked ? "convex-decompose"
+      : elements["coplanar-union"].checked ? "coplanar-union" : "safe";
+  }
+
+  function options() {
+    return {
+      building_physics_level: Number(elements["physics-level"].value),
+      building_collider_reduction: colliderReduction(),
+      terrain_uncovered_policy: elements["terrain-uncovered-policy"].value,
+    };
+  }
+
+  function refresh(valid = page.selectionIsValid()) {
+    elements.inspect.disabled = !valid || inspecting || generating;
+    elements.generate.disabled = !valid || inspecting || generating || lastAvailable === null;
+  }
+
+  function invalidateInspection() {
+    lastAvailable = null;
+    diagnosticMeshLayer.clearLayers();
+    elements["mesh-summary"].textContent = "";
+    elements.generate.disabled = true;
+    elements["to-osm"].hidden = true;
+    if (!generating) {
+      elements.generation.className = "generation";
+      elements.generation.textContent = "";
+    }
+  }
+
+  for (const id of ["physics-level", "terrain-uncovered-policy"]) {
+    elements[id].addEventListener("input", () => { invalidateInspection(); refresh(); });
+  }
+  elements["coplanar-union"].addEventListener("change", () => {
+    if (!elements["coplanar-union"].checked) {
+      elements["convex-decompose"].checked = false;
+      elements["tolerant-planar"].checked = false;
+    }
+    invalidateInspection();
+    refresh();
+  });
+  elements["convex-decompose"].addEventListener("change", () => {
+    if (elements["convex-decompose"].checked) elements["coplanar-union"].checked = true;
+    else elements["tolerant-planar"].checked = false;
+    invalidateInspection();
+    refresh();
+  });
+  elements["tolerant-planar"].addEventListener("change", () => {
+    if (elements["tolerant-planar"].checked) {
+      elements["convex-decompose"].checked = true;
+      elements["coplanar-union"].checked = true;
+    }
+    invalidateInspection();
+    refresh();
+  });
+  elements["build-id"].addEventListener("input", () => { idEdited = elements["build-id"].value.trim() !== ""; });
+
+  // --- Diagnosis ------------------------------------------------------------
+
+  function renderInspection(inspected, request) {
+    diagnosticMeshLayer.clearLayers();
+    const meshes = Array.isArray(inspected.query_meshes) ? inspected.query_meshes : [];
+    for (const mesh of meshes) {
+      const bounds = mesh.bbox;
+      L.rectangle([[bounds.south, bounds.west], [bounds.north, bounds.east]], {
+        color: "#00897b", weight: 3, opacity: 0.9, fillColor: "#36b7a7", fillOpacity: 0.035, dashArray: "5 5",
+      }).bindTooltip(`PLATEAU 3次メッシュ: ${mesh.code}`).addTo(diagnosticMeshLayer);
+    }
+    elements["mesh-summary"].textContent = meshes.length
+      ? `診断対象PLATEAUメッシュ: ${meshes.map((mesh) => mesh.code).join(", ")}` : "";
+    const constant = request.options.terrain_uncovered_policy === "constant";
+    // No DEM at all, but buildings and roads: the Studio builds it on flat ground at 0 m.
+    const flatGround = inspected.status !== "available" && inspected.flat_ground_possible && constant;
+    const available = inspected.status === "available" || flatGround;
+    elements.overall.className = available ? "available" : "unavailable";
+    if (inspected.status === "available") {
+      elements.overall.textContent = `生成候補あり — ${inspected.source_file_count} files / 約${(inspected.estimated_download_bytes / 1_000_000).toFixed(1)} MB / DEM未被覆: ${constant ? "標高0 mで補完" : "厳密停止"}`;
+    } else if (flatGround) {
+      elements.overall.textContent = `生成候補あり（DEMなし：地面は標高0 mの平面） — ${inspected.source_file_count} files / 約${(inspected.estimated_download_bytes / 1_000_000).toFixed(1)} MB`;
+    } else if (inspected.flat_ground_possible) {
+      elements.overall.textContent = `生成不可 — ${inspected.reason}（DEM未被覆領域を「標高0 mで補完」にすると、平らな地面で生成できます）`;
+    } else {
+      elements.overall.textContent = `生成不可 — ${inspected.reason}`;
+    }
+    elements.municipality.textContent = inspected.municipalities.length
+      ? inspected.municipalities.map((item) => `${item.city} (${item.year}, spec ${item.spec})`).join(" / ") : "";
+    elements.capabilities.replaceChildren();
+    for (const [name, label] of Object.entries(capabilityLabels)) {
+      const capability = inspected.capabilities[name];
+      const view = capabilityPresentation(capability);
+      elements.capabilities.append(el("div", { class: `capability ${view.style}` },
+        el("div", { class: "symbol" }, view.symbol),
+        el("div", {},
+          el("strong", {}, `${label}: ${view.title}`),
+          el("small", {}, capability.dataset_status === "available"
+            ? `max LOD ${capability.max_lod} / ${capability.source_file_count} files${capability.reason ? ` / ${capability.reason}` : ""}`
+            : capability.reason))));
+    }
+    lastAvailable = available ? { request } : null;
+    if (available && !idEdited) elements["build-id"].value = generatedJobId(request.selection, inspected);
+    elements["to-osm"].hidden = available;
+  }
+
+  async function inspectSelection() {
+    if (inspecting || !page.selectionIsValid()) return;
+    inspecting = true;
+    invalidateInspection();
+    elements.inspect.disabled = true;
+    elements.inspect.textContent = "診断中…";
+    elements.overall.className = "";
+    elements.overall.textContent = "PLATEAU catalogを確認中";
+    elements.capabilities.replaceChildren();
+    elements.municipality.textContent = "";
+    const request = { selection: page.selection(), options: options() };
+    try {
+      renderInspection(await call("POST", "plateau/inspect", request), request);
+    } catch (error) {
+      elements.overall.className = "failed";
+      elements.overall.textContent = `診断処理に失敗しました — ${error.message}`;
+    } finally {
+      inspecting = false;
+      elements.inspect.textContent = "2. Capabilityを診断";
+      refresh();
+    }
+  }
+
+  // --- Generation -----------------------------------------------------------
+
+  async function afterGenerated(id, build) {
+    const target = { path: build, title: id };
+    if (page.exportDir && elements["build-register"].checked) await exportWorld(target);
+    if (elements["build-import"].checked) await page.importWorld(target, id);
+  }
+
+  async function follow(id) {
+    generating = true;
+    refresh();
+    elements.generate.textContent = "生成中…";
+    elements.cancel.disabled = false;
+    elements.generation.className = "generation running";
+    try { localStorage.setItem(BUILD_KEY, id); } catch { /* storage unavailable */ }
+    try {
+      for (;;) {
+        const status = await api("GET", `city-worlds/build/${encodeURIComponent(id)}`);
+        if (status.state === "running") {
+          if (!canceling) elements.generation.textContent = progressText(status.progress);
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          continue;
+        }
+        writeLog({ type: "BUILD_FINISHED", status: { ...status, log_tail: undefined } });
+        if (status.state === "done") {
+          elements.generation.className = "generation ready";
+          elements.generation.textContent = `Generate成功 — ${id}`;
+          await afterGenerated(id, status.build);
+          await refreshGeneratedJobs(id);
+        } else if (status.state === "canceled") {
+          elements.generation.className = "generation canceled";
+          elements.generation.textContent = "Generateをキャンセルしました。";
+        } else {
+          elements.generation.className = "generation failed";
+          const lines = status.errors.length ? status.errors : status.log_tail.slice(-5);
+          elements.generation.replaceChildren(el("div", {}, `Generate失敗 — ${id}（ログ：${status.log}）`),
+            ...lines.map((line) => el("div", {}, line)));
+        }
+        break;
+      }
+    } catch (error) {
+      elements.generation.className = "generation failed";
+      elements.generation.textContent = `Generateの状態を取得できません — ${error.message}`;
+    } finally {
+      try { localStorage.removeItem(BUILD_KEY); } catch { /* storage unavailable */ }
+      generating = false;
+      canceling = false;
+      elements.cancel.disabled = true;
+      elements.cancel.textContent = "生成をキャンセル";
+      elements.generate.textContent = "3. City Worldを生成";
+      refresh();
+    }
+  }
+
+  async function generateWorld() {
+    if (generating || lastAvailable === null) return;
+    const id = elements["build-id"].value.trim();
+    if (!ID_PATTERN.test(id)) {
+      page.setStatus("ID は小文字・数字・- _ で付けてください（64 文字まで）", "error");
+      return;
+    }
+    const offline = elements["build-offline"].checked;
+    elements.generation.className = "generation running";
+    elements.generation.textContent = "Generateを送信しています";
+    try {
+      await call("POST", "city-worlds/build", {
+        id, name: id, ...lastAvailable.request, offline, overwrite: offline,
+      });
+    } catch (error) {
+      elements.generation.className = "generation failed";
+      elements.generation.textContent = `Generate失敗 — ${error.message}`;
+      return;
+    }
+    await follow(id);
+  }
+
+  async function cancelGeneration() {
+    let id = null;
+    try { id = localStorage.getItem(BUILD_KEY); } catch { /* storage unavailable */ }
+    if (!generating || canceling || !id) return;
+    canceling = true;
+    elements.cancel.disabled = true;
+    elements.cancel.textContent = "キャンセル中…";
+    elements.generation.className = "generation running";
+    elements.generation.textContent = "生成処理を終了しています…";
+    try {
+      await call("POST", `city-worlds/build/${encodeURIComponent(id)}/cancel`, {});
+    } catch (error) {
+      canceling = false;
+      elements.cancel.disabled = false;
+      elements.cancel.textContent = "生成をキャンセル";
+      elements.generation.className = "generation failed";
+      elements.generation.textContent = `キャンセル要求の送信に失敗しました。生成処理は継続しています — ${error.message}`;
+    }
+  }
+
+  // --- Results --------------------------------------------------------------
+
+  function selectedGeneratedJob() {
+    return generatedJobs.find((item) => item.job_id === elements["artifact-select"].value) ?? null;
+  }
+
+  function applyGeneratedSelection(job) {
+    const selection = job?.selection;
+    if (selection === null || selection === undefined) {
+      generatedRectangle.setStyle({ opacity: 0 });
+      return;
+    }
+    if (Number.isInteger(job.building_physics_level)) elements["physics-level"].value = String(job.building_physics_level);
+    const reduction = job.building_collider_reduction;
+    elements["coplanar-union"].checked = ["coplanar-union", "convex-decompose", "tolerant-planar"].includes(reduction);
+    elements["convex-decompose"].checked = ["convex-decompose", "tolerant-planar"].includes(reduction);
+    elements["tolerant-planar"].checked = reduction === "tolerant-planar";
+    elements["terrain-uncovered-policy"].value = job.terrain_uncovered_policy === "constant" ? "constant" : "error";
+    page.applySelection(selection);
+    invalidateInspection();
+    refresh();
+    const bounds = page.selectionBounds();
+    generatedRectangle.setBounds(bounds);
+    generatedRectangle.setStyle({ opacity: 1 });
+    generatedRectangle.unbindTooltip().bindTooltip(`生成結果: ${job.job_id}`);
+    map.fitBounds(bounds.pad(0.35), { maxZoom: 19 });
+  }
+
+  function updateArtifactSelection({ restoreSelection = false } = {}) {
+    const job = selectedGeneratedJob();
+    for (const id of ["download", "view3d", "delete-artifact", "import-artifact", "export-artifact", "viewer-visual"]) {
+      elements[id].disabled = job === null;
+    }
+    elements["viewer-collider"].disabled = job === null || !job?.collider_available;
+    elements["export-artifact"].textContent = job?.exported ? "書き出しを消す" : "書き出す";
+    elements["export-artifact"].title = job?.exported
+      ? `書き出し先の ${job.exported.id} を消します（City World 自体は残ります）`
+      : "この City World を変換せずにそのまま書き出し先に書き出します";
+    if (job !== null && !job.collider_available) {
+      elements["viewer-visual"].checked = true;
+      elements["viewer-collider"].checked = false;
+    } else if (job !== null && job.visual_size_bytes > LARGE_VISUAL_PREVIEW_BYTES) {
+      // A city-scale textured GLB can exceed browser memory limits. Prefer the
+      // much smaller collider preview while keeping Visual available on demand.
+      elements["viewer-visual"].checked = false;
+      elements["viewer-collider"].checked = true;
+    }
+    elements["artifact-path"].textContent = job === null ? "—" : `${job.path}/`;
+    const componentCounts = job?.colliders?.by_component ?? {};
+    const componentText = Object.entries(componentCounts).map(([name, count]) => `${name}=${count}`).join(", ");
+    const classCounts = job?.colliders?.by_physics_class ?? {};
+    const classText = ["P0", "P1", "P2", "P3"].map((name) => `${name}=${classCounts[name] ?? 0}`).join(", ");
+    const geomTypes = job?.colliders?.building_by_geom_type;
+    elements["artifact-detail"].textContent = job === null
+      ? "Physics Level: — / Collider: —"
+      : [
+        `Physics Level: ${job.building_physics_level ?? "不明"}`,
+        `Collider reduction: ${job.building_collider_reduction ?? "safe"}`,
+        `Collider total: ${job.colliders?.total ?? "不明"} geoms`,
+        `Preview files: Visual=${formatBytes(job.visual_size_bytes ?? 0)}, Collider=${formatBytes(job.collider_size_bytes ?? 0)}`,
+        job.visual_size_bytes > LARGE_VISUAL_PREVIEW_BYTES ? "Visualは大容量のため、3D表示はColliderを既定にしています。" : null,
+        componentText ? `Components: ${componentText}` : null,
+        job.colliders?.by_physics_class ? `Building allocation: ${classText}` : null,
+        geomTypes ? `Building geom types: box=${geomTypes.box}, mesh=${geomTypes.mesh}` : null,
+        job.exported ? `書き出し済み: ${job.exported.id}` : null,
+      ].filter(Boolean).join("\n");
+    if (restoreSelection) applyGeneratedSelection(job);
+  }
+
+  async function refreshGeneratedJobs(preferredJobId = null, { restoreSelection = true } = {}) {
+    try {
+      const payload = await api("GET", "city-worlds/jobs");
+      generatedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      const cache = payload.shared_cache;
+      elements["cache-info"].textContent = cache
+        ? `共有キャッシュ: ${cache.path}/ (${cache.object_count} files / ${formatBytes(cache.size_bytes)})`
+        : "共有キャッシュ: —";
+      const previous = elements["artifact-select"].value;
+      elements["artifact-select"].replaceChildren();
+      if (generatedJobs.length === 0) {
+        elements["artifact-select"].append(new Option("生成結果はありません", ""));
+        elements["artifact-select"].disabled = true;
+      } else {
+        for (const job of generatedJobs) {
+          elements["artifact-select"].append(new Option(job.selection
+            ? `${job.job_id} — ${job.selection.half_extent_m.east_west * 2}m × ${job.selection.half_extent_m.north_south * 2}m — ${formatBytes(job.size_bytes)}`
+            : `${job.job_id} — ${formatBytes(job.size_bytes)}`, job.job_id));
+        }
+        elements["artifact-select"].disabled = false;
+        const keep = preferredJobId ?? previous;
+        if (keep && generatedJobs.some((job) => job.job_id === keep)) elements["artifact-select"].value = keep;
+      }
+      updateArtifactSelection({ restoreSelection });
+    } catch (error) {
+      generatedJobs = [];
+      elements["cache-info"].textContent = "共有キャッシュ: 取得できません";
+      elements["artifact-select"].replaceChildren(new Option("生成履歴を取得できません", ""));
+      elements["artifact-select"].disabled = true;
+      updateArtifactSelection();
+      writeLog({ type: "GENERATED_INDEX_FAILED", error: String(error.message ?? error) });
+    }
+  }
+
+  function closeViewerForJob(jobId) {
+    if (viewerJobId !== jobId) return;
+    viewerLoadSequence += 1;
+    if (viewerRuntime !== null) {
+      for (const model of Object.values(viewerModels).filter(Boolean)) {
+        viewerRuntime.scene.remove(model);
+        disposeObject(model);
+      }
+      viewerRuntime.renderer.render(viewerRuntime.scene, viewerRuntime.camera);
+    }
+    viewerModels = { visual: null, collider: null };
+    viewerJobId = null;
+    document.body.classList.remove("viewer-open");
+    requestAnimationFrame(() => map.invalidateSize());
+  }
+
+  async function deleteSelectedArtifact() {
+    const job = selectedGeneratedJob();
+    if (job === null) return;
+    if (!window.confirm(`生成結果 ${job.job_id} を削除しますか？\n`
+      + "サーバー上のjobディレクトリ（ZIP・GLB・MJCF・中間生成物）を削除します。\n"
+      + "共有CityGMLキャッシュは削除しません。")) return;
+    elements["delete-artifact"].disabled = true;
+    try {
+      await call("POST", `city-worlds/jobs/${encodeURIComponent(job.job_id)}/delete`, {});
+      closeViewerForJob(job.job_id);
+      generatedRectangle.setStyle({ opacity: 0 });
+      elements.generation.className = "generation ready";
+      elements.generation.textContent = `サーバー上のjobを削除しました — ${job.job_id}（共有CityGMLキャッシュは保持）`;
+      await refreshGeneratedJobs(null, { restoreSelection: false });
+    } catch (error) {
+      elements.generation.className = "generation failed";
+      elements.generation.textContent = `生成結果の削除に失敗しました — ${error.message}`;
+      updateArtifactSelection();
+    }
+  }
+
+  // A City World written to the export folder as it is (POST /api/city-worlds/export);
+  // the tool watching that folder (hakoniwa-urban-mobility) takes it as a World.
+  async function exportWorld(build) {
+    page.setStatus(`${build.title} を書き出しています…`);
+    try {
+      const result = await call("POST", "city-worlds/export", { path: build.path, title: build.title });
+      page.setStatus(`${build.title} を ${result.id} として書き出しました（${result.job}）`, "ok");
+    } catch (error) {
+      page.setStatus(error.message, "error");
+    }
+  }
+
+  async function exportSelected() {
+    const job = selectedGeneratedJob();
+    if (job === null) return;
+    if (job.exported) {
+      if (!window.confirm(`書き出し先の ${job.exported.id} を消しますか？（City World 自体は残ります）`)) return;
+      try {
+        await call("POST", `exports/${encodeURIComponent(job.exported.id)}/delete`, {});
+        page.setStatus(`書き出し先の ${job.exported.id} を消しました`, "ok");
+      } catch (error) {
+        page.setStatus(error.message, "error");
+      }
+    } else {
+      await exportWorld({ path: job.build, title: job.job_id });
+    }
+    await refreshGeneratedJobs(job.job_id, { restoreSelection: false });
+  }
+
+  // --- 3D viewer ------------------------------------------------------------
+
+  function applyViewerMode() {
+    if (viewerModels.visual === null && viewerModels.collider === null) return;
+    if (viewerModels.visual !== null) viewerModels.visual.visible = elements["viewer-visual"].checked;
+    if (viewerModels.collider !== null) viewerModels.collider.visible = elements["viewer-collider"].checked;
+    viewerRuntime?.renderer.render(viewerRuntime.scene, viewerRuntime.camera);
+  }
+
+  function viewerLayerLabel() {
+    if (elements["viewer-visual"].checked && elements["viewer-collider"].checked) return "Visual + Collider";
+    return elements["viewer-visual"].checked ? "Visual" : "Collider";
+  }
+
+  async function changeViewerLayer(changedElement) {
+    if (!elements["viewer-visual"].checked && !elements["viewer-collider"].checked) changedElement.checked = true;
+    const missingRequestedLayer = viewerJobId !== null && (
+      (elements["viewer-visual"].checked && viewerModels.visual === null)
+      || (elements["viewer-collider"].checked && viewerModels.collider === null));
+    if (missingRequestedLayer) {
+      await openSelectedViewer();
+      return;
+    }
+    applyViewerMode();
+    if (viewerJobId !== null) elements["viewer-status"].textContent = `${viewerJobId} — ${viewerLayerLabel()}`;
+  }
+
+  async function initializeViewer() {
+    if (viewerRuntime !== null) return viewerRuntime;
+    const THREE = await import("three");
+    const [{ GLTFLoader }, { OrbitControls }] = await Promise.all([
+      import("three/addons/loaders/GLTFLoader.js"),
+      import("three/addons/controls/OrbitControls.js"),
+    ]);
+    const renderer = new THREE.WebGLRenderer({ canvas: elements["viewer-canvas"], antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xdde6eb);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    // Render only on interaction so an idle Viewer does not consume CPU.
+    controls.enableDamping = false;
+    controls.addEventListener("change", () => renderer.render(scene, camera));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x53606b, 2.2));
+    const sunlight = new THREE.DirectionalLight(0xffffff, 2.5);
+    sunlight.position.set(100, 180, 80);
+    scene.add(sunlight);
+    const resize = () => {
+      const width = Math.max(1, elements["viewer-panel"].clientWidth);
+      const height = Math.max(1, elements["viewer-panel"].clientHeight);
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.render(scene, camera);
+    };
+    new ResizeObserver(resize).observe(elements["viewer-panel"]);
+    viewerRuntime = { THREE, GLTFLoader, renderer, scene, camera, controls, resize };
+    return viewerRuntime;
+  }
+
+  async function openSelectedViewer() {
+    const job = selectedGeneratedJob();
+    if (job === null) return;
+    const loadSequence = ++viewerLoadSequence;
+    document.body.classList.add("viewer-open");
+    elements["viewer-status"].textContent = `${job.job_id}を読み込み中…`;
+    requestAnimationFrame(() => map.invalidateSize());
+    const base = `/api/city-worlds/jobs/${encodeURIComponent(job.job_id)}`;
+    try {
+      const runtime = await initializeViewer();
+      runtime.resize();
+      const visualGltf = elements["viewer-visual"].checked
+        ? await new runtime.GLTFLoader().loadAsync(`${base}/city-world.glb`) : null;
+      const colliderGltf = job.collider_available && elements["viewer-collider"].checked
+        ? await new runtime.GLTFLoader().loadAsync(`${base}/city-world-colliders.glb`) : null;
+      if (loadSequence !== viewerLoadSequence) {
+        if (visualGltf !== null) disposeObject(visualGltf.scene);
+        if (colliderGltf !== null) disposeObject(colliderGltf.scene);
+        return;
+      }
+      for (const model of Object.values(viewerModels).filter(Boolean)) {
+        runtime.scene.remove(model);
+        disposeObject(model);
+      }
+      viewerModels = { visual: visualGltf?.scene ?? null, collider: colliderGltf?.scene ?? null };
+      viewerJobId = job.job_id;
+      if (viewerModels.visual !== null) runtime.scene.add(viewerModels.visual);
+      if (viewerModels.collider !== null) {
+        const colliderMaterial = new runtime.THREE.MeshBasicMaterial({
+          color: 0x28a86b, transparent: true, opacity: 0.38, wireframe: true, depthTest: true, depthWrite: false,
+        });
+        viewerModels.collider.traverse((object) => {
+          if (!object.isMesh) return;
+          const oldMaterials = Array.isArray(object.material) ? object.material : [object.material];
+          oldMaterials.filter(Boolean).forEach((material) => material.dispose());
+          object.material = colliderMaterial;
+          object.renderOrder = 10;
+        });
+        runtime.scene.add(viewerModels.collider);
+      }
+      const box = new runtime.THREE.Box3();
+      if (viewerModels.visual !== null) box.expandByObject(viewerModels.visual);
+      if (viewerModels.collider !== null) box.expandByObject(viewerModels.collider);
+      if (box.isEmpty()) throw new Error("GLBに表示可能なgeometryがありません");
+      const center = box.getCenter(new runtime.THREE.Vector3());
+      const size = box.getSize(new runtime.THREE.Vector3());
+      if (viewerModels.visual !== null) viewerModels.visual.position.set(-center.x, -box.min.y, -center.z);
+      if (viewerModels.collider !== null) viewerModels.collider.position.set(-center.x, -box.min.y, -center.z);
+      const distance = Math.max(size.x, size.y, size.z, 10) * 1.35;
+      runtime.camera.near = Math.max(0.1, distance / 10000);
+      runtime.camera.far = Math.max(2000, distance * 20);
+      runtime.camera.position.set(distance * 0.65, distance * 0.55, distance * 0.65);
+      runtime.camera.updateProjectionMatrix();
+      runtime.controls.target.set(0, Math.max(0, size.y * 0.2), 0);
+      runtime.controls.update();
+      applyViewerMode();
+      elements["viewer-status"].textContent = `${job.job_id} — ${viewerLayerLabel()}`;
+    } catch (error) {
+      elements["viewer-status"].textContent = "3D表示に失敗しました。通信ログを確認してください。";
+      writeLog({ type: "VIEWER_FAILED", job_id: job.job_id, error: String(error) });
+    }
+  }
+
+  elements.inspect.addEventListener("click", inspectSelection);
+  elements.generate.addEventListener("click", generateWorld);
+  elements.cancel.addEventListener("click", cancelGeneration);
+  elements["to-osm"].addEventListener("click", () => page.toOsm());
+  elements["artifact-select"].addEventListener("change", () => updateArtifactSelection({ restoreSelection: true }));
+  elements["viewer-visual"].addEventListener("change", (event) => changeViewerLayer(event.target));
+  elements["viewer-collider"].addEventListener("change", (event) => changeViewerLayer(event.target));
+  elements.download.addEventListener("click", () => {
+    const job = selectedGeneratedJob();
+    if (job !== null) window.location.assign(`/api/city-worlds/jobs/${encodeURIComponent(job.job_id)}/artifact.zip`);
+  });
+  elements.view3d.addEventListener("click", openSelectedViewer);
+  elements["delete-artifact"].addEventListener("click", deleteSelectedArtifact);
+  elements["export-artifact"].addEventListener("click", exportSelected);
+  elements["import-artifact"].addEventListener("click", () => {
+    const job = selectedGeneratedJob();
+    if (job !== null) page.importWorld({ path: job.build, title: job.job_id });
+  });
+
+  refreshGeneratedJobs(null, { restoreSelection: false });
+  try {  // a generation started before this page was opened again
+    const running = localStorage.getItem(BUILD_KEY);
+    if (running) follow(running);
+  } catch { /* storage unavailable */ }
+
+  return {
+    // The selection moved: a diagnosis is for the selection it was made for.
+    selectionChanged(valid) { invalidateInspection(); refresh(valid); },
+    inspect: inspectSelection,
+  };
+}

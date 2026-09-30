@@ -40,22 +40,32 @@ class InspectionError(RuntimeError):
 
 def _capability(name: str, files: list[dict]) -> dict:
     if not files:
-        return {"available": False, "usable": False, "max_lod": None, "files": 0,
-                "reason": "PLATEAU has no data for it in this area"}
+        return {"dataset_status": "not_available", "generation_status": "scoped_out", "max_lod": None,
+                "source_file_count": 0, "reason": "dataset is not available in the selected bbox"}
     max_lod = max(int(item.get("max_lod", 0)) for item in files)
-    usable = not (name in LOD3_ONLY and max_lod < 3)
-    return {"available": True, "usable": usable, "max_lod": max_lod, "files": len(files),
-            "reason": None if usable else "the builder uses it only at LOD3"}
+    candidate = not (name in LOD3_ONLY and max_lod < 3)
+    return {"dataset_status": "available", "generation_status": "candidate" if candidate else "scoped_out",
+            "max_lod": max_lod, "source_file_count": len(files),
+            "reason": None if candidate else "LOD3 geometry required by the current generator is not available"}
 
 
 def inspect(center: tuple[float, float], half: tuple[float, float], client=None) -> dict:
-    """The PLATEAU catalog's answer for a selection (centre lat/lon, half extents N-S, E-W in m)."""
+    """The PLATEAU catalog's answer for a selection (centre lat/lon, half
+    extents N-S, E-W in m), in the City World Web UI's inspection form
+    (Business Pack tools/remote_operation/city_world/inspection.py): status,
+    the query meshes, capabilities, municipalities, files and bytes. Besides,
+    `missing` (the required components not there) and `flat_ground_possible`
+    (only the DEM is missing: a flat ground makes it)."""
     client = client or env_envsim.plateau_client()
     try:
         bbox = client.bounding_box(center[0], center[1], half[0], half[1])
-        meshes = set(client.third_mesh_codes(bbox))
+        query_meshes = []
+        for code in client.third_mesh_codes(bbox):
+            west, south, east, north = client.third_mesh_bounds(code)
+            query_meshes.append({"code": code, "bbox": {"west": west, "south": south, "east": east, "north": north}})
     except Exception as exc:  # noqa: BLE001 - envsim's PlateauError and bad selections
         raise InspectionError(f"the area cannot be asked about: {exc}") from exc
+    meshes = {item["code"] for item in query_meshes}
 
     def ask(component: str) -> list[dict]:
         feature_type, min_lod = FEATURES[component]
@@ -76,15 +86,18 @@ def inspect(center: tuple[float, float], half: tuple[float, float], client=None)
 
     capabilities = {name: _capability(name, files) for name, files in selected.items()}
     unique = {item["url"]: item for files in selected.values() for item in files}
-    municipalities = sorted({(item["city_code"], item["city_name"], item["year"]) for item in unique.values()})
-    missing = [name for name in REQUIRED if not capabilities[name]["available"]]
+    cities = {item["city_code"]: {"city_code": item["city_code"], "city": item["city_name"], "year": item["year"],
+                                  "spec": item.get("spec")} for item in unique.values()}
+    missing = [name for name in REQUIRED if capabilities[name]["dataset_status"] != "available"]
     return {
-        "available": not missing,
+        "status": "unavailable" if missing else "available",
+        "reason": "required PLATEAU components are unavailable: " + ", ".join(missing) if missing else None,
         "missing": missing,
-        # Buildings and roads but no DEM: a City World with flat ground is still possible.
         "flat_ground_possible": missing == ["terrain"],
+        "bbox": {"west": bbox[0], "south": bbox[1], "east": bbox[2], "north": bbox[3]},
+        "query_meshes": query_meshes,
         "capabilities": capabilities,
-        "municipalities": [{"city_code": code, "city": name, "year": year} for code, name, year in municipalities],
-        "download_bytes": sum(int(item.get("file_size", 0)) for item in unique.values()),
-        "files": len(unique),
+        "municipalities": [cities[code] for code in sorted(cities)],
+        "source_file_count": len(unique),
+        "estimated_download_bytes": sum(int(item.get("file_size", 0)) for item in unique.values()),
     }

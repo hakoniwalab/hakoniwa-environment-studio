@@ -30,7 +30,12 @@ if "fail" in str(build):
     sys.exit(2)
 (build / "world").mkdir(parents=True, exist_ok=True)
 (build / "download-manifest.json").write_text("{}")
-(build / "world" / "city-world-receipt.json").write_text("{}")
+(build / "world" / "city-world-receipt.json").write_text(json.dumps({"components": {"mjcf_geom_counts": {"total": 7, "buildings": 5, "terrain": 2}}}))
+(build / "world" / "dataset-validation.json").write_text("{}")
+(build / "components" / "buildings").mkdir(parents=True, exist_ok=True)
+(build / "components" / "buildings" / "building-physics-application.json").write_text(json.dumps({
+    "collider_geom_counts": {"by_class": {"P3": 4, "P0": 1}},
+    "collider_geom_types": {"by_class": {"P3": {"box": 3, "mesh": 1}, "P0": {"box": 1}}}}))
 (build / "world" / "city-world.xml").write_text("<mujoco/>")
 (build / "world" / "city-world.glb").write_bytes(b"glTF")
 print("OK: built")
@@ -90,12 +95,16 @@ class CityWorldBuildTest(unittest.TestCase):
         self.assertEqual(job["job_id"], "sapporo")
         status = self.wait("sapporo")
         self.assertEqual((status["state"], status["returncode"]), ("done", 0))
-        self.assertEqual(status["progress"], {"phase": "collider_visualization", "current": 1, "total": 1})
+        self.assertEqual(status["progress"]["percent"], 100)
         self.assertEqual(status["build"], str(self.dir / "work/city-worlds/sapporo/build"))
         # The viewer files the City World job contract asks for.
         viewer = self.dir / "work/city-worlds/sapporo/viewer"
         self.assertEqual((viewer / "city-world-colliders.glb").read_bytes(), b"glTF-colliders")
         self.assertEqual((viewer / "city-world.glb").read_bytes(), b"glTF")
+        # And its ZIP, with the City World Web UI's entries.
+        import zipfile
+        with zipfile.ZipFile(self.dir / "work/city-worlds/sapporo/artifacts/city-world-sapporo.zip") as archive:
+            self.assertEqual(sorted(archive.namelist()), sorted(env_cityworld.ZIP_ENTRIES))
         # Done, it is there to import; building it again needs overwrite.
         with self.assertRaises(env_cityworld.BuildError) as caught:
             self.builds.start({"id": "sapporo", "selection": SELECTION}, roots)
@@ -108,7 +117,7 @@ class CityWorldBuildTest(unittest.TestCase):
             self.builds.start({"id": "other", "selection": SELECTION}, [])
         self.assertEqual(caught.exception.status, 409)
         status = self.builds.cancel("slow")
-        self.assertEqual((status["state"], status["build"]), ("failed", None))
+        self.assertEqual((status["state"], status["build"]), ("canceled", None))
 
     def test_a_failed_build_says_why(self):
         self.builds.start({"id": "fail", "selection": SELECTION}, [])
@@ -142,6 +151,38 @@ class CityWorldBuildTest(unittest.TestCase):
         (self.dir / "work/city-worlds/half/build/source").mkdir(parents=True)
         self.assertEqual(self.builds.start({"id": "half", "selection": SELECTION}, [])["state"], "running")
         self.wait("half")
+
+    def test_the_results_are_listed_served_and_deleted(self):
+        with mock.patch.object(env_cityworld, "BUILDS", self.builds):
+            self.wait(self.builds.start({"id": "sapporo", "selection": SELECTION, "options": {
+                "building_physics_level": 2, "building_collider_reduction": "coplanar-union"}}, [])["id"])
+            (job,) = env_cityworld.list_jobs()
+            self.assertEqual((job["job_id"], job["selection"], job["building_physics_level"],
+                              job["building_collider_reduction"], job["collider_available"]),
+                             ("sapporo", SELECTION, 2, "coplanar-union", True))
+            # The colliders as the Web UI shows them.
+            self.assertEqual(job["colliders"], {
+                "total": 7, "by_component": {"buildings": 5, "terrain": 2},
+                "by_physics_class": {"P0": 1, "P1": 0, "P2": 0, "P3": 4},
+                "building_by_geom_type": {"box": 4, "mesh": 1}})
+            self.assertEqual(env_cityworld.job_file("sapporo", "city-world-colliders.glb").read_bytes(), b"glTF-colliders")
+            # A build from before the ZIP gets one when it is asked for.
+            env_cityworld.artifact_path(self.dir / "work/city-worlds/sapporo").unlink()
+            self.assertTrue(env_cityworld.job_file("sapporo", "artifact.zip").is_file())
+            with self.assertRaises(env_cityworld.BuildError):
+                env_cityworld.job_file("sapporo", "../job.json")
+            env_cityworld.delete_job("sapporo")
+            self.assertFalse((self.dir / "work/city-worlds/sapporo").exists())
+            self.assertEqual(env_cityworld.list_jobs(), [])
+
+    def test_progress_is_a_percentage_that_does_not_go_back(self):
+        lines = ["[HAKO_PROGRESS] " + json.dumps(event) for event in (
+            {"phase": "building_glb"}, {"phase": "source_download", "feature": "bldg", "current": 1, "total": 2,
+                                        "mode": "cache-reused"})]
+        progress = env_cityworld.build_progress(lines)
+        self.assertEqual((progress["percent"], progress["phase"]), (72, "source_download"))
+        self.assertIn("共有キャッシュを再利用しました（1/2）", progress["message"])
+        self.assertEqual(env_cityworld.build_progress([])["percent"], 10)
 
     def test_bad_requests_are_refused(self):
         for body, words in (({"id": "Bad Id", "selection": SELECTION}, "not an id"),

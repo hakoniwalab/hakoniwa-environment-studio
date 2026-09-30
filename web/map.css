@@ -1,14 +1,14 @@
 [hidden] { display: none !important; }
 /* The map import page (web/map.html). */
 .map-layout {
-  display: grid; grid-template-columns: 320px 1fr; gap: 16px;
+  display: grid; grid-template-columns: minmax(320px, 390px) 1fr; gap: 16px;
   padding: 16px 20px; height: calc(100vh - 60px); min-height: 520px;
 }
 @media (max-width: 800px) {
   .map-layout { grid-template-columns: 1fr; height: auto; }
   #map { height: 60vh; }
 }
-.map-panel { display: flex; min-height: 0; padding: 0; overflow: hidden; }
+.map-panel { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; }
 #map { flex: 1; min-height: 360px; }
 .back { color: var(--accent); text-decoration: none; }
 .button {
@@ -28,8 +28,57 @@
 /* PLATEAU / OpenStreetMap: one selection, two ways to make it. */
 #source-mode { width: 100%; }
 #source-mode button { flex: 1; }
-#plateau-report p { margin: 6px 0; }
-#plateau-report .ok { color: var(--ok); }
-#plateau-report .error { color: var(--danger); }
-#plateau-report ul { margin: 4px 0; padding-left: 18px; }
 #to-osm, #to-plateau { margin-top: 8px; }
+/* PLATEAU mode: the City World Web UI (Business Pack tools/remote_operation/city_world/web). */
+#mode-plateau { display: flex; flex-direction: column; gap: 16px; }
+#mode-plateau[hidden] { display: none; }
+#mode-plateau .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 8px; }
+#mode-plateau .grid .checkbox-option, #mode-plateau .grid .full { grid-column: 1 / -1; }
+#mode-plateau .grid .checkbox-option { display: flex; align-items: flex-start; gap: 8px; }
+#mode-plateau .grid .checkbox-option input { width: auto; margin-top: 2px; }
+#mode-plateau label { display: grid; gap: 4px; font-size: .78rem; color: var(--muted); }
+#mode-plateau .grid select, #mode-plateau .grid input:not([type="checkbox"]), .artifact-controls select { width: 100%; }
+#mode-plateau .mono { margin-top: 9px; font: .78rem ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+#mode-plateau button.wide { width: 100%; margin-top: 12px; padding: 11px; font-weight: 700; }
+#inspect { background: #1367a8; border-color: #1367a8; color: #fff; }
+#generate { background: #18864b; border-color: #18864b; color: #fff; }
+#generate:hover:not(:disabled) { background: #126d3c; }
+#cancel { background: #a96b18; border-color: #a96b18; color: #fff; }
+#cancel:hover:not(:disabled) { background: #895511; }
+#mode-plateau button:disabled { opacity: .55; }
+#overall { padding: 10px; border-radius: 7px; background: #f2f5f7; color: #17222d; font-weight: 650; overflow-wrap: anywhere; }
+#overall.available { background: #e8f7ef; color: #17613a; }
+#overall.unavailable, #overall.failed { background: #fff0ee; color: #9b2c24; }
+.municipality { margin-top: 8px; font-size: .8rem; color: var(--muted); }
+.capabilities { display: grid; gap: 7px; margin-top: 8px; }
+.capability { display: grid; grid-template-columns: 28px 1fr; gap: 7px; padding: 9px; border: 1px solid var(--border); border-radius: 7px; }
+.capability .symbol { font-size: 1.15rem; font-weight: 800; }
+.capability.candidate .symbol { color: #16864b; }
+.capability.limited .symbol { color: #b36a00; }
+.capability.unavailable .symbol { color: #8a98a5; }
+.capability strong { display: block; font-size: .87rem; }
+.capability small { display: block; margin-top: 2px; color: var(--muted); line-height: 1.35; }
+.generation { margin-top: 8px; padding: 0; border-radius: 7px; font-size: .84rem; overflow-wrap: anywhere; }
+.generation.running { padding: 9px; background: #eaf3fb; color: #185b8d; }
+.generation.ready { padding: 9px; background: #e8f7ef; color: #17613a; font-weight: 700; }
+.generation.failed { padding: 9px; background: #fff0ee; color: #9b2c24; }
+.generation.canceled { padding: 9px; background: #fff6df; color: #775113; font-weight: 700; }
+#artifact-detail { margin-top: 7px; font: .75rem ui-monospace, monospace; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.45; }
+.viewer-layers { display: flex; gap: 16px; margin: 10px 0 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; }
+.viewer-layers legend { padding: 0 4px; color: var(--muted); font-size: .75rem; }
+#mode-plateau .viewer-layers label { display: flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--text); }
+.artifact-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.artifact-actions button { padding: 9px; font-weight: 700; }
+#view3d { background: #6c42a1; border-color: #6c42a1; color: #fff; }
+#view3d:hover:not(:disabled) { background: #593585; }
+#delete-artifact { grid-column: 1 / -1; background: #a93a32; border-color: #a93a32; color: #fff; }
+#delete-artifact:hover:not(:disabled) { background: #872d27; }
+#log { white-space: pre-wrap; word-break: break-word; background: #111922; color: #d8ffd8; padding: 10px; border-radius: 6px; max-height: 230px; overflow: auto; font-size: .7rem; }
+/* The 3D viewer under the map, as in the Web UI. */
+#viewer-panel { display: none; position: relative; flex: 0 0 45%; min-height: 280px; border-top: 1px solid var(--border); background: #17222d; }
+body.viewer-open #viewer-panel { display: block; }
+#viewer-canvas { display: block; width: 100%; height: 100%; }
+#viewer-status { position: absolute; z-index: 1; top: 10px; left: 10px; max-width: calc(100% - 20px); padding: 6px 9px; border-radius: 5px; color: #fff; background: #101820cc; font-size: .78rem; }
+@media (max-width: 800px) {
+  #viewer-panel { flex-basis: 360px; }
+}

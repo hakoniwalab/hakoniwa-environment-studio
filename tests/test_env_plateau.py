@@ -25,6 +25,9 @@ class FakeClient:
     def third_mesh_codes(self, bbox):
         return ["64414278"]
 
+    def third_mesh_bounds(self, code):
+        return (141.35, 43.0667, 141.3625, 43.075)
+
     def search_url(self, api, feature_type, bbox, mesh_level=3):
         return feature_type
 
@@ -37,7 +40,7 @@ class FakeClient:
 
 def file(feature, lod, code="64414278001", size=1000):
     return {"url": f"https://example/{feature}/{code}", "city_code": "01100", "city_name": "札幌市",
-            "year": 2020, "max_lod": lod, "file_size": size, "code": code}
+            "year": 2020, "spec": "3.5", "max_lod": lod, "file_size": size, "code": code}
 
 
 class PlateauInspectionTest(unittest.TestCase):
@@ -45,29 +48,34 @@ class PlateauInspectionTest(unittest.TestCase):
         client = FakeClient({"bldg": [file("bldg", 2)], "dem": [file("dem", 1)], "tran": [file("tran", 1)],
                              "frn": [file("frn", 1)]})
         result = env_plateau.inspect((43.0668, 141.351), (100, 100), client)
-        self.assertTrue(result["available"])
+        self.assertEqual((result["status"], result["reason"]), ("available", None))
         self.assertEqual(result["capabilities"]["building"]["max_lod"], 2)
         # Road markings below LOD3 are there, but the builder does not use them.
-        self.assertEqual((result["capabilities"]["road_markings"]["available"],
-                          result["capabilities"]["road_markings"]["usable"]), (True, False))
-        self.assertEqual(result["municipalities"], [{"city_code": "01100", "city": "札幌市", "year": 2020}])
-        self.assertEqual((result["files"], result["download_bytes"]), (4, 4000))
+        self.assertEqual((result["capabilities"]["road_markings"]["dataset_status"],
+                          result["capabilities"]["road_markings"]["generation_status"]), ("available", "scoped_out"))
+        self.assertEqual(result["municipalities"],
+                         [{"city_code": "01100", "city": "札幌市", "year": 2020, "spec": "3.5"}])
+        self.assertEqual((result["source_file_count"], result["estimated_download_bytes"]), (4, 4000))
+        # The third meshes asked about, to be drawn on the map.
+        self.assertEqual(result["query_meshes"], [{"code": "64414278", "bbox": {
+            "west": 141.35, "south": 43.0667, "east": 141.3625, "north": 43.075}}])
 
     def test_an_area_without_roads_is_not_available(self):
         result = env_plateau.inspect((35.36, 138.73), (100, 100),
                                      FakeClient({"bldg": [file("bldg", 1)], "dem": [file("dem", 1)]}))
-        self.assertEqual((result["available"], result["missing"], result["flat_ground_possible"]),
-                         (False, ["road"], False))
+        self.assertEqual((result["status"], result["missing"], result["flat_ground_possible"]),
+                         ("unavailable", ["road"], False))
+        self.assertIn("road", result["reason"])
 
     def test_an_area_without_terrain_can_be_built_on_flat_ground(self):
         result = env_plateau.inspect((35.0, 139.0), (100, 100),
                                      FakeClient({"bldg": [file("bldg", 1)], "tran": [file("tran", 1)]}))
-        self.assertEqual((result["available"], result["flat_ground_possible"]), (False, True))
+        self.assertEqual((result["status"], result["flat_ground_possible"]), ("unavailable", True))
 
     def test_bridges_outside_the_area_are_left_out(self):
         client = FakeClient({"bldg": [file("bldg", 1)], "dem": [file("dem", 1)], "tran": [file("tran", 1)],
                              "brid": [file("brid", 3, code="64414278002"), file("brid", 3, code="64414279001")]})
-        self.assertEqual(env_plateau.inspect((43.0, 141.3), (100, 100), client)["capabilities"]["bridge"]["files"], 1)
+        self.assertEqual(env_plateau.inspect((43.0, 141.3), (100, 100), client)["capabilities"]["bridge"]["source_file_count"], 1)
 
     def test_a_catalog_that_does_not_answer_is_an_inspection_error(self):
         class Down(FakeClient):
@@ -80,8 +88,9 @@ class PlateauInspectionTest(unittest.TestCase):
 
 class BuildConditionsTest(unittest.TestCase):
     def test_the_defaults_are_the_city_world_web_uis(self):
+        # Physics Level 3, every collider reduction off, stop where the DEM does not cover.
         self.assertEqual(env_cityworld.build_options(None), {
-            "building_physics_level": 3, "building_collider_reduction": "convex-decompose",
+            "building_physics_level": 3, "building_collider_reduction": "safe",
             "terrain_uncovered_policy": "error"})
 
     def test_chosen_conditions_go_into_the_envsim_build(self):

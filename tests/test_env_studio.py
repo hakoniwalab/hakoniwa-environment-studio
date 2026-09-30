@@ -54,6 +54,22 @@ class StudioServerTest(unittest.TestCase):
         except HTTPError as error:
             return error.code, json.loads(error.read())
 
+    def test_a_built_city_world_in_the_export_folder_is_not_deleted(self):
+        job = self.user.parent / "city-worlds/sapporo"
+        (job / "build/world").mkdir(parents=True)
+        (job / "job.json").write_text("{}", encoding="utf-8")
+        exported = {str((job / "build").resolve()): {"id": "sapporo", "title": "sapporo"}}
+        with mock.patch.object(env_studio, "EXPORT_DIR", self.user.parent / "exports"), \
+                mock.patch.object(env_studio.env_urban, "exported", lambda _: exported):
+            status, answer = self.call("POST", "/api/city-worlds/jobs/sapporo/delete", {})
+        self.assertEqual(status, 409)
+        self.assertIn("書き出しを消す", answer["error"])
+        self.assertTrue(job.is_dir())
+        # Not exported: it goes.
+        self.assertEqual(self.call("POST", "/api/city-worlds/jobs/sapporo/delete", {})[0], 200)
+        self.assertFalse(job.exists())
+        self.assertEqual(self.call("GET", "/api/city-worlds/jobs/sapporo/city-world.glb")[0], 404)
+
     def test_only_this_studios_pages_may_change_things(self):
         def post(headers):
             request = Request(f"http://127.0.0.1:{self.port}/api/validate", data=b"{}", method="POST", headers=headers)

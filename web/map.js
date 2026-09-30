@@ -5,6 +5,7 @@
 // osm2citygml.py) and that into parts (tools/env_citygml.py).
 
 import { $, api, el } from "./dom.js";
+import { plateauMode } from "./plateau.js";
 
 const DEFAULT_CENTER = [35.6809, 139.7667]; // Tokyo Station
 const DEFAULT_ZOOM = 17;
@@ -276,51 +277,6 @@ async function importWorld(build, given = null) {
   }
 }
 
-// A City World built from PLATEAU by hakoniwa-envsim (POST /api/city-worlds/build),
-// followed until it is done, then imported under the same id.
-const BUILD_KEY = "hakoniwa-environment-city-world-build";
-const PHASES = { source_download: "ダウンロード", catalog: "カタログの問い合わせ", collider_visualization: "当たり判定の表示用 GLB" };
-
-function describeBuild(status) {
-  const progress = status.progress || {};
-  const phase = PHASES[progress.phase] || progress.phase || "準備";
-  const count = progress.total ? ` ${progress.current}/${progress.total}` : "";
-  const feature = progress.feature ? `（${progress.feature}）` : "";
-  const elapsed = status.elapsed_s ? `・${Math.round(status.elapsed_s)} 秒` : "";
-  return `${status.id}：${phase}${feature}${count}${elapsed}`;
-}
-
-async function followBuild(id, onDone) {
-  $("#build-cancel").hidden = false;
-  $("#build-start").disabled = true;
-  try { localStorage.setItem(BUILD_KEY, id); } catch { /* storage unavailable */ }
-  for (;;) {
-    let status;
-    try {
-      status = await api("GET", `city-worlds/build/${encodeURIComponent(id)}`);
-    } catch (error) {
-      $("#build-status").textContent = error.message;
-      break;
-    }
-    $("#build-status").textContent = describeBuild(status);
-    if (status.state !== "running") {
-      if (status.state === "done") {
-        $("#build-status").textContent = `${id} を作りました。続けて登録・取り込みをします…`;
-        await onDone(status);
-        $("#build-status").textContent = `${id} を作りました（City World：${status.build}）`;
-      } else {
-        $("#build-status").replaceChildren(el("div", {}, `${id} を作れませんでした（ログ：${status.log}）`),
-          ...(status.errors.length ? status.errors : status.log_tail.slice(-5)).map((line) => el("div", {}, line)));
-      }
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-  try { localStorage.removeItem(BUILD_KEY); } catch { /* storage unavailable */ }
-  $("#build-cancel").hidden = true;
-  $("#build-start").disabled = false;
-}
-
 function report(result) {
   const assumed = result.assumed;
   const items = [
@@ -338,11 +294,9 @@ function report(result) {
 // surfaces); OpenStreetMap covers anywhere, with buildings as extruded outlines.
 const MODE_KEY = "hakoniwa-environment-map-mode";
 const MODE_HINTS = {
-  plateau: "PLATEAU：整備された都市だけですが、LOD2 の建物（テクスチャ付き）・建物ごとの当たり判定・地形（DEM）・道路面まであります。まず「この範囲を診断」でデータがあるか確かめてください。",
+  plateau: "PLATEAU：整備された都市だけですが、LOD2 の建物（テクスチャ付き）・建物ごとの当たり判定・地形（DEM）・道路面まであります。まず「2. Capabilityを診断」でデータがあるか確かめてください。",
   osm: "OpenStreetMap：世界中どこでも使えます。建物は外形を押し出した箱（高さは推定を含む）、地面は平らです。取り込んだ建物や道路は部品として編集できます。",
 };
-const FEATURE_LABELS = { building: "建物", terrain: "地形（DEM）", road: "道路", road_markings: "路面標示", bridge: "橋" };
-
 function setMode(mode) {
   for (const button of document.querySelectorAll("#source-mode button")) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
@@ -353,52 +307,8 @@ function setMode(mode) {
   try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage unavailable */ }
 }
 
-function formatMegabytes(bytes) {
-  return bytes > 0 ? `約 ${(bytes / 1e6).toFixed(1)} MB` : "不明（カタログにサイズがありません）";
-}
-
-// POST /api/plateau/inspect: what PLATEAU has in the selection (nothing downloaded).
-async function inspectPlateau() {
-  if (!selectionIsValid()) {
-    setStatus("範囲の値を確認してください", "error");
-    return;
-  }
-  const report = $("#plateau-report");
-  $("#to-osm").hidden = true;
-  $("#plateau-inspect").disabled = true;
-  report.textContent = "PLATEAU のカタログに問い合わせています…";
-  try {
-    const result = await api("POST", "plateau/inspect", { selection: selection() });
-    const rows = Object.entries(result.capabilities).map(([name, item]) => el("li", {},
-      `${FEATURE_LABELS[name] || name}：${item.available ? `あり（最大 LOD${item.max_lod}、${item.files} ファイル）` : "なし"}`
-      + (item.available && !item.usable ? "（この変換では使いません：LOD3 が必要）" : "")));
-    const cities = result.municipalities.map((city) => `${city.city}（${city.year} 年度）`).join("、");
-    let verdict;
-    if (result.available) {
-      verdict = el("p", { class: "ok" }, "この範囲は PLATEAU で作れます。");
-    } else if (result.flat_ground_possible) {
-      verdict = el("p", {}, "地形（DEM）がありません。「地形（DEM）が無い所」を「平らな地面にする」にすれば作れます。OpenStreetMap で作ることもできます。");
-      $("#build-terrain").value = "constant";
-    } else {
-      verdict = el("p", { class: "error" }, `この範囲には PLATEAU の${result.missing.map((name) => FEATURE_LABELS[name] || name).join("・")}がありません。OpenStreetMap で作れます。`);
-    }
-    report.replaceChildren(verdict,
-      el("div", {}, `自治体：${cities || "なし"}`),
-      el("ul", {}, ...rows),
-      el("div", {}, `ダウンロード量：${formatMegabytes(result.download_bytes)}`));
-    $("#to-osm").hidden = result.available;
-  } catch (error) {
-    report.textContent = error.message;
-    $("#to-osm").hidden = false;
-  } finally {
-    $("#plateau-inspect").disabled = false;
-  }
-}
-
 async function init() {
   const config = await api("GET", "map/config");
-  // Started with an export folder: offer writing City Worlds there.
-  $("#build-register-field").hidden = !config.export_dir;
   const saved = loadSelection();
   $("#latitude").value = saved.latitude.toFixed(6);
   $("#longitude").value = saved.longitude.toFixed(6);
@@ -408,9 +318,27 @@ async function init() {
   L.tileLayer(config.tiles.url, { maxZoom: 20, maxNativeZoom: 19, attribution: config.tiles.attribution }).addTo(map);
   L.control.scale().addTo(map);
   let importing = false;
-  const controls = selectionControls(map, (valid) => { $("#import").disabled = importing || !valid; });
+  let plateau = null;
+  const controls = selectionControls(map, (valid) => {
+    $("#import").disabled = importing || !valid;
+    plateau?.selectionChanged(valid);
+  });
   map.fitBounds(selectionBounds().pad(0.35), { maxZoom: 19 });
   const update = () => controls.refresh();
+
+  // PLATEAU: the City World Web UI (plateau.js) over the same selection.
+  plateau = plateauMode({
+    map, exportDir: config.export_dir, selection, selectionIsValid, selectionBounds, setStatus, importWorld,
+    applySelection(given) {
+      $("#latitude").value = Number(given.center.latitude).toFixed(6);
+      $("#longitude").value = Number(given.center.longitude).toFixed(6);
+      $("#northSouth").value = Number(given.half_extent_m.north_south).toFixed(1);
+      $("#eastWest").value = Number(given.half_extent_m.east_west).toFixed(1);
+      controls.refresh();
+    },
+    toOsm: () => setMode("osm"),
+  });
+  plateau.selectionChanged(selectionIsValid());
 
   $("#source").addEventListener("change", () => { $("#geojson-field").hidden = $("#source").value !== "geojson"; });
 
@@ -420,59 +348,13 @@ async function init() {
   for (const button of document.querySelectorAll("#source-mode button")) {
     button.addEventListener("click", () => setMode(button.dataset.mode));
   }
-  $("#plateau-inspect").addEventListener("click", inspectPlateau);
-  // The same selection in the other source: from PLATEAU without data to OSM, from OSM to a PLATEAU check.
-  $("#to-osm").addEventListener("click", () => setMode("osm"));
-  $("#to-plateau").addEventListener("click", () => { setMode("plateau"); inspectPlateau(); });
+  // The same selection in the other source: from OSM to a PLATEAU diagnosis.
+  $("#to-plateau").addEventListener("click", () => { setMode("plateau"); plateau.inspect(); });
 
   const worlds = L.layerGroup().addTo(map);
   try { $("#world-root").value = localStorage.getItem(ROOT_KEY) || ""; } catch { /* storage unavailable */ }
   $("#world-search").addEventListener("click", () => searchWorlds(map, worlds));
   searchWorlds(map, worlds);
-
-  const imported = async (status) => {
-    const build = { path: status.build, title: status.id };
-    if (config.export_dir && $("#build-register").checked) await exportWorld(build);
-    if ($("#build-import").checked) await importWorld(build, status.id);
-    searchWorlds(map, worlds);
-  };
-  $("#build-start").addEventListener("click", async () => {
-    const id = $("#build-id").value.trim();
-    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) {
-      setStatus("ID は小文字・数字・- _ で付けてください", "error");
-      return;
-    }
-    if (!selectionIsValid()) {
-      setStatus("範囲の値を確認してください", "error");
-      return;
-    }
-    try {
-      await api("POST", "city-worlds/build", {
-        id, name: id, selection: selection(),
-        options: {
-          building_physics_level: Number($("#build-physics").value),
-          building_collider_reduction: $("#build-reduction").value,
-          terrain_uncovered_policy: $("#build-terrain").value,
-        },
-        offline: $("#build-offline").checked, overwrite: $("#build-offline").checked, root: $("#world-root").value.trim().split(",")[0].trim() || undefined,
-      });
-    } catch (error) {
-      setStatus(error.message, "error");
-      return;
-    }
-    setStatus(`${id} を作り始めました（hakoniwa-envsim）`, "ok");
-    followBuild(id, imported);
-  });
-  $("#build-cancel").addEventListener("click", async () => {
-    let id = null;
-    try { id = localStorage.getItem(BUILD_KEY); } catch { /* storage unavailable */ }
-    if (!id || !window.confirm(`${id} を作るのを中止しますか？`)) return;
-    try { await api("POST", `city-worlds/build/${encodeURIComponent(id)}/cancel`, {}); } catch (error) { setStatus(error.message, "error"); }
-  });
-  try {  // a build started before this page was opened again
-    const running = localStorage.getItem(BUILD_KEY);
-    if (running) followBuild(running, imported);
-  } catch { /* storage unavailable */ }
 
   // Only grounds that need no data of their own (map data brings no terrain).
   $("#terrain").replaceChildren(...config.terrains

@@ -19,7 +19,7 @@
   <main class="map-layout">
     <aside class="sidebar">
       <section class="panel">
-        <h2>範囲</h2>
+        <h2>1. 対象範囲</h2>
         <div class="row">
           <label class="field">Latitude<input id="latitude" type="number" step="0.000001"></label>
           <label class="field">Longitude<input id="longitude" type="number" step="0.000001"></label>
@@ -34,56 +34,92 @@
 
       <section class="panel">
         <div class="segmented" id="source-mode" role="group" aria-label="データの種類">
-          <button data-mode="plateau" aria-pressed="true" title="国土交通省の 3D 都市モデル。整備された都市だけですが、LOD2 の建物・地形（DEM）・道路面まであります">PLATEAU</button>
-          <button data-mode="osm" aria-pressed="false" title="OpenStreetMap。世界中どこでも使えますが、建物は外形を押し出した箱（高さは推定を含む）です">OpenStreetMap</button>
+          <button class="secondary" data-mode="plateau" aria-pressed="true" title="国土交通省の 3D 都市モデル。整備された都市だけですが、LOD2 の建物・地形（DEM）・道路面まであります">PLATEAU</button>
+          <button class="secondary" data-mode="osm" aria-pressed="false" title="OpenStreetMap。世界中どこでも使えますが、建物は外形を押し出した箱（高さは推定を含む）です">OpenStreetMap</button>
         </div>
         <p class="hint" id="mode-hint"></p>
       </section>
 
       <div id="mode-plateau">
         <section class="panel">
-          <h2>PLATEAU で診断する</h2>
-          <p class="hint">青い範囲に PLATEAU のどのデータがあるかを、公式のカタログに問い合わせます（ダウンロードはしません）。</p>
-          <button id="plateau-inspect">この範囲を診断</button>
-          <div id="plateau-report" class="meta"></div>
-          <button id="to-osm" class="secondary" hidden>この範囲を OpenStreetMap で作る</button>
+          <h2>生成条件</h2>
+          <div class="grid">
+            <label>Building Physics Level
+              <select id="physics-level">
+                <option value="0">0 — P0のみ（最軽量）</option>
+                <option value="1">1 — P1 → P0</option>
+                <option value="2">2 — P2 → P1 → P0</option>
+                <option value="3" selected>3 — P3 → P2 → P1 → P0</option>
+              </select>
+            </label>
+            <label>DEM未被覆領域
+              <select id="terrain-uncovered-policy">
+                <option value="error" selected>停止する（厳密・既定）</option>
+                <option value="constant">標高0 mで補完（水面向け）</option>
+              </select>
+            </label>
+            <label class="checkbox-option">
+              <input id="coplanar-union" type="checkbox">
+              <span>同一平面の隣接する凸面も統合する（Collider削減）</span>
+            </label>
+            <label class="checkbox-option">
+              <input id="convex-decompose" type="checkbox">
+              <span>凹polygonの三角Colliderも少数の凸領域へ再構成する（実験的）</span>
+            </label>
+            <label class="checkbox-option">
+              <input id="tolerant-planar" type="checkbox">
+              <span>WallSurfaceを派生平面まで最大5cmで統合する（box維持・近似あり）</span>
+            </label>
+          </div>
+          <p class="hint">海・河川を含む範囲では、PLATEAU DEMの未被覆部分を標高0 mで補完できます。DEMがまったく無い範囲も、標高0 mで補完にすると平らな地面で生成できます。</p>
+          <div id="mesh-summary" class="mono"></div>
+          <button id="inspect" class="wide" type="button">2. Capabilityを診断</button>
         </section>
 
         <section class="panel">
-          <h2>PLATEAU から City World を作る</h2>
-          <p class="hint">青い範囲の PLATEAU データを hakoniwa-envsim でダウンロードして変換します（LOD2 の見た目・建物の当たり判定・地形・道路・路面標示）。範囲と建物の数によって数分〜数十分かかります。ダウンロードしたデータは共有のキャッシュに残り、次から使い回します。</p>
-          <label class="field">ID<input id="build-id" placeholder="sapporo-station" autocomplete="off"></label>
-          <label class="field" title="建物の当たり判定をどこまで細かくするか。P3 は屋根・壁の面ごと、P0 は建物ごとの箱（hakoniwa-envsim の building_physics_level）">建物の当たり判定
-            <select id="build-physics">
-              <option value="3" selected>P3：屋根・壁の面まで（細かい）</option>
-              <option value="2">P2</option>
-              <option value="1">P1</option>
-              <option value="0">P0：建物ごとの箱（軽い）</option>
-            </select>
-          </label>
-          <label class="field" title="当たり判定の面をまとめて数を減らす方式（hakoniwa-envsim の building_collider_reduction）">当たり判定の簡略化
-            <select id="build-reduction">
-              <option value="convex-decompose" selected>convex-decompose（既定）</option>
-              <option value="coplanar-union">coplanar-union</option>
-              <option value="safe">safe（まとめない）</option>
-              <option value="tolerant-planar">tolerant-planar（壁を最大 5 cm 近似）</option>
-            </select>
-          </label>
-          <label class="field" title="地形（DEM）が無い所の扱い。平らにすると、DEM の無い範囲でも作れます（hakoniwa-envsim の terrain_uncovered_policy）">地形（DEM）が無い所
-            <select id="build-terrain">
-              <option value="error" selected>止める</option>
-              <option value="constant">平らな地面にする（0 m）</option>
-            </select>
-          </label>
-          <label class="field inline" title="同じ ID・同じ範囲で前に作った City World を、そのとき取得したカタログと CityGML だけで作り直します（ネットワークを使いません）。"><input type="checkbox" id="build-offline"> 前に作った同じ ID・同じ範囲を、取得済みのデータで作り直す（オフライン）</label>
-          <label class="field inline" id="build-register-field" hidden title="作った City World を、変換せずにそのまま書き出し先に書き出します（書き出し先を見ているツール、例えば hakoniwa-urban-mobility が World として取り込みます。ID がその World の ID になります）。"><input type="checkbox" id="build-register" checked> できあがったら書き出し先にそのまま書き出す</label>
-          <label class="field inline" title="作った City World を、この Studio で編集できる部品にします。編集したものは Studio の画面の「書き出す」で書き出します。"><input type="checkbox" id="build-import" checked> できあがったら部品として取り込む（編集用）</label>
-          <div class="row">
-            <button id="build-start">この範囲の City World を作る</button>
-            <button id="build-cancel" class="secondary" hidden>中止</button>
+          <h2>診断結果</h2>
+          <div id="overall">未診断</div>
+          <div id="municipality" class="municipality"></div>
+          <div id="capabilities" class="capabilities"></div>
+          <button id="to-osm" class="secondary wide" type="button" hidden>この範囲を OpenStreetMap で作る</button>
+          <div class="grid">
+            <label class="full" title="生成する City World の ID。書き出し先では World の ID になります（小文字・数字・- _）。診断すると、自治体と中心から付けます。">ID
+              <input id="build-id" autocomplete="off" placeholder="診断すると自動で付きます"></label>
+            <label class="checkbox-option" id="build-register-field" hidden title="作った City World を、変換せずにそのまま書き出し先に書き出します（書き出し先を見ているツール、例えば hakoniwa-urban-mobility が World として取り込みます）。">
+              <input type="checkbox" id="build-register" checked><span>できあがったら書き出し先にそのまま書き出す</span></label>
+            <label class="checkbox-option" title="作った City World を、この Studio で編集できる部品にします。編集したものは Studio の画面の「書き出す」で書き出します。">
+              <input type="checkbox" id="build-import"><span>できあがったら部品として取り込む（編集用）</span></label>
+            <label class="checkbox-option" title="同じ ID・同じ範囲で前に作った City World を、そのとき取得したカタログと CityGML だけで作り直します（ネットワークを使いません）。">
+              <input type="checkbox" id="build-offline"><span>前に作った同じ ID・同じ範囲を、取得済みのデータで作り直す（オフライン）</span></label>
           </div>
-          <div id="build-status" class="meta"></div>
+          <button id="generate" class="wide" type="button" disabled>3. City Worldを生成</button>
+          <button id="cancel" class="wide" type="button" disabled>生成をキャンセル</button>
+          <div id="generation" class="generation"></div>
         </section>
+
+        <section class="panel artifact-controls">
+          <label>生成結果<select id="artifact-select" disabled><option>生成結果はありません</option></select></label>
+          <div id="artifact-path" class="mono">—</div>
+          <div id="artifact-detail">Physics Level: — / Collider: —</div>
+          <div id="cache-info" class="mono">共有キャッシュ: —</div>
+          <fieldset class="viewer-layers">
+            <legend>3D表示</legend>
+            <label><input id="viewer-visual" type="checkbox" checked disabled>Visual</label>
+            <label><input id="viewer-collider" type="checkbox" disabled>Collider</label>
+          </fieldset>
+          <div class="artifact-actions">
+            <button id="download" type="button" disabled>Download ZIP</button>
+            <button id="view3d" type="button" disabled>3D Viewer</button>
+            <button id="export-artifact" class="secondary" type="button" disabled hidden>書き出す</button>
+            <button id="import-artifact" class="secondary" type="button" disabled title="この City World を、Studio で編集できる部品にします">部品として取り込む</button>
+            <button id="delete-artifact" type="button" disabled>生成結果を削除</button>
+          </div>
+        </section>
+
+        <details class="panel">
+          <summary>通信ログ</summary>
+          <pre id="log"></pre>
+        </details>
       </div>
 
       <div id="mode-osm" hidden>
@@ -122,9 +158,19 @@
       </section>
     </aside>
 
-    <section class="panel map-panel"><div id="map"></div></section>
+    <section class="panel map-panel">
+      <div id="map"></div>
+      <section id="viewer-panel" aria-label="生成した City World の 3D 表示">
+        <div id="viewer-status">3D Viewer</div>
+        <canvas id="viewer-canvas"></canvas>
+      </section>
+    </section>
   </main>
 
+  <!-- The Studio's three.js release (index.html). -->
+  <script type="importmap">
+    {"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+  </script>
   <script type="module" src="map.js"></script>
 </body>
 </html>

@@ -21,6 +21,10 @@ export async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await response.json();
+  if (response.status === 404 && String(data.error).startsWith("no API ")) {
+    // The page files are newer than the running server (the repository was updated while it ran).
+    throw new Error(`この画面より古い Environment Studio が動いています。停止して起動し直してください（${data.error}）`);
+  }
   if (!response.ok) throw new Error(data.error || `${response.status}`);
   return data;
 }
