@@ -299,6 +299,51 @@ class DemTerrainTest(unittest.TestCase):
             self.assertEqual([item.as_json() for item in env_validate.check(parsed)], [])
 
 
+class OverlapClipTest(unittest.TestCase):
+    """Footprints that overlap in the data are separated at import."""
+
+    @staticmethod
+    def building(part_id, points, height=10.0, base=0.0):
+        xs, ys = [x for x, _ in points], [y for _, y in points]
+        cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+        params = {"footprint": [[x - cx, y - cy] for x, y in points], "height_m": height}
+        if base:
+            params["min_height_m"] = base
+        return {"id": part_id, "item": "building-footprint", "pose": {"x_m": cx, "y_m": cy, "yaw_deg": 0},
+                "params": params, "source": {"provider": "plateau", "kind": "citygml", "id": part_id.upper()}}
+
+    def test_the_smaller_one_gives_up_the_overlap(self):
+        from shapely.geometry import Polygon
+
+        big = self.building("big", [(0, 0), (40, 0), (40, 30), (0, 30)])
+        small = self.building("small", [(38, 10), (48, 10), (48, 18), (38, 18)])  # 2 m into the big one
+        before = dict(small["pose"])
+        clipped, left = env_citygml.clip_overlaps([big, small], "building-footprint")
+        self.assertEqual((clipped, left), (1, []))
+        self.assertEqual(small["pose"], before)  # the frame of its LOD2 look stays
+        world = Polygon([(small["pose"]["x_m"] + x, small["pose"]["y_m"] + y) for x, y in small["params"]["footprint"]])
+        self.assertAlmostEqual(world.area, 8 * (10 - 2 - env_citygml.CLIP_GAP_M), delta=0.05)
+        self.assertEqual(small["source"]["tags"]["clipped_by"], "BIG")
+        self.assertEqual(big["params"]["footprint"], [[-20.0, -15.0], [20.0, -15.0], [20.0, 15.0], [-20.0, 15.0]])
+        recipe = {"schema": env_schema.RECIPE_SCHEMA, "name": "clip", "catalog": CATALOG, "size_m": {"east": 120, "north": 80},
+                  "terrain": {"item": "grass-ground"}, "objects": [big, small]}
+        parsed = env_schema.parse_recipe(recipe, ROOT / "work/clip.yaml")
+        if env_validate.available():
+            self.assertEqual([item.as_json() for item in env_validate.check(parsed)], [])
+
+    def test_what_cannot_be_separated_is_left_and_reported(self):
+        big = self.building("big", [(0, 0), (40, 0), (40, 30), (0, 30)])
+        inside = self.building("inside", [(10, 10), (14, 10), (14, 14), (10, 14)])  # wholly inside
+        canopy = self.building("canopy", [(30, 20), (50, 20), (50, 40), (30, 40)], height=20.0, base=19.5)
+        under = self.building("under", [(35, 25), (45, 25), (45, 35), (35, 35)], height=6.0)
+        clipped, left = env_citygml.clip_overlaps([big, inside, canopy, under], "building-footprint")
+        # inside: nothing would remain of it; the canopy (19.5-20 m) meets neither big nor under in height.
+        pairs = {(item["a"], item["b"]) for item in left}
+        self.assertIn(("inside", "big"), pairs)
+        self.assertNotIn("clipped_by", canopy["source"].get("tags", {}))
+        self.assertEqual(under["source"].get("tags", {}).get("clipped_by"), "BIG")  # under meets big at the same height
+
+
 @unittest.skipUnless(ENVSIM, "hakoniwa-envsim is not available")
 class CommandErrorTest(unittest.TestCase):
     def test_a_failing_conversion_prints_json_diagnostics(self):

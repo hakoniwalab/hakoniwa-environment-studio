@@ -283,6 +283,9 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
 
     if not report["buildings"]:
         raise fail("citygml", "missing_field", "no LOD1 building in the selection", actual=str(source))
+    report["clipped"], report["overlaps_left"] = clip_overlaps(objects, items["building"])
+    if report["clipped"]:
+        report["notes"].append(f"{report['clipped']} building footprints were clipped where they overlapped a larger one in the data")
     report["lod2_visuals"] = 0
     if visuals is not None:
         report["lod2_visuals"] = attach_visuals(objects, grounds, center, visuals.get("textures") or {},
@@ -322,6 +325,85 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     report["terrain"] = "dem" if dem is not None else "flat"
     report["provider"] = provider
     return recipe, report
+
+
+# --- Overlaps already in the data ------------------------------------------------
+#
+# Map data has buildings whose footprints overlap (PLATEAU: a small building
+# reaching 6.6 m² into a station complex). Static buildings never move, but the
+# validation reports them and so would a vehicle meeting the seam. So the
+# smaller footprint of each overlapping pair (at overlapping heights) gives up
+# the part the larger one covers, kept a little apart; the part's position (the
+# frame of its LOD2 look) stays. A pair that cannot be separated that way is
+# left for a person and reported.
+
+CLIP_GAP_M = 0.002  # the clipped outline stays this far inside (rounding to mm cannot touch again)
+MIN_KEPT_SHARE = 0.2  # a building keeping less than this of its footprint is not clipped (reported)
+MIN_OVERLAP_M2 = 1e-4
+
+
+def _world_footprint(obj):
+    from shapely.geometry import Polygon
+
+    x, y = obj["pose"]["x_m"], obj["pose"]["y_m"]
+    return Polygon([(x + px, y + py) for px, py in obj["params"]["footprint"]])
+
+
+def _height_range(obj) -> tuple[float, float]:
+    params = obj["params"]
+    return float(params.get("min_height_m", 0.0)), float(params["height_m"])
+
+
+def clip_overlaps(objects: list[dict], building_item: str) -> tuple[int, list[dict]]:
+    """Separate overlapping building footprints (see above); returns (how many
+    were clipped, the overlaps left: [{a, b, area_m2, reason}])."""
+    from shapely.geometry import Polygon
+    from shapely.strtree import STRtree
+
+    buildings = sorted((obj for obj in objects if obj["item"] == building_item), key=lambda obj: obj["id"])
+    shapes = {obj["id"]: _world_footprint(obj) for obj in buildings}
+    originals = {key: shape.area for key, shape in shapes.items()}
+    tree = STRtree([shapes[obj["id"]] for obj in buildings])
+    clipped, left = set(), []
+    for index, obj in enumerate(buildings):
+        for other_index in sorted(int(i) for i in tree.query(shapes[obj["id"]])):
+            if other_index <= index:
+                continue
+            other = buildings[other_index]
+            a, b = shapes[obj["id"]], shapes[other["id"]]
+            (low_a, high_a), (low_b, high_b) = _height_range(obj), _height_range(other)
+            if min(high_a, high_b) <= max(low_a, low_b):
+                continue  # one above the other (a canopy over a building)
+            overlap = a.intersection(b).area
+            if overlap <= MIN_OVERLAP_M2:
+                continue
+            small, large = (obj, other) if (a.area, obj["id"]) < (b.area, other["id"]) else (other, obj)
+            rest = shapes[small["id"]].difference(shapes[large["id"]].buffer(CLIP_GAP_M, join_style="mitre"))
+            if rest.geom_type == "MultiPolygon":
+                pieces = sorted(rest.geoms, key=lambda piece: piece.area, reverse=True)
+                if pieces[1].area > 0.05 * pieces[0].area:
+                    left.append({"a": small["id"], "b": large["id"], "area_m2": round(overlap, 3),
+                                 "reason": "clipping would split the building"})
+                    continue
+                rest = pieces[0]
+            if rest.geom_type != "Polygon" or rest.is_empty or rest.interiors \
+                    or rest.area < MIN_KEPT_SHARE * originals[small["id"]]:
+                left.append({"a": small["id"], "b": large["id"], "area_m2": round(overlap, 3),
+                             "reason": "clipping would leave too little or a hole"})
+                continue
+            x, y = small["pose"]["x_m"], small["pose"]["y_m"]
+            ring = _clean_ring([(px - x, py - y) for px, py in list(rest.exterior.coords)[:-1]])
+            if ring is None:
+                left.append({"a": small["id"], "b": large["id"], "area_m2": round(overlap, 3),
+                             "reason": "the clipped outline is not a simple polygon"})
+                continue
+            small["params"]["footprint"] = [[_mm(px), _mm(py)] for px, py in ring]
+            shapes[small["id"]] = Polygon([(x + px, y + py) for px, py in ring])
+            tags = small["source"].setdefault("tags", {})
+            tags["clipped_by"] = ", ".join(filter(None, [tags.get("clipped_by"), large["source"]["id"]]))
+            tags["clipped_m2"] = f"{float(tags.get('clipped_m2', 0)) + overlap:.3f}"
+            clipped.add(small["id"])
+    return len(clipped), left
 
 
 # --- LOD2 visuals (stage B-1) ----------------------------------------------------
