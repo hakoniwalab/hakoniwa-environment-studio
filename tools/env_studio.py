@@ -59,7 +59,7 @@ import env_citygml  # noqa: E402
 import env_schema  # noqa: E402
 import env_validate  # noqa: E402
 import env_version  # noqa: E402
-from env_diagnostics import DiagnosticError  # noqa: E402
+from env_diagnostics import DiagnosticError, load_yaml_text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "web"
@@ -180,15 +180,25 @@ def _recipe_files() -> dict[str, tuple[Path, bool]]:
 
 
 def list_recipes() -> list[dict]:
+    """Each Recipe's name, size, object count and ground kind, read from its
+    YAML without resolving it (a city Recipe with a DEM takes seconds to
+    resolve; opening it reports its problems)."""
     entries = []
     for recipe_id, (path, editable) in sorted(_recipe_files().items()):
         entry = {"id": recipe_id, "editable": editable, "path": str(path)}
         try:
-            recipe = env_schema.load_recipe(path)
-            entry.update(name=recipe.name, size_m={"east": recipe.size_east_m, "north": recipe.size_north_m},
-                         objects=len(recipe.objects), terrain=recipe.terrain.kind,
-                         catalog_id=_catalog_id_of(recipe.catalog.path))
-        except DiagnosticError as exc:
+            if not ID_PATTERN.match(recipe_id):
+                raise StudioError(f"ファイル名 {path.name} は Recipe の ID に使えません（小文字・数字・- _、64 文字まで）")
+            data = load_yaml_text(path.read_text(encoding="utf-8"))
+            size = data["size_m"]
+            catalog_path = (path.parent / data["catalog"]).resolve()
+            catalog = env_schema.load_catalog(catalog_path)
+            terrain_item = catalog.items.get((data.get("terrain") or {}).get("item"))
+            entry.update(name=data.get("name") or recipe_id, size_m={"east": size["east"], "north": size["north"]},
+                         objects=len(data.get("objects") or []),
+                         terrain=(terrain_item.type.terrain or {}).get("kind", "flat") if terrain_item else "flat",
+                         catalog_id=_catalog_id_of(catalog_path))
+        except (StudioError, DiagnosticError, OSError, yaml.YAMLError, KeyError, TypeError, AttributeError) as exc:
             entry["error"] = str(exc)
         entries.append(entry)
     return entries
@@ -199,7 +209,7 @@ def read_recipe(recipe_id: str) -> dict:
     if found is None:
         raise StudioError(f"Recipe {recipe_id} not found", HTTPStatus.NOT_FOUND)
     path, editable = found
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = load_yaml_text(path.read_text(encoding="utf-8"))
     reference = data.get("catalog") if isinstance(data, dict) else None
     catalog_id = _catalog_id_of(path.parent / reference) if isinstance(reference, str) else None
     return {"id": recipe_id, "editable": editable, "recipe": data, "catalog_id": catalog_id}

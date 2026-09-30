@@ -455,6 +455,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.out is None:
         parser.error("--out is required")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", args.out.stem):
+        parser.error(f"--out file name {args.out.name!r} is not a Recipe id (lower case letters, digits, - and _; "
+                     "the Studio opens a Recipe by its file name)")
     try:
         out = args.out.resolve()
         catalog = Path(os.path.relpath(args.catalog.resolve(), out.parent)).as_posix()

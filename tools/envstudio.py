@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import yaml  # noqa: E402
 
 import env_schema  # noqa: E402
-from env_diagnostics import CODES, DiagnosticError, fail  # noqa: E402
+from env_diagnostics import CODES, DiagnosticError, fail, load_yaml_text  # noqa: E402
 
 CONTRACT_VERSION = "1"
 
@@ -50,7 +50,7 @@ def _read(source: str, base: Path | None) -> tuple[dict, Path]:
         except OSError as exc:
             raise fail(str(source), "missing_field", f"cannot read: {exc}") from exc
     try:
-        data = yaml.safe_load(text)  # JSON is YAML too
+        data = load_yaml_text(text)  # JSON is YAML too
     except yaml.YAMLError as exc:
         raise fail(str(source), "wrong_type", f"invalid YAML / JSON: {exc}") from exc
     if not isinstance(data, dict):

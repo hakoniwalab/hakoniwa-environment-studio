@@ -24,7 +24,7 @@ import yaml
 
 import env_polygon
 import env_types
-from env_diagnostics import Collector, DiagnosticError, fail, mapping, only
+from env_diagnostics import Collector, DiagnosticError, fail, mapping, only, load_yaml_text
 from env_terrain import Terrain, make_terrain
 from env_types import EnvType, Param, Shape
 
@@ -195,7 +195,7 @@ def _text(value, path: str) -> str:
 
 def _load_yaml(path: Path, label: str) -> dict:
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        data = load_yaml_text(Path(path).read_text(encoding="utf-8"))
     except OSError as exc:
         raise fail(str(path), "missing_field", f"cannot read the {label}: {exc}") from exc
     except yaml.YAMLError as exc:
@@ -303,8 +303,19 @@ def parse_catalog(data: dict, path: Path, library: env_types.TypeLibrary | None 
 
 
 def load_catalog(path: Path) -> Catalog:
-    path = Path(path)
-    return parse_catalog(_load_yaml(path, "catalog"), path.resolve())
+    """A Catalog file, parsed once while the file is unchanged (every Studio
+    request needs it; parsing resolves every item's shape)."""
+    path = Path(path).resolve()
+    try:
+        stat = path.stat()
+    except OSError:
+        return parse_catalog(_load_yaml(path, "catalog"), path)  # reports the missing file
+    return _load_catalog_cached(path, stat.st_mtime_ns, stat.st_size)
+
+
+@functools.lru_cache(maxsize=16)
+def _load_catalog_cached(path: Path, _mtime_ns: int, _size: int) -> Catalog:
+    return parse_catalog(_load_yaml(path, "catalog"), path)
 
 
 # --- Recipe ------------------------------------------------------------------------

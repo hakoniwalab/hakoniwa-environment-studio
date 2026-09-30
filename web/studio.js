@@ -474,7 +474,12 @@ function renderRecipeList() {
   $("#recipe-list").replaceChildren(...state.recipes.map((item) => el("li", {},
     el("button", {
       "aria-current": String(state.current?.id === item.id),
-      onclick: () => { if (confirmDiscard()) openRecipe(item.id); },
+      onclick: () => {
+        if (!confirmDiscard()) return;
+        if (item.error) { setStatus(`${item.id} を開けません: ${item.error}`, "error"); return; }
+        setStatus(`${item.id} を開いています…`);
+        openRecipe(item.id).catch((error) => setStatus(`${item.id} を開けません: ${error.message}`, "error"));
+      },
     }, el("span", {}, item.id), el("span", { class: "meta" }, item.error ? "エラー"
       : `${item.size_m.east}×${item.size_m.north} m・${item.objects} 部品${item.terrain === "hfield" ? "・丘" : ""}${
         item.editable ? "" : "・例"}`)))));

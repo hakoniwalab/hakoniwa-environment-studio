@@ -31,7 +31,7 @@ import re
 import yaml
 
 import env_polygon
-from env_diagnostics import DiagnosticError, fail, mapping, only
+from env_diagnostics import DiagnosticError, fail, mapping, only, load_yaml_text
 
 TYPES_SCHEMA = "hakoniwa.environment-types/v1"
 DEFAULT_TYPES = Path(__file__).resolve().parents[1] / "types"
@@ -476,7 +476,7 @@ def _raw_types(paths: list[Path]) -> dict[str, dict]:
     raw: dict[str, dict] = {}
     for path in paths:
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data = load_yaml_text(path.read_text(encoding="utf-8"))
         except (OSError, yaml.YAMLError) as exc:
             raise fail(path.name, "wrong_type", f"cannot read: {exc}") from exc
         data = mapping(data, path.name)

@@ -111,3 +111,11 @@ def mapping(value, path: str) -> dict:
     if not isinstance(value, dict):
         raise fail(path, "wrong_type", "must be a mapping", expected="mapping", actual=type(value).__name__)
     return value
+
+
+def load_yaml_text(text: str):
+    """YAML (or JSON) text parsed safely, with the C loader when PyYAML has it
+    (city Recipes are hundreds of kilobytes of points)."""
+    import yaml
+
+    return yaml.load(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
