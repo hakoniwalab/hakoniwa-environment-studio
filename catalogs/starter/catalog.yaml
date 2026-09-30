@@ -19,6 +19,12 @@ items:
     name: 平らな地面（舗装）
     params: {color: "#5b5f64"}
 
+  - id: city-ground
+    type: flat_ground
+    name: 平らな地面（街・明るい舗装）
+    description: Light pavement for a town made from a map, so roads and buildings stand out.
+    params: {color: "#a9aba6"}
+
   - id: rolling-hills
     type: hills_terrain
     name: なだらかな丘
@@ -68,6 +74,14 @@ items:
   - id: two-lane-road
     type: road_surface
     name: 道路（2 車線・幅 7 m）
+
+  - id: road-path
+    type: road_path
+    name: 道路（中心線・地図から）
+
+  - id: building-footprint
+    type: building_footprint
+    name: 建物（外形・地図から）
 
   - id: stop-line
     type: road_marking

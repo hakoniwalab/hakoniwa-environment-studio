@@ -181,6 +181,7 @@ types:
     label: 道路
     description: A straight road along its y, with edge lines and lines between lanes.
     id_prefix: road
+    behavior: {layer: surface}
     params:
       color: {kind: color, label: 路面の色, default: "#4a4d52", level: placement}
       snap: {kind: bool, label: 吸い付き, default: true, level: item}
@@ -206,12 +207,63 @@ types:
     label: 路面の標示
     description: A painted marking such as a stop line (no collision).
     id_prefix: marking
+    behavior: {layer: surface}
     params:
       color: {kind: color, label: 色, default: "#f4f4f4", level: placement}
       width_m: {kind: length, label: 長さ, default: 3.5, min: 0.1, max: 50, level: placement}
       depth_m: {kind: length, label: 幅, default: 0.45, min: 0.05, max: 10, level: item}
     shapes:
       - {name: paint, primitive: box, w: $width_m, d: $depth_m, h: 0.004, z: 0.024, collide: false}
+
+  # A road along a centre line (from a map, #10): one object per road, its
+  # segments and bends included. Surface layer: roads may cross one another.
+  - id: road_path
+    extends: object
+    label: 道路（中心線）
+    description: >-
+      A road of a given width along a centre line (a polyline in the object's
+      frame), with edge lines and lines between lanes; bends are filled.
+    id_prefix: road
+    params:
+      color: {kind: color, label: 路面の色, default: "#4a4d52", level: placement}
+      centerline: {kind: polyline, label: 中心線, default: [[0, -10], [0, 10]], level: placement,
+                   description: "The road's centre line, [[x, y], ...] in metres in the object's frame."}
+      width_m: {kind: length, label: 幅, default: 7.0, min: 2, max: 60, level: placement}
+      lanes: {kind: integer, label: 車線の数, default: 2, values: [1, 2, 3, 4], level: placement}
+      line_color: {kind: color, label: 線の色, default: "#f4f4f4", level: item}
+    behavior: {layer: surface}
+    shapes:
+      - {name: slab, primitive: ribbon, points: $centerline, w: $width_m, h: 0.02}
+      - {name: edge-left, primitive: ribbon, points: $centerline, w: 0.15, h: 0.004, x: -$width_m / 2 + 0.2,
+         z: 0.022, color: $line_color, collide: false}
+      - {name: edge-right, primitive: ribbon, points: $centerline, w: 0.15, h: 0.004, x: $width_m / 2 - 0.2,
+         z: 0.022, color: $line_color, collide: false}
+      - {name: lane-1, primitive: ribbon, points: $centerline, w: 0.12, h: 0.004,
+         x: -$width_m / 2 + $width_m / $lanes, z: 0.022, color: $line_color, collide: false, when: $lanes >= 2}
+      - {name: lane-2, primitive: ribbon, points: $centerline, w: 0.12, h: 0.004,
+         x: -$width_m / 2 + 2 * $width_m / $lanes, z: 0.022, color: $line_color, collide: false, when: $lanes >= 3}
+      - {name: lane-3, primitive: ribbon, points: $centerline, w: 0.12, h: 0.004,
+         x: -$width_m / 2 + 3 * $width_m / $lanes, z: 0.022, color: $line_color, collide: false, when: $lanes >= 4}
+
+  # A building from its footprint (a map outline, #10): the outline raised to
+  # its height with a flat roof (from min_height_m: a canopy or a skyway).
+  # Concave outlines are split into convex pieces.
+  - id: building_footprint
+    extends: object
+    label: 建物（外形）
+    description: A building from its footprint polygon (for example from a map), raised to its height, flat roof.
+    id_prefix: building
+    params:
+      color: {kind: color, label: 色, default: "#c9c3b6", level: placement}
+      footprint: {kind: polygon, label: 外形, default: [[-5, -4], [5, -4], [5, 4], [-5, 4]], level: placement,
+                  description: "The outline, [[x, y], ...] in metres in the object's frame (any turning order)."}
+      height_m: {kind: length, label: 高さ, default: 9.0, min: 1, max: 500, level: placement,
+                 description: Height of its top above the ground.}
+      min_height_m: {kind: length, label: 下端の高さ, default: 0.0, min: 0, max: 499, level: placement,
+                     description: "Where it starts above the ground: > 0 for a canopy (a roof on posts) or a bridge between buildings."}
+    shapes:
+      - {name: body, primitive: prism, points: $footprint, h: $height_m - $min_height_m,
+         z: ($height_m + $min_height_m) / 2}
 
   # Posts at both ends (and the middle when long) carrying a rail.
   - id: guard_rail

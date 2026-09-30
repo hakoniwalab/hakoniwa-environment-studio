@@ -48,6 +48,21 @@ export function solidFootprint(part, solid) {
   return placed(part, solid.outline);
 }
 
+// What the plan draws for a part: its envelope, or, for a part whose envelope
+// is not its shape (a footprint, a road along a centre line: part.detailed),
+// each visible solid's outline. [{polygon, color, collide}]
+export function outlines(part) {
+  if (!part.detailed || !part.solids?.length) return [{ polygon: footprint(part), color: part.color, collide: true }];
+  return part.solids.filter((solid) => solid.visible !== false)
+    .map((solid) => ({ polygon: solidFootprint(part, solid), color: solid.color, collide: solid.collide !== false }));
+}
+
+// The outlines that make up a part's body (for picking and the edges).
+export function bodyOutlines(part) {
+  const body = outlines(part).filter((outline) => outline.collide).map((outline) => outline.polygon);
+  return body.length ? body : [footprint(part)];
+}
+
 // The solids of a part that take part in interference, as {polygon, z0, z1}
 // in the environment frame; a part without solids is its envelope.
 function collisionVolumes(part) {
@@ -91,7 +106,7 @@ export function bounds(points) {
 
 // How far a part sticks out of the area (0 when inside).
 export function outsideBy(part, area) {
-  const box = bounds(footprint(part));
+  const box = bounds(bodyOutlines(part).flat());
   return Math.max(0, area.minX - box.minX, area.minY - box.minY, box.maxX - area.maxX, box.maxY - area.maxY);
 }
 
@@ -205,11 +220,16 @@ export function slideDistance(part, direction, others, area, limit = 10000) {
 // parts overlap when a solid of one meets a solid of the other on the ground
 // and in height (a car under a raised gate's top does not); MuJoCo remains
 // the formal check (it also sees the terrain).
+//
+// Surface parts (roads, markings) are left out of the overlap check: they may
+// cross one another, and what stands on them stands on top of them (the
+// server sets those heights; MuJoCo checks them).
 export function checkLayout(parts, area) {
   const outside = parts.filter((part) => outsideBy(part, area) > TOLERANCE_M + EPSILON_M).map((part) => part.id);
   const overlaps = [];
   for (let i = 0; i < parts.length; i += 1) {
     for (let j = i + 1; j < parts.length; j += 1) {
+      if (parts[i].layer === "surface" || parts[j].layer === "surface") continue;
       const depth = overlapDepth(parts[i], parts[j]);
       if (depth > TOLERANCE_M + EPSILON_M) overlaps.push({ a: parts[i].id, b: parts[j].id, depth });
     }

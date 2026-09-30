@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Map Import</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="studio.css">
+  <link rel="stylesheet" href="map.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>地図から環境を作る</h1>
+    <a href="./" class="back">← Environment Studio に戻る</a>
+    <div id="status" class="status" role="status"></div>
+  </header>
+
+  <main class="map-layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>範囲</h2>
+        <p class="hint">地図を動かして、枠を取り込みたい場所に合わせます（枠は地図の中心）。</p>
+        <div class="row">
+          <label class="field">東西 (m)<input id="size-east" type="number" min="20" step="10" value="300"></label>
+          <label class="field">南北 (m)<input id="size-north" type="number" min="20" step="10" value="300"></label>
+        </div>
+        <label class="field">中心（緯度, 経度）
+          <span class="row"><input id="center" placeholder="35.6809, 139.7667" autocomplete="off">
+            <button id="go" class="secondary">移動</button></span>
+        </label>
+        <p id="bbox" class="meta"></p>
+      </section>
+
+      <section class="panel">
+        <h2>作る環境</h2>
+        <label class="field">ID<input id="recipe-id" placeholder="tokyo-station" autocomplete="off"></label>
+        <label class="field">名前<input id="recipe-name" placeholder="東京駅周辺" autocomplete="off"></label>
+        <label class="field">地面<select id="terrain"></select></label>
+        <label class="field">地図データ
+          <select id="source">
+            <option value="overpass">OpenStreetMap（Overpass API で取得）</option>
+            <option value="geojson">GeoJSON ファイル</option>
+          </select>
+        </label>
+        <label class="field" id="geojson-field" hidden>GeoJSON<input id="geojson" type="file" accept=".geojson,.json,application/geo+json"></label>
+        <button id="import">この範囲を取り込む</button>
+        <p class="hint">建物は外形と高さ（無ければ階数、それも無ければ種類ごとの既定値）、道路は中心線・幅・車線数（無ければ道路の種類ごとの既定値）で作ります。取り込み後は Studio で普通の部品として編集できます。</p>
+      </section>
+
+      <section class="panel" id="result" hidden>
+        <h2>取り込み結果</h2>
+        <div id="report"></div>
+        <a id="open" class="button">Studio で開く</a>
+      </section>
+    </aside>
+
+    <section class="panel map-panel"><div id="map"></div></section>
+  </main>
+
+  <script type="module" src="map.js"></script>
+</body>
+</html>

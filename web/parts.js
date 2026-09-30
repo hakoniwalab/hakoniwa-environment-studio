@@ -88,6 +88,9 @@ export class Parts {
       solids: shape.solids,
       z: surface === "elevated" ? this.paramValue(part, "z_m") ?? 0 : 0,
       surface,
+      layer: shape.layer || "object",
+      // Its envelope is not its shape (a footprint, a road along a line): the plan draws its solids.
+      detailed: shape.layer === "surface" || shape.solids.some((solid) => solid.primitive === "prism"),
       snap: shape.snap !== false,
       color: this.paramValue(part, "color") || "#b0b4ba",
     };

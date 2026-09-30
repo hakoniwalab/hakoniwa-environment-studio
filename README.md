@@ -200,6 +200,21 @@ python tools/env_studio.py stop
 
 Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `work/recipes/`（例の環境は保存するとコピーになります）。
 
+地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、枠（東西 × 南北 m、地図の中心）を合わせて取り込むと、その範囲の建物と道路の Recipe ができます。
+
+- **取得元**：OpenStreetMap（Overpass API。接続先は `HAKONIWA_OVERPASS_URL`、地図タイルは `HAKONIWA_MAP_TILES` で変更可）か GeoJSON ファイル。
+- **座標**：緯度経度は環境の中心を原点とするローカルの m（ENU）に変換します。
+- **建物**：外形を押し出した `building-footprint`。高さは height タグ、無ければ階数 × 3 m、それも無ければ種類ごとの既定値。屋根だけの構造（building=roof）は宙に浮いた板にします。
+- **道路**：中心線に沿った `road-path`。幅と車線数は、無ければ道路の種類ごとの既定値で補います。
+- **出典の記録**：出典（OSM の要素と主なタグ、原点・範囲・投影・© OpenStreetMap contributors / ODbL）は Recipe の `geo` と各物体の `source` に残ります。取得したデータは `work/map-data/<id>.json` に保存されます。
+- **取り込み後**：普通の部品として編集・検証・生成できます。
+
+コマンドでも取り込めます：
+
+```bash
+python tools/env_map.py --bbox 35.6795,139.7650,35.6822,139.7683 --overpass --out work/recipes/tokyo-station.yaml
+```
+
 - データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)
 - AI エージェント向けの契約（contract / inspect / validate → repair のループ）：[docs/ai-contract.md](docs/ai-contract.md)
 - 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`

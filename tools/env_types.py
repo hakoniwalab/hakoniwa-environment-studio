@@ -30,17 +30,23 @@ import re
 
 import yaml
 
+import env_polygon
 from env_diagnostics import DiagnosticError, fail, mapping, only
 
 TYPES_SCHEMA = "hakoniwa.environment-types/v1"
 DEFAULT_TYPES = Path(__file__).resolve().parents[1] / "types"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
-PARAM_KINDS = {"length", "angle", "number", "integer", "color", "enum", "bool", "text"}
-UNITS = {"length": "m", "angle": "deg"}
+PARAM_KINDS = {"length", "angle", "number", "integer", "color", "enum", "bool", "text", "polygon", "polyline"}
+UNITS = {"length": "m", "angle": "deg", "polygon": "m", "polyline": "m"}
+# Points a polygon (footprint) or polyline (centre line) parameter may hold.
+MAX_POINTS = 2000
 LEVELS = ("type", "item", "placement")
 SURFACES = {"ground", "elevated"}
-PRIMITIVES = {"box", "cylinder", "wedge"}
+PRIMITIVES = {"box", "cylinder", "wedge", "prism", "ribbon"}
+# Objects on the "surface" layer (roads, markings) lie on the ground and may
+# overlap one another (roads meet at crossings); everything else collides.
+LAYERS = {"object", "surface"}
 TERRAIN_KINDS = {"flat", "hfield"}
 # Terrain generators the engine provides (env_terrain.py), with the parameter
 # names each one reads.
@@ -49,8 +55,8 @@ TYPE_KEYS = {"id", "label", "description", "abstract", "extends", "id_prefix", "
              "envelope", "terrain"}
 PARAM_KEYS = {"kind", "level", "label", "description", "unit", "default", "min", "max", "values"}
 SHAPE_KEYS = {"name", "primitive", "w", "d", "h", "x", "y", "z", "roll", "pitch", "yaw", "color", "collide",
-              "visible", "when"}
-BEHAVIOR_KEYS = {"surface", "snap", "friction"}
+              "visible", "when", "points"}
+BEHAVIOR_KEYS = {"surface", "snap", "friction", "layer"}
 # Largest size or position accepted, in metres (a sanity bound).
 MAX_M = 100_000.0
 
@@ -165,6 +171,35 @@ def evaluate(value, params: dict, path: str):
         raise fail(path, "invalid_expression", str(exc), actual=value.source) from exc
 
 
+def _points(kind: str, value, path: str) -> list[list[float]]:
+    """A footprint (polygon: a simple ring, stored counter-clockwise without a
+    repeated closing point) or a centre line (polyline), as [[x, y], ...] in
+    the object's frame, metres."""
+    closed = kind == "polygon"
+    need = 3 if closed else 2
+    shape = "[[x, y], ...]"
+    if not isinstance(value, list) or not all(
+            isinstance(point, list) and len(point) == 2 and all(
+                not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) for v in point)
+            for point in value):
+        raise fail(path, "wrong_type", f"must be a list of [x, y] points in metres", expected=shape, actual=value)
+    if len(value) > MAX_POINTS:
+        raise fail(path, "out_of_range", f"at most {MAX_POINTS} points", expected=f"<= {MAX_POINTS}", actual=len(value))
+    points = env_polygon.cleaned([(float(x), float(y)) for x, y in value], closed)
+    if len(points) < need:
+        raise fail(path, "invalid_shape", f"a {kind} needs at least {need} distinct points", expected=f">= {need}",
+                   actual=len(points))
+    if max(abs(v) for point in points for v in point) > MAX_M:
+        raise fail(path, "out_of_range", f"points must be within {MAX_M} m", expected=f"<= {MAX_M}")
+    if closed:
+        if abs(env_polygon.signed_area(points)) < 1e-6:
+            raise fail(path, "invalid_shape", "the polygon has no area")
+        if not env_polygon.is_simple(points):
+            raise fail(path, "invalid_shape", "the polygon's edges cross or touch each other")
+        points = env_polygon.counter_clockwise(points)
+    return [[round(x, 6), round(y, 6)] for x, y in points]
+
+
 # --- Definitions ----------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -200,6 +235,8 @@ class Param:
         elif self.kind == "text":
             if not isinstance(value, str):
                 raise fail(path, "wrong_type", "must be text", expected="text", actual=value)
+        elif self.kind in ("polygon", "polyline"):
+            return _points(self.kind, value, path)
         if self.values is not None and value not in self.values:
             raise fail(path, "not_one_of", "must be one of the choices", expected=list(self.values), actual=value)
         if self.min is not None and value < self.min:
@@ -277,10 +314,13 @@ class EnvType:
 
 @dataclass(frozen=True)
 class Solid:
-    """A box, an upright cylinder or a wedge in the object's own frame, in
-    metres: (x, y, z) is its centre; roll, pitch, yaw (degrees, applied yaw,
-    then pitch, then roll about its centre) tilt it. A wedge's base is w x d
-    and it rises along +y from 0 to h."""
+    """A box, an upright cylinder, a wedge or a prism in the object's own
+    frame, in metres: (x, y, z) is its centre; roll, pitch, yaw (degrees,
+    applied yaw, then pitch, then roll about its centre) tilt it. A wedge's
+    base is w x d and it rises along +y from 0 to h. A prism is a convex
+    outline (points about its centre) raised h; w x d is its outline's box.
+    (A type's "prism" and "ribbon" shapes resolve into these: see
+    resolve_shape.)"""
 
     name: str
     primitive: str
@@ -296,11 +336,15 @@ class Solid:
     color: str = "#cccccc"
     collide: bool = True
     visible: bool = True
+    # A prism's convex outline about its centre (x, y), counter-clockwise.
+    points: tuple[tuple[float, float], ...] = ()
 
     def as_json(self) -> dict:
         data = {key: getattr(self, key) for key in (
             "name", "primitive", "width_m", "depth_m", "height_m", "x_m", "y_m", "z_m",
             "roll_deg", "pitch_deg", "yaw_deg", "color", "collide", "visible")}
+        if self.primitive == "prism":
+            data["points"] = [list(point) for point in self.points]
         # For the browser, which does no tilt maths: the outline seen from above
         # and the height range, both in the object's frame.
         corners = self.corners()
@@ -327,6 +371,8 @@ class Solid:
         if self.primitive == "wedge":
             local = [(sx * hw, -hd, -hh) for sx in (-1, 1)] + [(sx * hw, hd, -hh) for sx in (-1, 1)] \
                 + [(sx * hw, hd, hh) for sx in (-1, 1)]
+        elif self.primitive == "prism":
+            local = [(x, y, z) for x, y in self.points for z in (-hh, hh)]
         else:
             local = [(sx * hw, sy * hd, sz * hh) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
         r = self.rotation()
@@ -378,12 +424,13 @@ class Shape:
     surface: str
     snap: bool
     friction: float
+    layer: str = "object"
 
     def as_json(self) -> dict:
         return {
             "solids": [solid.as_json() for solid in self.solids], "envelope": self.envelope,
             "bottom_m": self.bottom_m, "height_m": self.height_m, "surface": self.surface, "snap": self.snap,
-            "friction": self.friction,
+            "friction": self.friction, "layer": self.layer,
         }
 
 
@@ -505,6 +552,9 @@ def _compiled(env_type: EnvType, where: str) -> EnvType:
     surface = env_type.behavior.get("surface", "ground")
     if surface not in SURFACES:
         raise fail(f"{where}.behavior.surface", "not_one_of", "unknown surface", expected=sorted(SURFACES), actual=surface)
+    layer = env_type.behavior.get("layer", "object")
+    if layer not in LAYERS:
+        raise fail(f"{where}.behavior.layer", "not_one_of", "unknown layer", expected=sorted(LAYERS), actual=layer)
     if surface == "elevated" and "z_m" not in env_type.params:
         raise fail(f"{where}.params", "missing_field", "an elevated type needs a z_m parameter (its height above the terrain)")
     if env_type.terrain is not None and env_type.shapes:
@@ -516,7 +566,8 @@ def _compiled(env_type: EnvType, where: str) -> EnvType:
         path = f"{where}.shapes[{index}]"
         shape = mapping(shape, path)
         only(shape, SHAPE_KEYS, path)
-        for key in ("primitive", "w", "d", "h"):
+        # A prism takes points and h; a ribbon points, w and h; the others w, d and h.
+        for key in ("primitive", "h", *(("w", "d") if "points" not in shape else ())):
             if key not in shape:
                 raise fail(f"{path}.{key}", "missing_field", f"a shape needs {key}")
         shapes.append({key: compiled(value, f"{path}.{key}") for key, value in shape.items()})
@@ -576,7 +627,15 @@ def _number(value, path: str) -> float:
 
 
 def resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
-    """The solids, outline and behaviour of an object type with its parameter values."""
+    """The solids, outline and behaviour of an object type with its parameter values.
+
+    A "prism" shape (a footprint raised h) becomes one prism solid per convex
+    piece of its footprint (<name>, or <name>-1, <name>-2, ... when concave). A
+    "ribbon" shape (a strip w wide along a centre line, such as a road) becomes
+    a box per segment (<name>-1, ...) and, when it runs along the line itself
+    (x = 0), an upright cylinder filling each bend (<name>-joint-1, ...); x
+    moves it sideways, to the right of the line's direction.
+    """
     solids = []
     for index, shape in enumerate(env_type.shapes):
         where = f"{path} ({env_type.id}.shapes[{index}])"
@@ -585,11 +644,6 @@ def resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
         primitive = evaluate(shape["primitive"], params, f"{where}.primitive")
         if primitive not in PRIMITIVES:
             raise fail(f"{where}.primitive", "invalid_shape", "unknown primitive", expected=sorted(PRIMITIVES), actual=primitive)
-        sizes = [_number(evaluate(shape[key], params, f"{where}.{key}"), f"{where}.{key}") for key in ("w", "d", "h")]
-        if min(sizes) <= 0:
-            raise fail(where, "invalid_shape", "its size must be greater than zero", expected="> 0", actual=sizes)
-        if primitive == "cylinder" and abs(sizes[0] - sizes[1]) > 1e-9:
-            raise fail(where, "invalid_shape", "a cylinder's w and d are its diameter and must be equal", actual=sizes[:2])
         color = evaluate(shape.get("color", params.get("color", "#cccccc")), params, f"{where}.color")
         if not isinstance(color, str) or not COLOR_PATTERN.match(color):
             raise fail(f"{where}.color", "invalid_shape", "must be a #RRGGBB colour", actual=color)
@@ -597,14 +651,40 @@ def resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
         def number(key, default=0):
             return _number(evaluate(shape.get(key, default), params, f"{where}.{key}"), f"{where}.{key}")
 
+        def size(key):
+            if key not in shape:
+                raise fail(f"{where}.{key}", "missing_field", f"a {primitive} needs {key}")
+            value = number(key)
+            if value <= 0:
+                raise fail(f"{where}.{key}", "invalid_shape", "must be greater than zero", expected="> 0", actual=value)
+            return value
+
+        name = str(shape.get("name", f"solid{index}"))
+        common = {"color": color.lower(),
+                  "collide": bool(evaluate(shape.get("collide", True), params, f"{where}.collide")),
+                  "visible": bool(evaluate(shape.get("visible", True), params, f"{where}.visible"))}
+        if primitive in ("prism", "ribbon"):
+            if "points" not in shape:
+                raise fail(f"{where}.points", "missing_field", f"a {primitive} needs points")
+            kind = "polygon" if primitive == "prism" else "polyline"
+            points = [tuple(point) for point in _points(kind, evaluate(shape["points"], params, f"{where}.points"),
+                                                         f"{where}.points")]
+            if any(number(key) for key in ("roll", "pitch", "yaw")):
+                raise fail(where, "invalid_shape", f"a {primitive} is not tilted or turned (its points are)")
+            height = size("h")
+            z = number("z", height / 2)
+            if primitive == "prism":
+                solids += _prism_solids(name, points, number("x"), number("y"), z, height, common)
+            else:
+                solids += _ribbon_solids(name, points, size("w"), number("x"), z, height, common)
+            continue
+        sizes = [size(key) for key in ("w", "d", "h")]
+        if primitive == "cylinder" and abs(sizes[0] - sizes[1]) > 1e-9:
+            raise fail(where, "invalid_shape", "a cylinder's w and d are its diameter and must be equal", actual=sizes[:2])
         solids.append(Solid(
-            name=str(shape.get("name", f"solid{index}")), primitive=primitive,
-            width_m=sizes[0], depth_m=sizes[1], height_m=sizes[2],
+            name=name, primitive=primitive, width_m=sizes[0], depth_m=sizes[1], height_m=sizes[2],
             x_m=number("x"), y_m=number("y"), z_m=number("z", sizes[2] / 2),
-            roll_deg=number("roll"), pitch_deg=number("pitch"), yaw_deg=number("yaw"),
-            color=color.lower(),
-            collide=bool(evaluate(shape.get("collide", True), params, f"{where}.collide")),
-            visible=bool(evaluate(shape.get("visible", True), params, f"{where}.visible")),
+            roll_deg=number("roll"), pitch_deg=number("pitch"), yaw_deg=number("yaw"), **common,
         ))
     if not solids:
         raise fail(path, "invalid_shape", f"type {env_type.id} makes no shape with these values")
@@ -620,8 +700,40 @@ def resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
         bottom_m=max(bottom, 0.0), height_m=round(max(z for _, _, z in corners), 6),
         surface=behavior.get("surface", "ground"),
         snap=bool(evaluate(behavior.get("snap", True), params, f"{path}.snap")),
-        friction=friction,
+        friction=friction, layer=behavior.get("layer", "object"),
     )
+
+
+def _prism_solids(name, points, dx, dy, z, height, common) -> list[Solid]:
+    pieces = env_polygon.convex_pieces(points)
+    solids = []
+    for number, piece in enumerate(pieces, 1):
+        xs, ys = [x for x, _ in piece], [y for _, y in piece]
+        cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+        solids.append(Solid(
+            name=name if len(pieces) == 1 else f"{name}-{number}", primitive="prism",
+            width_m=round(max(xs) - min(xs), 6), depth_m=round(max(ys) - min(ys), 6), height_m=height,
+            x_m=round(cx + dx, 6), y_m=round(cy + dy, 6), z_m=z,
+            points=tuple((round(x - cx, 6), round(y - cy, 6)) for x, y in piece), **common))
+    return solids
+
+
+def _ribbon_solids(name, points, width, offset, z, height, common) -> list[Solid]:
+    solids = []
+    for number, ((x1, y1), (x2, y2)) in enumerate(zip(points, points[1:]), 1):
+        length = math.hypot(x2 - x1, y2 - y1)
+        heading = math.atan2(y2 - y1, x2 - x1)
+        # Right of the direction of travel: (sin, -cos) of the heading.
+        cx = (x1 + x2) / 2 + offset * math.sin(heading)
+        cy = (y1 + y2) / 2 - offset * math.cos(heading)
+        solids.append(Solid(
+            name=f"{name}-{number}", primitive="box", width_m=width, depth_m=round(length, 6), height_m=height,
+            x_m=round(cx, 6), y_m=round(cy, 6), z_m=z, yaw_deg=round(math.degrees(heading) - 90, 6), **common))
+    if abs(offset) < 1e-9:
+        for number, (x, y) in enumerate(points[1:-1], 1):
+            solids.append(Solid(name=f"{name}-joint-{number}", primitive="cylinder", width_m=width, depth_m=width,
+                                height_m=height, x_m=round(x, 6), y_m=round(y, 6), z_m=z, **common))
+    return solids
 
 
 def _envelope(env_type: EnvType, params: dict, corners, path: str) -> dict:

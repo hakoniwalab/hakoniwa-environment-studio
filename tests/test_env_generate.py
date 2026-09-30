@@ -154,7 +154,8 @@ class MjcfTest(unittest.TestCase):
         slab = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, env_generate.geom_name("road", "slab"))
         self.assertEqual((model.geom_contype[lane], model.geom_conaffinity[lane]), (0, 0))
         self.assertEqual(model.geom_group[lane], env_generate.VISUAL_GROUP)
-        self.assertEqual(model.geom_contype[slab], 1)
+        # The road is on the surface layer: it collides with everything but other roads.
+        self.assertEqual((model.geom_contype[slab], model.geom_conaffinity[slab]), (env_generate.SURFACE_CONTYPE, 1))
 
     def test_objects_stand_on_the_hills(self):
         recipe = load("hills-field")

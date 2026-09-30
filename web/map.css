@@ -1,0 +1,19 @@
+[hidden] { display: none !important; }
+/* The map import page (web/map.html). */
+.map-layout {
+  display: grid; grid-template-columns: 320px 1fr; gap: 16px;
+  padding: 16px 20px; height: calc(100vh - 60px); min-height: 520px;
+}
+@media (max-width: 800px) {
+  .map-layout { grid-template-columns: 1fr; height: auto; }
+  #map { height: 60vh; }
+}
+.map-panel { display: flex; min-height: 0; padding: 0; overflow: hidden; }
+#map { flex: 1; min-height: 360px; }
+.back { color: var(--accent); text-decoration: none; }
+.button {
+  display: inline-block; margin-top: 8px; padding: 6px 12px; border-radius: 6px;
+  background: var(--accent); color: var(--accent-text); text-decoration: none;
+}
+#report ul { margin: 4px 0; padding-left: 18px; }
+.leaflet-container { font: inherit; }

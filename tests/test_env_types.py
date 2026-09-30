@@ -43,7 +43,8 @@ class ShippedTypesTest(unittest.TestCase):
         placeable = {key for key, value in self.library.types.items() if not value.abstract}
         self.assertEqual(placeable, {
             "flat_ground", "hills_terrain", "wall", "building_block", "box_obstacle", "pylon", "gate", "ramp",
-            "platform", "landing_pad", "road_surface", "road_marking", "guard_rail", "road_sign", "traffic_signal"})
+            "platform", "landing_pad", "road_surface", "road_marking", "guard_rail", "road_sign", "traffic_signal",
+            "road_path", "building_footprint"})
         self.assertTrue(self.library.types["hills_terrain"].is_terrain)
         self.assertTrue(self.library.types["landing_pad"].is_a("platform"))
 

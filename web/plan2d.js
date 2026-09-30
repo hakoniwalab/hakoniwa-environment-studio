@@ -15,7 +15,7 @@
 // dragging any selected part moves them all, and the handle above them turns
 // them together about their centre.
 
-import { bounds, contact, contains, footprint, heightOverlap } from "./geometry.js";
+import { bodyOutlines, bounds, contact, contains, footprint, heightOverlap, outlines } from "./geometry.js";
 
 function area(polygon) {
   let sum = 0;
@@ -190,29 +190,41 @@ export class PlanView {
     // sight on top of them, and the selected part last of all. Elevated parts
     // (raised above the ground) are drawn faint and dashed, so what is
     // under them shows through.
+    // Roads and markings (the surface layer) lie under everything.
     const ordered = [...this.parts].sort((a, b) =>
-      Number(this.selection.has(a.id)) - Number(this.selection.has(b.id)) || area(footprint(b)) - area(footprint(a)));
+      Number(this.selection.has(a.id)) - Number(this.selection.has(b.id))
+      || Number(b.layer === "surface") - Number(a.layer === "surface")
+      || area(footprint(b)) - area(footprint(a)));
     const single = this.selection.size === 1;
     for (const part of ordered) {
-      const corners = footprint(part);
+      const shapes = outlines(part);
+      const corners = shapes.flatMap((shape) => shape.polygon);
       const bad = this.problems.outside.has(part.id) || this.problems.overlapping.has(part.id);
       const selected = this.selection.has(part.id);
       const mounted = part.surface === "elevated";
       const group = svg("g", {
         class: `part${mounted ? " mounted" : ""}${selected ? " selected" : ""}${bad ? " problem" : ""}`, "data-id": part.id,
       });
-      group.append(svg("polygon", {
-        points: points(corners), fill: part.color, "stroke-width": px * (selected ? 3 : 1.5),
-      }));
-      // A tick on the local +y side marks the part's facing, for rotations.
+      for (const shape of shapes) {
+        group.append(svg("polygon", {
+          points: points(shape.polygon), fill: shape.color,
+          class: shape.collide ? "" : "paint", "stroke-width": px * (selected ? 3 : 1.5),
+        }));
+      }
+      // A tick on the local +y side marks the part's facing, for rotations
+      // (a part drawn by its solids shows its own shape instead).
       const yaw = (part.yaw * Math.PI) / 180;
       const front = [part.x - Math.sin(yaw) * part.depth / 2, part.y + Math.cos(yaw) * part.depth / 2];
-      group.append(svg("line", {
-        x1: part.x, y1: -part.y, x2: front[0], y2: -front[1], class: "facing", "stroke-width": px * 1.5,
-      }));
+      if (!part.detailed) {
+        group.append(svg("line", {
+          x1: part.x, y1: -part.y, x2: front[0], y2: -front[1], class: "facing", "stroke-width": px * 1.5,
+        }));
+      }
       // The id only when it fits inside the part (about 6.5 px per character).
       const box = bounds(corners);
-      if ((box.maxX - box.minX) / px > part.id.length * 6.5 + 8 && (box.maxY - box.minY) / px > 14) {
+      // (A part drawn by its solids only when selected: its box says little about where its shape has room.)
+      if ((!part.detailed || selected) && (box.maxX - box.minX) / px > part.id.length * 6.5 + 8
+        && (box.maxY - box.minY) / px > 14) {
         const label = svg("text", { x: part.x, y: -part.y + 4 * px, class: "label", "font-size": 11 * px, "stroke-width": 3 * px });
         label.textContent = part.id;
         group.append(label);
@@ -381,9 +393,10 @@ export class PlanView {
 
   // Parts whose outline contains a point, smallest first.
   partsAt(point) {
-    return this.parts.map((part) => ({ part, polygon: footprint(part) }))
-      .filter(({ polygon }) => contains(polygon, point))
-      .sort((a, b) => area(a.polygon) - area(b.polygon))
+    return this.parts.map((part) => ({ part, polygons: bodyOutlines(part) }))
+      .filter(({ polygons }) => polygons.some((polygon) => contains(polygon, point)))
+      .sort((a, b) => Number(a.part.layer === "surface") - Number(b.part.layer === "surface")
+        || area(footprint(a.part)) - area(footprint(b.part)))
       .map(({ part }) => part);
   }
 
@@ -428,7 +441,9 @@ export class PlanView {
     const reach = EDGE_SNAP_PX * this.mmPerPixel();
     // Push out of an overlap only when it is shallow, so a part never jumps far.
     const pushLimit = Math.max(reach, 0.4 * Math.min(part.width, part.depth));
-    const others = this.parts.filter((other) => other.id !== part.id && other.snap !== false && !this.moving?.has(other.id));
+    // Parts drawn by their solids (footprints, roads) are no snap targets: their envelope is not their shape.
+    const others = this.parts.filter((other) => other.id !== part.id && other.snap !== false && !other.detailed
+      && !this.moving?.has(other.id));
     const used = [];
     const guides = { targets: new Set(), lines: [] };
     const parallel = (axis) => used.some((other) => Math.abs(other[0] * axis[0] + other[1] * axis[1]) > 0.99);

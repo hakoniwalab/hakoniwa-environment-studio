@@ -107,8 +107,8 @@ function snapToGrid(value) {
 
 // What the server needs to check, preview or save the Recipe as it is now.
 function recipeBody() {
-  const { name, description, size_m: size, terrain, objects } = recipe();
-  return { name, description, size_m: size, terrain, objects, catalog_id: state.catalogId };
+  const { name, description, size_m: size, terrain, objects, geo } = recipe();
+  return { name, description, size_m: size, terrain, objects, geo, catalog_id: state.catalogId };
 }
 
 // --- Rendering --------------------------------------------------------------------
@@ -721,7 +721,10 @@ async function init() {
   document.addEventListener("paste", onPaste);
   window.addEventListener("beforeunload", (event) => { if (isDirty()) event.preventDefault(); });
 
-  const first = state.recipes.find((item) => !item.error);
+  // ?recipe=<id> opens that Recipe (the map import page links here).
+  const wanted = new URLSearchParams(window.location.search).get("recipe");
+  const first = state.recipes.find((item) => !item.error && item.id === wanted)
+    || state.recipes.find((item) => !item.error);
   if (first) await openRecipe(first.id);
   else newRecipe();
 }

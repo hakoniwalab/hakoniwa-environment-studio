@@ -160,8 +160,9 @@ def resolved_json(recipe) -> dict:
         "objects": [{
             "id": obj.id, "item": obj.item, "type": obj.type,
             "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
-            "params": obj.params, **obj.shape.as_json(),
+            "params": obj.params, **obj.shape.as_json(), **({"source": obj.source} if obj.source else {}),
         } for obj in recipe.objects],
+        **({"geo": recipe.geo} if recipe.geo else {}),
     }
 
 
@@ -207,19 +208,22 @@ def cmd_inspect(args) -> dict:
         raise fail("schema", "wrong_schema", "inspect takes a Recipe", expected=env_schema.RECIPE_SCHEMA)
     round_mm = lambda value: round(value, 3)  # noqa: E731
     half_east, half_north = parsed.size_east_m / 2, parsed.size_north_m / 2
-    outlines = {obj.id: env_schema.footprint(obj) for obj in parsed.objects}
+    # The solids' own outlines (an L-shaped building, a bending road), not the envelope.
+    outlines = {obj.id: [env_schema.placed(obj, solid.outline()) for solid in obj.solids if solid.collide]
+                or [env_schema.footprint(obj)] for obj in parsed.objects}
     heights = [h for row in parsed.terrain.heights for h in row] or [0.0]  # flat ground has no grid
     objects = []
     for obj in parsed.objects:
-        outline = outlines[obj.id]
-        xs, ys = [x for x, _ in outline], [y for _, y in outline]
-        gaps = sorted((_gap(outline, outlines[other.id]), other.id) for other in parsed.objects if other.id != obj.id)
+        pieces = outlines[obj.id]
+        xs, ys = [x for piece in pieces for x, _ in piece], [y for piece in pieces for _, y in piece]
+        gaps = sorted((min(_gap(mine, theirs) for mine in pieces for theirs in outlines[other.id]), other.id)
+                      for other in parsed.objects if other.id != obj.id)
         objects.append({
             "id": obj.id, "item": obj.item, "type": obj.type,
             "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
             "bounds_m": {"x": [round_mm(min(xs)), round_mm(max(xs))], "y": [round_mm(min(ys)), round_mm(max(ys))],
                          "z": [round_mm(obj.pose.z_m + obj.shape.bottom_m), round_mm(obj.pose.z_m + obj.shape.height_m)]},
-            "ground_m": round_mm(parsed.terrain.highest_under(outline)),
+            "ground_m": round_mm(parsed.terrain.highest_under(env_schema.footprint(obj))),
             "nearest": {"id": gaps[0][1], "gap_m": round_mm(gaps[0][0])} if gaps else None,
             "room_m": {"east": round_mm(half_east - max(xs)), "west": round_mm(min(xs) + half_east),
                        "north": round_mm(half_north - max(ys)), "south": round_mm(min(ys) + half_north)},

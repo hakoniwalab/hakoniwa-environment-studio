@@ -1,0 +1,15 @@
+# Map-style shapes (#10): an L-shaped building from a footprint, a road along
+# a bending centre line, a crossing road and a cone standing on the road.
+schema: hakoniwa.environment-recipe/v1
+name: shapes
+catalog: ../../catalogs/starter/catalog.yaml
+size_m: {east: 60, north: 60}
+terrain: {item: asphalt-ground}
+objects:
+  - {id: l-house, item: building-footprint, pose: {x_m: -15, y_m: 15, yaw_deg: 30},
+     params: {footprint: [[-6, -6], [6, -6], [6, -1], [-1, -1], [-1, 6], [-6, 6]], height_m: 12}}
+  - {id: main, item: road-path, pose: {x_m: 0, y_m: 0, yaw_deg: 0},
+     params: {centerline: [[-28, -5], [0, -5], [10, 5], [10, 28]], width_m: 8}}
+  - {id: cross, item: road-path, pose: {x_m: 0, y_m: 0, yaw_deg: 0},
+     params: {centerline: [[-5, -28], [-5, 20]], lanes: 1, width_m: 4}}
+  - {id: cone, item: traffic-cone, pose: {x_m: -20, y_m: -5, yaw_deg: 0}}

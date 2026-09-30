@@ -28,6 +28,7 @@ CODES = {
     "outside": "an object reaches outside the environment",
     "below_terrain": "an object reaches into the terrain",
     "compile_error": "MuJoCo could not compile the generated world",
+    "fetch_error": "map data could not be fetched from its source",
 }
 
 

@@ -55,6 +55,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
+import env_map  # noqa: E402
 import env_schema  # noqa: E402
 import env_validate  # noqa: E402
 import env_version  # noqa: E402
@@ -222,6 +223,8 @@ def _recipe_data(body: dict, name: str) -> dict:
     data = {"schema": env_schema.RECIPE_SCHEMA, "name": body.get("name") or name}
     if body.get("description"):
         data["description"] = body["description"]
+    if body.get("geo"):
+        data["geo"] = body["geo"]
     data.update(size_m=body.get("size_m"), terrain=body.get("terrain"), objects=body.get("objects", []))
     return data
 
@@ -252,6 +255,59 @@ def validate_recipe(body: object) -> dict:
         return {"ok": True, "stage": "schema", "diagnostics": [
             {"severity": "warning", "path": "", "code": "physics_skipped", "reason": "MuJoCo is not installed"}]}
     return {"stage": "physics", **env_validate.validate(recipe)}
+
+
+# Map tiles behind the area picker (web/map.html); HAKONIWA_MAP_TILES points
+# elsewhere (a company tile server, another style). OpenStreetMap's own tiles
+# are for light interactive use with attribution.
+DEFAULT_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+DEFAULT_TILES_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+
+
+def map_config() -> dict:
+    return {
+        "tiles": {"url": os.environ.get("HAKONIWA_MAP_TILES", DEFAULT_TILES),
+                  "attribution": os.environ.get("HAKONIWA_MAP_TILES_ATTRIBUTION", DEFAULT_TILES_ATTRIBUTION)},
+        "overpass": os.environ.get("HAKONIWA_OVERPASS_URL") or env_map.DEFAULT_OVERPASS,
+        "max_side_m": env_map.MAX_SIDE_M,
+    }
+
+
+def import_map(body: object) -> dict:
+    """Make a Recipe from map data and save it under work/recipes/ (#10).
+
+    Body: {id, name?, bbox: {south, west, north, east}, source: "overpass" |
+    "geojson", geojson?, terrain?, catalog_id?, overwrite?}. The map data as
+    fetched is kept in work/map-data/<id>.json, so the import can be redone
+    without the network.
+    """
+    if not isinstance(body, dict):
+        raise StudioError("the request body must be {id, bbox, source}")
+    recipe_id = _check_id(str(body.get("id") or ""))
+    directory = USER_RECIPES.resolve()
+    target = directory / f"{recipe_id}.yaml"
+    if (target.exists() or recipe_id in _recipe_files()) and not body.get("overwrite"):
+        raise StudioError(f"Recipe {recipe_id} はもうあります（別の ID にしてください）", HTTPStatus.CONFLICT)
+    box = body.get("bbox")
+    source = body.get("source", "overpass")
+    try:
+        bbox = env_map.Box.of(box["south"], box["west"], box["north"], box["east"]) if isinstance(box, dict) else None
+        catalog = _catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID)
+        recipe, report, data = env_map.import_map(
+            bbox, overpass=source == "overpass", geojson=body.get("geojson") if source == "geojson" else None,
+            name=body.get("name") or None, catalog=_catalog_reference(catalog, directory),
+            terrain_item=body.get("terrain") or "city-ground")
+        env_schema.parse_recipe(recipe, target)
+    except (KeyError, TypeError) as exc:
+        raise StudioError("bbox must be {south, west, north, east} in degrees") from exc
+    except DiagnosticError as exc:
+        raise StudioError(f"地図から作れません: {exc}") from exc
+    directory.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
+    data_dir = directory.parent / "map-data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / f"{recipe_id}.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return {"id": recipe_id, "path": str(target), "size_m": recipe["size_m"], **report.as_json()}
 
 
 def save_recipe(recipe_id: str, body: object) -> dict:
@@ -328,6 +384,10 @@ class StudioHandler(SimpleHTTPRequestHandler):
                 return self._json(list_catalogs())
             if method == "GET" and len(parts) == 2 and parts[0] == "catalogs":
                 return self._json(catalog_json(parts[1]))
+            if method == "GET" and parts == ["map", "config"]:
+                return self._json(map_config())
+            if method == "POST" and parts == ["map", "import"]:
+                return self._json(import_map(self._body()))
             if method == "GET" and parts == ["recipes"]:
                 return self._json(list_recipes())
             if method == "POST" and parts == ["resolve"]:

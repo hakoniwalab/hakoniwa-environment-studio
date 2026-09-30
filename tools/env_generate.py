@@ -13,7 +13,8 @@ Names: each object keeps its Recipe id. The GLB node is named after it (item
 and type in its extras); in MuJoCo it is the body object:<id> with one geom
 per solid, geom:<id>/<solid>. Solids that take no part in collision (paint,
 lamps) are geoms with contype and conaffinity 0 in group 2, which rays and
-contacts pass through. The terrain is the geom `terrain` (an hfield, or a slab
+contacts pass through. Solids of "surface" layer objects (roads) have contype
+2 and conaffinity 1: they collide with everything but one another. The terrain is the geom `terrain` (an hfield, or a slab
 whose top is z = 0 for flat ground).
 
 environment_mjcf(validation=True) gives the world env_validate.py checks:
@@ -46,6 +47,7 @@ GEOM_PREFIX = "geom:"
 BOUNDARY_PREFIX = "boundary:"
 TERRAIN_GEOM = "terrain"
 VISUAL_GROUP = 2
+SURFACE_CONTYPE = 2
 # Thickness of the validation boundary boxes, metres; they stand this high.
 BOUNDARY_THICKNESS_M = 1.0
 BOUNDARY_HEIGHT_M = 200.0
@@ -111,6 +113,19 @@ def _box_mesh(w, d, h):
     return _faces_mesh(v, [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)])
 
 
+def prism_vertices(solid: Solid) -> list[tuple[float, float, float]]:
+    """A prism's corners about its centre: the outline at the bottom, then at the top."""
+    hh = solid.height_m / 2
+    return [(x, y, -hh) for x, y in solid.points] + [(x, y, hh) for x, y in solid.points]
+
+
+def _prism_mesh(solid: Solid):
+    v = prism_vertices(solid)
+    n = len(solid.points)
+    sides = [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+    return _faces_mesh(v, [tuple(reversed(range(n))), tuple(range(n, 2 * n)), *sides])
+
+
 def _wedge_mesh(solid: Solid):
     v = wedge_vertices(solid)
     # bottom, high end (+y), slope, and the two sides.
@@ -148,6 +163,8 @@ def solid_mesh(solid: Solid):
         mesh = _box_mesh(solid.width_m, solid.depth_m, solid.height_m)
     elif solid.primitive == "cylinder":
         mesh = _cylinder_mesh(solid.width_m, solid.height_m)
+    elif solid.primitive == "prism":
+        mesh = _prism_mesh(solid)
     else:
         mesh = _wedge_mesh(solid)
     r = solid.rotation()
@@ -357,11 +374,15 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False) -> 
                 attributes.update(type="cylinder", size=_numbers((solid.width_m / 2, solid.height_m / 2)))
             else:
                 mesh = f"mesh:{obj.id}/{solid.name}"
-                ET.SubElement(asset, "mesh", {"name": mesh,
-                                              "vertex": _numbers([v for p in wedge_vertices(solid) for v in p])})
+                vertices = prism_vertices(solid) if solid.primitive == "prism" else wedge_vertices(solid)
+                ET.SubElement(asset, "mesh", {"name": mesh, "vertex": _numbers([v for p in vertices for v in p])})
                 attributes.update(type="mesh", mesh=mesh)
             if not solid.collide:
                 attributes.update(contype="0", conaffinity="0", group=str(VISUAL_GROUP))
+            elif obj.shape.layer == "surface":
+                # Surface objects (roads, markings) do not collide with one
+                # another, only with everything else (contype 2 & conaffinity 1).
+                attributes.update(contype=str(SURFACE_CONTYPE), conaffinity="1")
             ET.SubElement(body, "geom", attributes)
     if not len(asset):
         root.remove(asset)
@@ -397,7 +418,9 @@ def manifest(recipe: env_schema.Recipe, files: dict[str, str] | None = None) -> 
             "id": obj.id, "item": obj.item, "type": obj.type, "glb_node": obj.id, "mjcf_body": BODY_PREFIX + obj.id,
             "mjcf_geoms": [geom_name(obj.id, solid.name) for solid in obj.solids],
             "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
+            **({"source": obj.source} if obj.source else {}),
         } for obj in recipe.objects],
+        **({"geo": recipe.geo} if recipe.geo else {}),
         "files": files or {},
     }
 

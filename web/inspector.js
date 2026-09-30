@@ -79,6 +79,7 @@ export function createInspector(host, app) {
       })),
       el("p", { class: "meta" }, `${entry?.name || part.item}（${entry?.category || ""}・${part.item}）`),
       sourceLine(entry),
+      objectSource(part),
       el("div", { class: "grid2" },
         numberField("x (m)・東", part.pose.x_m, (value) => { part.pose.x_m = mm(value); }),
         numberField("y (m)・北", part.pose.y_m, (value) => { part.pose.y_m = mm(value); }),
@@ -154,6 +155,7 @@ export function createInspector(host, app) {
         type: "color", value, onchange: (event) => { set(event.target.value.toLowerCase()); app.render(); },
       }));
     }
+    if (kind === "polygon" || kind === "polyline") return pointsField(definition, value, set);
     if (kind === "bool") {
       return el("label", { class: "field inline", title }, el("input", {
         type: "checkbox", checked: value, onchange: (event) => { set(event.target.checked); app.render(); },
@@ -176,6 +178,34 @@ export function createInspector(host, app) {
     return el("label", { class: "field", title }, label, el("input", {
       value, onchange: (event) => { set(event.target.value); app.render(); },
     }));
+  }
+
+  // A footprint or centre line: its size in words, and its points as JSON to
+  // edit by hand (the server checks them: a crossing outline is refused).
+  function pointsField(definition, value, set) {
+    const points = Array.isArray(value) ? value : [];
+    const closed = definition.kind === "polygon";
+    const pairs = closed ? points.map((point, i) => [point, points[(i + 1) % points.length]]) : points.slice(1).map((point, i) => [points[i], point]);
+    const length = pairs.reduce((sum, [a, b]) => sum + Math.hypot(b[0] - a[0], b[1] - a[1]), 0);
+    const area = closed ? Math.abs(points.reduce((sum, [x1, y1], i) => {
+      const [x2, y2] = points[(i + 1) % points.length];
+      return sum + x1 * y2 - x2 * y1;
+    }, 0)) / 2 : 0;
+    const summary = closed ? `${points.length} 点・面積 ${Math.round(area * 10) / 10} m²・周長 ${Math.round(length * 10) / 10} m`
+      : `${points.length} 点・長さ ${Math.round(length * 10) / 10} m`;
+    const text = el("textarea", { rows: "4", spellcheck: "false", class: "points" }, JSON.stringify(points));
+    text.addEventListener("change", () => {
+      try {
+        set(JSON.parse(text.value));
+        app.render();
+      } catch (error) {
+        text.setCustomValidity(`JSON として読めません: ${error.message}`);
+        text.reportValidity();
+      }
+    });
+    text.addEventListener("input", () => text.setCustomValidity(""));
+    return el("label", { class: "field", title: definition.description || "" },
+      `${definition.label}（${summary}）`, text);
   }
 
   // Fields for parameters a caller keeps: values[name] is the current value,
@@ -209,6 +239,19 @@ export function createInspector(host, app) {
     const source = entry?.source || {};
     const bits = [entry?.description, source.note, source.url].filter(Boolean);
     return bits.length ? el("div", { class: "source" }, ...bits.map((bit) => el("div", {}, bit))) : null;
+  }
+
+  // Where this object came from (a map feature, #10): kept in the Recipe as its source.
+  function objectSource(part) {
+    const source = part.source;
+    if (!source) return null;
+    const osm = source.provider === "openstreetmap" && ["node", "way", "relation"].includes(source.kind);
+    const label = `${source.provider} ${source.kind}/${source.id}`;
+    const tags = Object.entries(source.tags || {}).map(([key, value]) => `${key}=${value}`).join("、");
+    return el("div", { class: "source" }, "出典：",
+      osm ? el("a", { href: `https://www.openstreetmap.org/${source.kind}/${source.id}`, target: "_blank", rel: "noopener" }, label)
+        : label,
+      tags ? el("div", {}, tags) : null);
   }
 
   // Values the item assumes (not in its source), unless this part sets them itself.

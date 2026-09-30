@@ -15,6 +15,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import env_studio  # noqa: E402
 import env_validate  # noqa: E402
@@ -136,6 +137,30 @@ class StudioServerTest(unittest.TestCase):
         self.assertEqual((status, result["ok"], result["stage"]), (200, False, "schema"))
         self.assertEqual([(item["code"], item["path"]) for item in result["diagnostics"]],
                          [("unknown_reference", "objects[0].item")])
+
+    def test_a_map_area_becomes_a_saved_recipe(self):
+        import test_env_map
+
+        box = test_env_map.BOX.as_json()
+        with mock.patch.object(env_studio.env_map, "fetch_overpass", return_value=test_env_map.sample()) as fetch:
+            status, result = self.call("POST", "/api/map/import", {"id": "my-block", "name": "街区", "bbox": box})
+        self.assertEqual(status, 200, result)
+        fetch.assert_called_once()
+        self.assertEqual((result["buildings"], result["roads"]), (5, 2))
+        # Saved like any Recipe (and opens in the Studio), with the data as fetched beside it.
+        _, loaded = self.call("GET", "/api/recipes/my-block")
+        self.assertEqual((loaded["editable"], loaded["recipe"]["terrain"]["item"]), (True, "city-ground"))
+        self.assertEqual(loaded["recipe"]["geo"]["bbox_deg"], box)
+        self.assertTrue((self.user.parent / "map-data/my-block.json").exists())
+        # The same id again is refused; the map settings are there for the page.
+        self.assertEqual(self.call("POST", "/api/map/import", {"id": "my-block", "bbox": box})[0], 409)
+        _, config = self.call("GET", "/api/map/config")
+        self.assertIn("{z}", config["tiles"]["url"])
+        status, error = self.call("POST", "/api/map/import", {"id": "big", "bbox": {
+            "south": 35, "west": 135, "north": 35.2, "east": 135.2}, "source": "geojson",
+            "geojson": {"type": "FeatureCollection", "features": []}})
+        self.assertEqual(status, 400)
+        self.assertIn("地図から作れません", error["error"])
 
     def test_an_invalid_recipe_is_rejected_and_not_saved(self):
         status, body = self.call("PUT", "/api/recipes/bad", {

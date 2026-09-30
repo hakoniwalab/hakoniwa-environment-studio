@@ -44,13 +44,15 @@ types:
 |---|---|
 | `id` / `label` / `description` | 識別子、表示名、説明（`describe-type` で人と AI が読む） |
 | `extends` / `abstract` | 単一継承。抽象の型は品目から直接使えない |
-| `params` | `kind`（length / angle / number / integer / color / enum / bool / text）、`unit`（length は m、angle は deg が既定）、`label`、`description`、`default`、`min` / `max` / `values`、`level` |
-| `behavior` | `surface`（`ground`：地面に立つ／`elevated`：地面から `z_m` の高さ）、`snap`、`friction` |
+| `params` | `kind`（length / angle / number / integer / color / enum / bool / text / polygon / polyline）、`unit`（length は m、angle は deg が既定）、`label`、`description`、`default`、`min` / `max` / `values`、`level` |
+| `behavior` | `surface`（`ground`：地面に立つ／`elevated`：地面から `z_m` の高さ）、`snap`、`friction`、`layer`（`object` が既定／`surface`：道路や標示。surface どうしは重なってよい） |
 | `shapes` | 形状（3 章）。地形の型では代わりに `terrain` |
 | `terrain` | `kind`（flat / hfield）、`generator`、`color`、`friction`（4 章） |
 | `envelope` | 上面図の外形（既定は形状全部を収める中心合わせの箱） |
 
 子の型で `params: {name: null}` と書くと、親のパラメータを外します。
+
+`polygon`（建物の外形など）と `polyline`（道路の中心線など）は、物体のローカル座標（m）の点の並び `[[x, y], ...]` です。polygon は 3 点以上で、辺が交差・接触してはいけません（`invalid_shape`）。向きは問わず、反時計回りにそろえて保存します。閉じる点の重複や一直線上の点は取り除きます。点は最大 2000 個です。
 
 ### 2.1 パラメータの level
 
@@ -68,13 +70,19 @@ types:
 
 | 項目 | 内容 |
 |---|---|
-| `primitive` | `box`、`cylinder`（直立、`w` = `d` = 直径）、`wedge`（くさび：底面 `w × d`、ローカル +y に向かって 0 から `h` まで上がる） |
+| `primitive` | `box`、`cylinder`（直立、`w` = `d` = 直径）、`wedge`（くさび：底面 `w × d`、ローカル +y に向かって 0 から `h` まで上がる）、`prism`（`points` の多角形を `h` だけ押し出す）、`ribbon`（`points` の折れ線に沿った幅 `w` の帯） |
+| `points` | prism / ribbon の点（`$footprint` のような polygon / polyline のパラメータ） |
 | `w` / `d` / `h` | 大きさ（m） |
 | `x` / `y` / `z` | **形状の中心**（物体の底面の中心からの位置）。`z` の既定は `h / 2`（底面に立つ） |
 | `roll` / `pitch` / `yaw` | 中心まわりの傾き（度。yaw → pitch → roll の順に適用） |
 | `color` / `collide` / `visible` / `when` | 色、衝突に加わるか、見えるか、作る条件 |
 
 形状は物体の底面より下に出てはいけません（出ると `invalid_shape`）。形状の名前は型の中で一意です。
+
+- **prism**：MuJoCo はメッシュを凸包で衝突させるため、凹んだ外形（L 字の建物など）は凸の部品に分けます（耳切りで三角形に分け、凸を保つ限りつなぐ Hertel-Mehlhorn 法。決定的）。部品の名前は `<名前>-1`、`<名前>-2`、…（凸なら `<名前>` のまま）です。傾けられません（点のほうを動かします）。
+- **ribbon**：線分ごとの箱 `<名前>-1`、… に分けます。`x` = 0（線の上）のときは、曲がり角を直径 `w` の円柱 `<名前>-joint-1`、… で埋めます。`x` は進行方向の右へのずれです（車線の線など）。
+
+`layer: surface` の物体の形状は、MuJoCo で contype 2・conaffinity 1 になります。ほかの物体や地面とは衝突し、surface どうしは衝突しません（交差点で道路が重なるため）。地面に立つ物体は、足元にある surface の物体（道路）の**上面に**乗ります。道路に置いたコーンは道路にめり込みません。
 
 ## 4. 地形
 
@@ -121,6 +129,11 @@ objects:
   - {id: gate-1, item: race-gate, pose: {x_m: 0, y_m: -6, yaw_deg: 0}}
   - {id: landing-pad, item: landing-pad, pose: {x_m: 7, y_m: 12, yaw_deg: 0}, params: {color: "#2f6fb0"}}
 ```
+
+地図から作った Recipe（#10）は、出典を持ちます。どちらも世界の形は変えず、そのまま保存・出力（`resolve`、`environment.json`）されます。
+
+- `geo`：`provider`、`origin {lat_deg, lon_deg}`（原点 = 環境の中心）、`bbox_deg {south, west, north, east}`、`projection`、`attribution`、`license`、`data_timestamp`、`query`
+- 物体の `source`：`provider`、`kind`（way / relation / feature）、`id`、`tags`
 
 `pose` は `x_m`・`y_m`・`yaw_deg` だけです。高さは地形から決まり（4 章）、`elevated` の物体は `params.z_m` で持ち上げます。`params` は型が `placement` とした値だけ書けます。
 

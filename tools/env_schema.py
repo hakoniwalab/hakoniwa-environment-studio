@@ -22,6 +22,7 @@ import re
 
 import yaml
 
+import env_polygon
 import env_types
 from env_diagnostics import Collector, DiagnosticError, fail, mapping, only
 from env_terrain import Terrain, make_terrain
@@ -34,8 +35,13 @@ MAX_SIZE_M = 10_000.0
 # Sides of the polygon that stands for a circle on the plan (web/geometry.js too).
 CIRCLE_SEGMENTS = 32
 ITEM_KEYS = {"id", "type", "extends", "name", "description", "category", "params", "source", "assumed"}
-RECIPE_KEYS = {"schema", "name", "description", "catalog", "size_m", "terrain", "objects"}
-OBJECT_KEYS = {"id", "item", "pose", "params"}
+RECIPE_KEYS = {"schema", "name", "description", "catalog", "size_m", "terrain", "objects", "geo"}
+OBJECT_KEYS = {"id", "item", "pose", "params", "source"}
+# Provenance of a Recipe made from map data (#10): where its origin is on the
+# Earth and where the data came from. Kept as it is; it does not change the world.
+GEO_KEYS = {"provider", "origin", "bbox_deg", "projection", "attribution", "license", "data_timestamp", "query"}
+# Provenance of one object (the map feature it was made from).
+SOURCE_KEYS = {"provider", "kind", "id", "tags", "note"}
 POSE_KEYS = {"x_m", "y_m", "yaw_deg"}
 
 
@@ -91,6 +97,7 @@ class EnvObject:
     pose: Pose
     params: dict
     shape: Shape
+    source: dict | None = None
 
     @property
     def solids(self):
@@ -112,9 +119,56 @@ class Recipe:
     terrain_item: str
     terrain: Terrain
     objects: list[EnvObject] = field(default_factory=list)
+    geo: dict | None = None
 
 
 # --- Small checks ------------------------------------------------------------------
+
+def _scalar_tags(value, path: str) -> dict:
+    value = mapping(value, path)
+    for key, tag in value.items():
+        if not isinstance(key, str) or not isinstance(tag, (str, int, float, bool)):
+            raise fail(f"{path}.{key}", "wrong_type", "tags are text keys with text or number values",
+                       expected="{key: value}", actual=tag)
+    return dict(value)
+
+
+def _source(value, path: str) -> dict:
+    value = mapping(value, path)
+    only(value, SOURCE_KEYS, path)
+    source = {key: value[key] for key in sorted(value) if key != "tags"}
+    for key, item in source.items():
+        if not isinstance(item, (str, int)) or isinstance(item, bool):
+            raise fail(f"{path}.{key}", "wrong_type", "must be text or a whole number", actual=item)
+    if "tags" in value:
+        source["tags"] = _scalar_tags(value["tags"], f"{path}.tags")
+    return source
+
+
+def _geo(value, path: str) -> dict:
+    value = mapping(value, path)
+    only(value, GEO_KEYS, path)
+    geo = dict(value)
+    if "origin" in geo:
+        origin = mapping(geo["origin"], f"{path}.origin")
+        only(origin, {"lat_deg", "lon_deg"}, f"{path}.origin")
+        for key, limit in (("lat_deg", 90), ("lon_deg", 180)):
+            number = origin.get(key)
+            if isinstance(number, bool) or not isinstance(number, (int, float)) or abs(number) > limit:
+                raise fail(f"{path}.origin.{key}", "out_of_range", f"degrees within ±{limit}",
+                           expected=f"|value| <= {limit}", actual=number)
+    if "bbox_deg" in geo:
+        box = mapping(geo["bbox_deg"], f"{path}.bbox_deg")
+        only(box, {"south", "west", "north", "east"}, f"{path}.bbox_deg")
+        if set(box) != {"south", "west", "north", "east"} or not all(
+                isinstance(box[key], (int, float)) and not isinstance(box[key], bool) for key in box):
+            raise fail(f"{path}.bbox_deg", "wrong_type", "south, west, north and east in degrees",
+                       expected="{south, west, north, east}", actual=box)
+    for key in ("provider", "projection", "attribution", "license", "data_timestamp", "query"):
+        if key in geo and not isinstance(geo[key], str):
+            raise fail(f"{path}.{key}", "wrong_type", "must be text", actual=geo[key])
+    return geo
+
 
 def _identifier(value, path: str) -> str:
     if not isinstance(value, str) or not ID_PATTERN.match(value):
@@ -310,15 +364,44 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain) -> EnvObject:
         problems.add(f"{path}.pose.yaw_deg", "wrong_type", "must be a number of degrees", expected="number", actual=yaw)
         yaw = 0
     resolved = problems.check(resolve_placement, item, value.get("params", {}), f"{path}.params")
+    source = problems.check(_source, value["source"], f"{path}.source") if "source" in value else None
     problems.raise_if_errors()
     params, shape = resolved
     obj = EnvObject(id=object_id, item=item.id, type=item.type.id, pose=Pose(x, y, 0.0, float(yaw) % 360.0),
-                    params=params, shape=shape)
+                    params=params, shape=shape, source=source)
     # Set on the terrain: its base at the highest ground under its outline
     # (plus its own height above the terrain when elevated).
     ground = terrain.highest_under(footprint(obj))
     z = ground + (params["z_m"] if shape.surface == "elevated" else 0.0)
     return replace(obj, pose=replace(obj.pose, z_m=round(z, 6)))
+
+
+def _solid_outlines(obj: EnvObject) -> list[tuple[list[tuple[float, float]], float]]:
+    """(outline in the environment frame, top above the object's base) of each colliding solid."""
+    return [(placed(obj, solid.outline()), solid.z_m + solid.height_m / 2)
+            for solid in obj.solids if solid.collide]
+
+
+def _on_surfaces(objects: list[EnvObject]) -> list[EnvObject]:
+    """Objects standing on the ground stand on top of the surface objects
+    (roads) under them, as they do on the terrain: a cone on a road stands on
+    the road, not in it."""
+    surfaces = [(obj, _solid_outlines(obj)) for obj in objects if obj.shape.layer == "surface"]
+    if not surfaces:
+        return objects
+    placed_objects = []
+    for obj in objects:
+        if obj.shape.layer == "surface" or obj.shape.surface != "ground":
+            placed_objects.append(obj)
+            continue
+        mine = [outline for outline, _ in _solid_outlines(obj)]
+        z = obj.pose.z_m
+        for surface, outlines in surfaces:
+            for polygon, top in outlines:
+                if any(env_polygon.convex_overlap(outline, polygon) for outline in mine):
+                    z = max(z, surface.pose.z_m + top)
+        placed_objects.append(obj if z == obj.pose.z_m else replace(obj, pose=replace(obj.pose, z_m=round(z, 6))))
+    return placed_objects
 
 
 def parse_recipe(data: dict, path: Path, catalog: Catalog | None = None) -> Recipe:
@@ -334,6 +417,7 @@ def parse_recipe(data: dict, path: Path, catalog: Catalog | None = None) -> Reci
             problems.raise_if_errors()
         catalog = load_catalog((path.parent / reference).resolve())
     name = problems.check(_text, data.get("name", path.stem), "name") or path.stem
+    geo = problems.check(_geo, data["geo"], "geo") if "geo" in data else None
     size = problems.check(mapping, data.get("size_m"), "size_m") or {}
     problems.check(only, size, {"east", "north"}, "size_m")
     size_east = problems.check(_metres, size.get("east"), "size_m.east", positive=True)
@@ -358,9 +442,10 @@ def parse_recipe(data: dict, path: Path, catalog: Catalog | None = None) -> Reci
         seen.add(obj.id)
         objects.append(obj)
     problems.raise_if_errors()
+    objects = _on_surfaces(objects)
     return Recipe(path=path, name=name, description=str(data.get("description", "")), catalog=catalog,
                   size_east_m=size_east, size_north_m=size_north, terrain_item=terrain_item, terrain=terrain,
-                  objects=objects)
+                  objects=objects, geo=geo)
 
 
 def load_recipe(path: Path) -> Recipe:

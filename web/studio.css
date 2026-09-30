@@ -137,3 +137,10 @@ button.icon { padding: 4px 0; font-size: 15px; }
 .plan .part.mounted .facing { display: none; }
 .source { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
 .assumed { color: #b26a00; font-size: 12px; }
+/* Paint on a part drawn by its solids (road lines): no outline of its own. */
+.plan .part polygon.paint { stroke: none; fill-opacity: 1; pointer-events: none; }
+a.button-link {
+  display: inline-block; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 6px;
+  color: var(--accent); text-decoration: none; font-size: 13px;
+}
+textarea.points { width: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
