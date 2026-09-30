@@ -2,6 +2,8 @@
 
 Environment Studio で作った環境を、hakoniwa-urban-mobility の World として使えるようにする仕組みです。実装は `tools/env_urban.py` です。
 
+作ってから urban で車を走らせるまでの手順は、README の「作った環境で車を走らせる（通しの手順）」にあります。
+
 ## 1. 受け渡しの決まり
 
 urban-mobility は World を **City World ジョブ**（フォルダ）で受け取り、`tools/urban_assets.py register-city --receipt <レシート>` で City Asset として登録します。ジョブの構成とレシートの中身の決まりは、urban-mobility 側の `schemas/city-world-job.yaml` にあり（`docs/asset-contract.md` 6.3 節）、`tools/city_world_job.py check` で調べられます。Studio はこの決まりに合わせて書き出します。

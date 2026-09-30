@@ -216,6 +216,38 @@ python -m unittest discover -s ../hakoniwa-environment-studio/tests
 
 Studio の作業データは、Business Pack の Recipe workspace `work/recipes/environment-studio/`（`$HAKONIWA_WORK_DIR/recipes/environment-studio`、以下 `<ws>`）に置きます。Workspace の外では Studio は起動せず、入り方を表示して止まります。
 
+### 作った環境で車を走らせる（通しの手順）
+
+Environment Studio で作った環境を hakoniwa-urban-mobility に登録し、車と組み合わせてシミュレーションするまでの流れです。どれも `(hako)` シェルの `hakoniwa-business-pack` で実行します。
+
+1. **Studio を開く**
+
+   ```bash
+   python ../hakoniwa-environment-studio/tools/env_studio.py start --open-browser
+   ```
+
+   動いている Studio をあとで開き直すときは `env_studio.py open` です。
+
+2. **環境を作る**：部品を置くか、「地図から」で街を取り込み、保存します。
+3. **urban に登録する**：上の「urban-mobility へ」を押します。書き出し（`<ws>/urban/<ID>/`）、urban のチェック、City Asset への登録までを行い、登録した ID が表示されます（詳しくは [docs/urban-export.md](docs/urban-export.md)）。
+4. **Urban Studio を開く**
+
+   ```bash
+   python ../hakoniwa-urban-mobility/tools/urban_studio.py start --open-browser
+   ```
+
+   開き直すときは `urban_studio.py open`、止めるときは `urban_studio.py stop` です。
+5. **車と組み合わせる**：Urban Studio の Compose で、World に 3 で登録した ID を選び、車（ゴルフカート、操作は `rc`）を追加して道路の上に置き、保存します。地図の原点がある環境は地図、原点のない環境は 3D ビューで置きます。
+6. **シミュレーションする**：Simulation でその Composition を選び、`configure` のあと `start` を押します。Viewer が開いたらコントローラで走らせ、終わったら `stop` を押します。
+7. **片付け**：Workspace を抜ける（`exit`）前に、両方の Studio を止めます。
+
+   ```bash
+   python ../hakoniwa-urban-mobility/tools/urban_studio.py stop
+   python ../hakoniwa-environment-studio/tools/env_studio.py stop
+   ```
+
+環境を直したときは、Studio で保存して「urban-mobility へ」を押し直せば、同じ ID の City が新しい版で登録し直されます。
+
 Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `<ws>/recipes/`（例の環境は保存するとコピーになります）。一覧の × で環境を削除できます。すぐには消さず、見た目の GLB（`<ID>.assets/`）と地図から取り込んだ元データ（`<ws>/map-data/<ID>/`）と一緒に `<ws>/trash/<日時>-<ID>/` へ移します（戻すときはそこから `<ws>/` へ戻し、要らなければ手で消します）。例の環境は消せません。別の ID で保存すると、見た目の GLB もその ID の `<ID>.assets/` にコピーするので、元の環境を消してもコピーは壊れません（手で書いた Recipe がほかの環境の `.assets/` を指している場合は、削除を止めてその環境を示します）。部品を動かしたときは、3D の部品をその場で動かし、高さ（地形・道路の上）だけをサーバに聞きます（`POST /api/poses`）。GLB を作り直すのは、形・品目・地面・大きさが変わったときだけです。
 
 地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、範囲を指定して取り込むと、その範囲の建物と道路が部品になった Recipe ができます。範囲の指定は PLATEAU の City World ブラウザと同じです（中心マーカー、区画のドラッグ、四隅のハンドル、half extent 10〜1000 m）。
