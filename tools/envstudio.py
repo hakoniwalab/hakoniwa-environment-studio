@@ -75,7 +75,7 @@ COMMANDS = {
     "inspect": "bounds, ground, nearest object and room to the edges of each object",
     "generate": "environment.glb / environment.xml / environment.json",
 }
-FRAME = {"units": "m", "axes": "ENU (x east, y north, z up)", "origin": "centre", "yaw": "deg, counter-clockwise from east"}
+FRAME = env_schema.FRAME
 
 
 def cmd_contract(args) -> dict:
@@ -151,19 +151,7 @@ def cmd_validate(args) -> dict:
             "tolerance_m": env_validate.TOLERANCE_M}
 
 
-def resolved_json(recipe) -> dict:
-    return {
-        "name": recipe.name, "description": recipe.description,
-        "size_m": {"east": recipe.size_east_m, "north": recipe.size_north_m},
-        "frame": FRAME,
-        "terrain": {"item": recipe.terrain_item, **recipe.terrain.as_json(with_heights=False)},
-        "objects": [{
-            "id": obj.id, "item": obj.item, "type": obj.type,
-            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
-            "params": obj.params, **obj.shape.as_json(), **({"source": obj.source} if obj.source else {}),
-        } for obj in recipe.objects],
-        **({"geo": recipe.geo} if recipe.geo else {}),
-    }
+resolved_json = env_schema.resolved_json
 
 
 def cmd_resolve(args) -> dict:

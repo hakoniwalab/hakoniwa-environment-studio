@@ -397,9 +397,7 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False) -> 
 def fingerprint(recipe: env_schema.Recipe) -> str:
     """sha256 of what the outputs are made from (the resolved Recipe, the terrain
     grid and this generator's version): it changes exactly when they do."""
-    import envstudio
-
-    payload = {"generator": GENERATOR_VERSION, "resolved": envstudio.resolved_json(recipe),
+    payload = {"generator": GENERATOR_VERSION, "resolved": env_schema.resolved_json(recipe),
                "heights": [list(row) for row in recipe.terrain.heights]}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 

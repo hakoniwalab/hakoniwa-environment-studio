@@ -10,12 +10,13 @@ import { $, api, el } from "./dom.js";
 import { History } from "./history.js";
 import { createInspector } from "./inspector.js";
 import { Parts } from "./parts.js";
-import { PlanView, mm, pivotOf, turned } from "./plan2d.js";
-import { checkLayout, normalizeYaw, slideDistance } from "./geometry.js";
+import { PlanView, pivotOf, roundMm, turned } from "./plan2d.js";
+import { normalizeYaw, slideDistance } from "./geometry.js";
+import { fromServer, quickProblems, renderProblems } from "./problems.js";
+import { terrainImage } from "./terrain.js";
 
 const PREVIEW_DELAY_MS = 300;
 const VALIDATE_DELAY_MS = 300;
-const EDGE_NAMES = { north: "北", south: "南", east: "東", west: "西" };
 const NUDGE_FAR = 10; // Shift + arrow moves ten grid steps
 const NUDGE_FINE_M = 0.01; // Alt + arrow
 const HISTORY_LIMIT = 200; // undo steps kept
@@ -104,11 +105,6 @@ function uniqueId(prefix) {
   return `${prefix}-${index}`;
 }
 
-function snapToGrid(value) {
-  const grid = Number($("#grid").value);
-  return grid ? mm(Math.round(value / grid) * grid) : mm(value);
-}
-
 // What the server needs to check, preview or save the Recipe as it is now.
 function recipeBody() {
   const { name, description, size_m: size, terrain, objects, geo } = recipe();
@@ -121,6 +117,7 @@ function recipeBody() {
 // leave the panels (and the slider in them) alone.
 function render({ live = false } = {}) {
   const current = state.current;
+  if (!current) return; // shapes can arrive before the first Recipe is open
   $("#recipe-id").value = current.id;
   $("#recipe-name").value = recipe().name || "";
   const size = recipe().size_m;
@@ -133,12 +130,12 @@ function render({ live = false } = {}) {
   // The server's check once it covers this exact layout; the quick check until then.
   const layout = layoutKey(); // once per render: it stringifies every object
   const checked = state.validation?.layout === layout ? state.validation.result : null;
-  const problems = checked ? fromServer(checked) : quickProblems(views);
+  const problems = checked ? fromServer(checked, recipe().objects) : quickProblems(views, area());
   state.plan.setScene({
     area: area(), parts: views, selected: state.selection, terrain: state.terrain.image,
     problems: { outside: problems.outside, overlapping: problems.overlapping },
   });
-  renderProblems(problems, Boolean(checked));
+  renderProblems($("#problems"), problems, Boolean(checked), recipe().objects.length > 0);
   scheduleValidation(layout);
   refreshTerrain();
   // While a slider is held, rebuilding the panels would drop it.
@@ -215,8 +212,8 @@ function onPaste(event) {
   state.selection = pasted.map((obj) => {
     const copy = JSON.parse(JSON.stringify(obj));
     copy.id = uniqueId(catalog.item(obj.item).id_prefix || "object");
-    copy.pose.x_m = mm(obj.pose.x_m + offset);
-    copy.pose.y_m = mm(obj.pose.y_m - offset);
+    copy.pose.x_m = roundMm(obj.pose.x_m + offset);
+    copy.pose.y_m = roundMm(obj.pose.y_m - offset);
     recipe().objects.push(copy);
     return copy.id;
   });
@@ -287,58 +284,6 @@ function layoutKey() {
   return JSON.stringify({ catalog: state.catalogId, size, terrain, objects });
 }
 
-function quickProblems(views) {
-  const check = checkLayout(views, area());
-  return {
-    outside: new Set(check.outside), overlapping: new Set(check.overlaps.flatMap((pair) => [pair.a, pair.b])),
-    lines: [
-      ...check.outside.map((id) => `${id} が環境の外にはみ出しています`),
-      ...check.overlaps.map((pair) => `${pair.a} と ${pair.b} が ${Math.round(pair.depth * 1000)} mm 重なっています`),
-    ],
-  };
-}
-
-// The object an objects[i] path points at (diagnostics use the Recipe's paths).
-function objectAt(path) {
-  const match = /^objects\[(\d+)\]/.exec(path || "");
-  return match ? recipe().objects[Number(match[1])] : null;
-}
-
-function fromServer(result) {
-  const outside = new Set();
-  const overlapping = new Set();
-  const lines = result.diagnostics.filter((item) => item.severity !== "warning").map((item) => {
-    const obj = objectAt(item.path);
-    const other = objectAt(item.related?.[0]);
-    const depth = (value) => Math.round(value * 1000);
-    if (item.code === "overlap" && obj && other) {
-      overlapping.add(obj.id).add(other.id);
-      return `${obj.id} と ${other.id} が ${depth(item.actual)} mm 重なっています`;
-    }
-    if (item.code === "outside" && obj) {
-      outside.add(obj.id);
-      return `${obj.id} が${EDGE_NAMES[item.actual.edge] || item.actual.edge}の端から ${depth(item.actual.depth_m)} mm はみ出しています`;
-    }
-    if (item.code === "below_terrain" && obj) {
-      overlapping.add(obj.id);
-      return `${obj.id} が地面に ${depth(item.actual)} mm めり込んでいます`;
-    }
-    if (obj) overlapping.add(obj.id);
-    return `${item.path}: ${item.reason}`;
-  });
-  return { outside, overlapping, lines, stage: result.stage };
-}
-
-function renderProblems(problems, byServer) {
-  const source = byServer ? (problems.stage === "schema" ? "スキーマ" : "MuJoCo") : "簡易チェック・MuJoCo 検証中";
-  const items = problems.lines.map((line) => el("li", {}, line));
-  const summary = items.length
-    ? el("li", { class: "summary" }, `NG（${source}）`)
-    : el("li", { class: "ok" }, recipe().objects.length
-      ? `OK：重なり・はみ出し・地面へのめり込みはありません（${source}）` : "");
-  $("#problems").replaceChildren(summary, ...items);
-}
-
 // Check the layout on the server once editing pauses; a stale answer is ignored.
 function scheduleValidation(current = layoutKey()) {
   if (!state.current || state.validation?.layout === current) return;
@@ -387,24 +332,6 @@ async function refreshTerrain() {
   } catch (error) {
     setStatus(error.message, "error");
   }
-}
-
-function terrainImage(ground) {
-  const canvas = document.createElement("canvas");
-  const rows = ground.heights || [[0]];
-  canvas.width = rows[0].length;
-  canvas.height = rows.length;
-  const context = canvas.getContext("2d");
-  const image = context.createImageData(canvas.width, canvas.height);
-  const [r, g, b] = [1, 3, 5].map((index) => parseInt(ground.color.slice(index, index + 2), 16));
-  const top = ground.max_height_m || 1;
-  rows.forEach((row, y) => row.forEach((height, x) => {
-    const shade = 0.72 + 0.5 * (height / top); // rows run north to south, as the image does
-    const offset = (y * canvas.width + x) * 4;
-    image.data.set([Math.min(255, r * shade), Math.min(255, g * shade), Math.min(255, b * shade), 255], offset);
-  }));
-  context.putImageData(image, 0, 0);
-  return canvas.toDataURL();
 }
 
 function renderTerrainPanel() {
@@ -554,8 +481,8 @@ function duplicateSelected() {
   const copies = chosen.map((obj) => {
     const copy = JSON.parse(JSON.stringify(obj));
     copy.id = uniqueId(catalog.item(obj.item)?.id_prefix || "object");
-    copy.pose.x_m = mm(obj.pose.x_m + offset[0]);
-    copy.pose.y_m = mm(obj.pose.y_m + offset[1]);
+    copy.pose.x_m = roundMm(obj.pose.x_m + offset[0]);
+    copy.pose.y_m = roundMm(obj.pose.y_m + offset[1]);
     recipe().objects.push(copy);
     return copy.id;
   });
@@ -576,8 +503,8 @@ function rotateSelected(degrees) {
 
 function moveSelected(dx, dy) {
   for (const obj of selectedObjects()) {
-    obj.pose.x_m = mm(obj.pose.x_m + dx);
-    obj.pose.y_m = mm(obj.pose.y_m + dy);
+    obj.pose.x_m = roundMm(obj.pose.x_m + dx);
+    obj.pose.y_m = roundMm(obj.pose.y_m + dy);
   }
   render();
 }
@@ -686,7 +613,7 @@ async function saveRecipe() {
 
 function setSize(east, north) {
   if (!(east > 0 && north > 0)) return;
-  recipe().size_m = { east: mm(east), north: mm(north) };
+  recipe().size_m = { east: roundMm(east), north: roundMm(north) };
   render();
   state.plan.fit();
 }

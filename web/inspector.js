@@ -10,7 +10,7 @@
 
 import { el } from "./dom.js";
 import { normalizeYaw } from "./geometry.js";
-import { mm, pivotOf, turned } from "./plan2d.js";
+import { pivotOf, roundMm, turned } from "./plan2d.js";
 
 const NUDGE_BUTTON_M = 0.1;
 // Screen directions in the environment frame: up on the plan is +y (north).
@@ -82,8 +82,8 @@ export function createInspector(host, app) {
       sourceLine(entry),
       objectSource(part),
       el("div", { class: "grid2" },
-        numberField("x (m)・東", part.pose.x_m, (value) => { part.pose.x_m = mm(value); }),
-        numberField("y (m)・北", part.pose.y_m, (value) => { part.pose.y_m = mm(value); }),
+        numberField("x (m)・東", part.pose.x_m, (value) => { part.pose.x_m = roundMm(value); }),
+        numberField("y (m)・北", part.pose.y_m, (value) => { part.pose.y_m = roundMm(value); }),
         sliderField("角度 (°)", Math.round(part.pose.yaw_deg ?? 0), (value) => { part.pose.yaw_deg = normalizeYaw(value); }, { min: 0, max: 359 }),
       ),
       el("p", { class: "meta" }, view.surface === "elevated"
@@ -164,7 +164,7 @@ export function createInspector(host, app) {
     }
     if (["length", "angle", "number", "integer"].includes(kind)) {
       const whole = kind === "angle" || kind === "integer";
-      const tidy = (number) => (kind === "length" ? mm(number) : whole ? Math.round(number) : number);
+      const tidy = (number) => (kind === "length" ? roundMm(number) : whole ? Math.round(number) : number);
       const unit = definition.unit ? ` (${definition.unit})` : "";
       const { min, max } = definition;
       if (min !== undefined && max !== undefined && kind !== "number") {

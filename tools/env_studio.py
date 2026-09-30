@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
 import env_citygml  # noqa: E402
+import env_rules  # noqa: E402
 import env_schema  # noqa: E402
 import env_validate  # noqa: E402
 import env_version  # noqa: E402
@@ -76,7 +77,7 @@ STOP_TIMEOUT_SEC = 5.0
 # server's pid can differ from the process `start` spawned: on Windows a venv's
 # python.exe is a launcher that runs the real interpreter as its child.
 INSTANCE_ENV = "HAKONIWA_ENVIRONMENT_STUDIO_INSTANCE"
-ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+ID_PATTERN = env_rules.ID_PATTERN
 
 
 class StudioError(RuntimeError):
@@ -391,7 +392,7 @@ def import_map(body: object) -> dict:
     except (DiagnosticError, osm.OsmConversionError) as exc:
         raise StudioError(f"地図から作れません: {exc}") from exc
     directory.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
+    env_schema.save_yaml(recipe, target)
     (data_dir / "map.json").write_text(json.dumps(osm_json or geojson, ensure_ascii=False), encoding="utf-8")
     return {
         "id": recipe_id, "path": str(target), "citygml": str(data_dir), "size_m": recipe["size_m"],
@@ -450,7 +451,7 @@ def import_city_world(body: object) -> dict:
     except DiagnosticError as exc:
         raise StudioError(f"City World から作れません: {exc}") from exc
     directory.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
+    env_schema.save_yaml(recipe, target)
     return {"id": recipe_id, "path": str(target), "build": str(build), "size_m": recipe["size_m"],
             "buildings": report["buildings"], "roads": report["roads"], "skipped": report["skipped"],
             "courtyards_filled": report["courtyards_filled"], "notes": report["notes"], "provider": report["provider"],
@@ -478,7 +479,7 @@ def save_recipe(recipe_id: str, body: object) -> dict:
     except DiagnosticError as exc:
         raise StudioError(f"Recipe を保存できません: {exc}") from exc
     directory.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    env_schema.save_yaml(data, target)
     return {"id": recipe_id, "editable": True, "path": str(target), "objects": len(recipe.objects)}
 
 
@@ -507,56 +508,66 @@ class StudioHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _body(self) -> object:
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError as exc:
+            raise StudioError("invalid Content-Length") from exc
         try:
             return json.loads(self.rfile.read(length) or b"null")
         except json.JSONDecodeError as exc:
             raise StudioError(f"invalid JSON body: {exc}") from exc
 
+    # method, path pattern ("*" matches one segment), handler(self, segments) -> response.
+    ROUTES = (
+        ("GET", ("health",), lambda self, _: self._json({
+            "app": APP_NAME, "pid": os.getpid(), "port": self.server.server_address[1],
+            "instance": os.environ.get(INSTANCE_ENV), "version": env_version.build_info(ROOT)})),
+        ("POST", ("shutdown",), lambda self, _: self._shutdown()),
+        ("GET", ("catalogs",), lambda self, _: self._json(list_catalogs())),
+        ("GET", ("catalogs", "*"), lambda self, parts: self._json(catalog_json(parts[1]))),
+        ("GET", ("map", "config"), lambda self, _: self._json(map_config())),
+        ("POST", ("map", "import"), lambda self, _: self._json(import_map(self._body()))),
+        ("GET", ("city-worlds",), lambda self, _: self._json(list_city_worlds(self._query("root")))),
+        ("POST", ("city-worlds", "import"), lambda self, _: self._json(import_city_world(self._body()))),
+        ("GET", ("recipes",), lambda self, _: self._json(list_recipes())),
+        ("GET", ("recipes", "*"), lambda self, parts: self._json(read_recipe(parts[1]))),
+        ("PUT", ("recipes", "*"), lambda self, parts: self._json(save_recipe(parts[1], self._body()))),
+        ("POST", ("resolve-many",), lambda self, _: self._json(resolve_many_json(self._body()))),
+        ("POST", ("resolve",), lambda self, _: self._json(resolve_json(self._body()))),
+        ("POST", ("validate",), lambda self, _: self._json(validate_recipe(self._body()))),
+        ("POST", ("terrain",), lambda self, _: self._json(terrain_json(self._body()))),
+        ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body()), "model/gltf-binary")),
+    )
+
+    def _query(self, name: str) -> str | None:
+        return (parse_qs(urlparse(self.path).query).get(name) or [None])[0]
+
+    def _shutdown(self) -> None:
+        self._json({"stopping": True})
+        # shutdown() waits for serve_forever, so it cannot run on this request's thread.
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+    def _guard(self, method: str) -> None:
+        """Only this Studio's own pages may change things: a request that
+        writes must carry JSON (a plain form cannot) and, when the browser
+        names an origin, come from this Studio."""
+        if method == "GET":
+            return
+        origin = self.headers.get("Origin")
+        port = self.server.server_address[1]
+        if origin and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+            raise StudioError(f"requests from {origin} are not accepted", HTTPStatus.FORBIDDEN)
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            raise StudioError("the request body must be application/json", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+
     def _api(self, method: str) -> None:
-        parts = [part for part in urlparse(self.path).path.split("/") if part][1:]
+        parts = tuple(part for part in urlparse(self.path).path.split("/") if part)[1:]
         try:
-            if method == "GET" and parts == ["health"]:
-                return self._json({
-                    "app": APP_NAME, "pid": os.getpid(), "port": self.server.server_address[1],
-                    "instance": os.environ.get(INSTANCE_ENV),
-                    "version": env_version.build_info(ROOT),
-                })
-            if method == "POST" and parts == ["shutdown"]:
-                self._json({"stopping": True})
-                # shutdown() waits for serve_forever, so it cannot run on this request's thread.
-                threading.Thread(target=self.server.shutdown, daemon=True).start()
-                return None
-            if method == "GET" and parts == ["catalogs"]:
-                return self._json(list_catalogs())
-            if method == "GET" and len(parts) == 2 and parts[0] == "catalogs":
-                return self._json(catalog_json(parts[1]))
-            if method == "GET" and parts == ["map", "config"]:
-                return self._json(map_config())
-            if method == "POST" and parts == ["map", "import"]:
-                return self._json(import_map(self._body()))
-            if method == "GET" and parts == ["city-worlds"]:
-                query = parse_qs(urlparse(self.path).query)
-                return self._json(list_city_worlds((query.get("root") or [None])[0]))
-            if method == "POST" and parts == ["city-worlds", "import"]:
-                return self._json(import_city_world(self._body()))
-            if method == "GET" and parts == ["recipes"]:
-                return self._json(list_recipes())
-            if method == "POST" and parts == ["resolve-many"]:
-                return self._json(resolve_many_json(self._body()))
-            if method == "POST" and parts == ["resolve"]:
-                return self._json(resolve_json(self._body()))
-            if method == "POST" and parts == ["validate"]:
-                return self._json(validate_recipe(self._body()))
-            if method == "POST" and parts == ["terrain"]:
-                return self._json(terrain_json(self._body()))
-            if method == "POST" and parts == ["glb"]:
-                return self._bytes(preview_glb(self._body()), "model/gltf-binary")
-            if len(parts) == 2 and parts[0] == "recipes":
-                if method == "GET":
-                    return self._json(read_recipe(parts[1]))
-                if method == "PUT":
-                    return self._json(save_recipe(parts[1], self._body()))
+            for route_method, pattern, handler in self.ROUTES:
+                if route_method == method and len(pattern) == len(parts) and all(
+                        expected in ("*", actual) for expected, actual in zip(pattern, parts)):
+                    self._guard(method)
+                    return handler(self, parts)
             raise StudioError(f"no API {method} {self.path}", HTTPStatus.NOT_FOUND)
         except StudioError as exc:
             return self._json({"error": str(exc)}, exc.status)
@@ -700,7 +711,8 @@ def stop(state_dir: Path) -> int:
         return 0
     port, pid = int(running["port"]), int(running["pid"])
     try:
-        urlopen(Request(f"http://127.0.0.1:{port}/api/shutdown", data=b"{}", method="POST"), timeout=2).read()
+        urlopen(Request(f"http://127.0.0.1:{port}/api/shutdown", data=b"{}", method="POST",
+                        headers={"Content-Type": "application/json"}), timeout=2).read()
     except (OSError, URLError):
         pass
     deadline = time.monotonic() + STOP_TIMEOUT_SEC

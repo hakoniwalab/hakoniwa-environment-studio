@@ -23,6 +23,7 @@ import re
 import yaml
 
 import env_polygon
+import env_rules
 import env_types
 from env_diagnostics import Collector, DiagnosticError, fail, mapping, only, load_yaml_text
 from env_terrain import Terrain, make_terrain
@@ -30,10 +31,10 @@ from env_types import EnvType, Param, Shape
 
 CATALOG_SCHEMA = "hakoniwa.environment-catalog/v1"
 RECIPE_SCHEMA = "hakoniwa.environment-recipe/v1"
-ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+ID_PATTERN = env_rules.ID_PATTERN
 MAX_SIZE_M = 10_000.0
 # Sides of the polygon that stands for a circle on the plan (web/geometry.js too).
-CIRCLE_SEGMENTS = 32
+CIRCLE_SEGMENTS = env_rules.CIRCLE_SEGMENTS
 ITEM_KEYS = {"id", "type", "extends", "name", "description", "category", "params", "source", "assumed"}
 RECIPE_KEYS = {"schema", "name", "description", "catalog", "size_m", "terrain", "objects", "geo"}
 OBJECT_KEYS = {"id", "item", "pose", "params", "source"}
@@ -398,12 +399,9 @@ def _solid_outlines(obj: EnvObject) -> list[tuple[list[tuple[float, float]], flo
             for solid in obj.solids if solid.collide]
 
 
-HFIELD_CLEARANCE_M = 0.005
+HFIELD_CLEARANCE_M = env_rules.HFIELD_CLEARANCE_M
 
-# Objects on a surface object float this far above its top: exactly touching
-# meshes make MuJoCo's convex collision pick a sideways normal and report a
-# deep overlap. Well within the checks' 1 mm tolerance.
-SURFACE_GAP_M = 0.0005
+SURFACE_GAP_M = env_rules.SURFACE_GAP_M  # see env_rules.py
 
 
 def _box(polygon) -> tuple[float, float, float, float]:
@@ -529,6 +527,44 @@ def footprint(obj: EnvObject) -> list[tuple[float, float]]:
     """The object's outline (its envelope) on the ground, counter-clockwise."""
     envelope = obj.shape.envelope
     return placed(obj, _outline(envelope["primitive"], envelope["width_m"], envelope["depth_m"]))
+
+
+FRAME = {"units": "m", "axes": "ENU (x east, y north, z up)", "origin": "centre", "yaw": "deg, counter-clockwise from east"}
+
+
+def resolved_json(recipe: Recipe) -> dict:
+    """A resolved Recipe as JSON: what `resolve` prints and the generated
+    files' fingerprint is taken from."""
+    return {
+        "name": recipe.name, "description": recipe.description,
+        "size_m": {"east": recipe.size_east_m, "north": recipe.size_north_m},
+        "frame": FRAME,
+        "terrain": {"item": recipe.terrain_item, **recipe.terrain.as_json(with_heights=False)},
+        "objects": [{
+            "id": obj.id, "item": obj.item, "type": obj.type,
+            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
+            "params": obj.params, **obj.shape.as_json(), **({"source": obj.source} if obj.source else {}),
+        } for obj in recipe.objects],
+        **({"geo": recipe.geo} if recipe.geo else {}),
+    }
+
+
+def save_yaml(data: dict, path: Path) -> None:
+    """Write a Recipe (or any mapping) as YAML, atomically: a temporary file
+    beside it, then a rename, so a failure never leaves half a file."""
+    import os
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=120)
+    handle, temporary = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -25,12 +25,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
+import env_rules  # noqa: E402
 import env_schema  # noqa: E402
 from env_diagnostics import Collector, DiagnosticError  # noqa: E402
 
-TOLERANCE_M = 0.001
-# Floating-point slack, so a contact exactly at the tolerance counts as within it.
-EPSILON_M = 1e-9
+TOLERANCE_M = env_rules.TOLERANCE_M  # see env_rules.py
+EPSILON_M = env_rules.EPSILON_M
 
 
 def _mujoco():

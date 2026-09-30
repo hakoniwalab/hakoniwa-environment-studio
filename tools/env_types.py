@@ -32,11 +32,12 @@ import re
 import yaml
 
 import env_polygon
+import env_rules
 from env_diagnostics import DiagnosticError, fail, mapping, only, load_yaml_text
 
 TYPES_SCHEMA = "hakoniwa.environment-types/v1"
 DEFAULT_TYPES = Path(__file__).resolve().parents[1] / "types"
-ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+ID_PATTERN = env_rules.ID_PATTERN
 COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 PARAM_KINDS = {"length", "angle", "number", "integer", "color", "enum", "bool", "text", "polygon", "polyline"}
 UNITS = {"length": "m", "angle": "deg", "polygon": "m", "polyline": "m"}
@@ -385,8 +386,9 @@ class Solid:
         cylinder, otherwise the convex hull of the tilted corners."""
         if self.primitive == "cylinder" and abs(self.roll_deg) < 1e-9 and abs(self.pitch_deg) < 1e-9:
             r = self.width_m / 2
-            return [(self.x_m + r * math.cos(2 * math.pi * i / 32), self.y_m + r * math.sin(2 * math.pi * i / 32))
-                    for i in range(32)]
+            segments = env_rules.CIRCLE_SEGMENTS
+            return [(self.x_m + r * math.cos(2 * math.pi * i / segments), self.y_m + r * math.sin(2 * math.pi * i / segments))
+                    for i in range(segments)]
         return convex_hull([(x, y) for x, y, _ in self.corners()])
 
     def rotation(self) -> list[list[float]]:

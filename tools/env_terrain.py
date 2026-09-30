@@ -181,9 +181,9 @@ _DEM_CACHE: dict = {}
 
 def _sample_dem(hfield: Path, ns_m: float, ew_m: float, size_east: float, size_north: float,
                 nrow: int, ncol: int) -> tuple:
-    import env_citygml  # Envsim's reader (imported only for this generator)
+    import env_envsim  # Envsim's reader (imported only for this generator)
 
-    _geodesy, _extract, probe = env_citygml.envsim_modules()
+    _geodesy, _extract, probe = env_envsim.pipeline()
     rows, cols, samples = probe.read_hfield(hfield)
     offset = min(samples)
     heights = []

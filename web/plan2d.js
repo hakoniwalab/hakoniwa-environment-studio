@@ -6,7 +6,7 @@
 // point is drawn at (x, -y).
 //
 // Mouse: drag a part to move it (snaps to the grid and to area/part edges,
-// except furniture placed alone, which only snaps to the grid; hold Alt for free movement), drag the round handle to turn it (15° steps;
+// except parts that do not snap (snap false), which only snap to the grid; hold Alt for free movement), drag the round handle to turn it (15° steps;
 // hold Shift for free turning), drag the background to pan, wheel to zoom.
 // Where parts are stacked (a cone on a platform), a click picks the smallest
 // one under the pointer, and clicking again without dragging picks the next.
@@ -44,7 +44,7 @@ function svg(tag, attributes = {}, children = []) {
 const points = (corners) => corners.map(([x, y]) => `${x},${-y}`).join(" ");
 
 // Positions are kept to the millimetre.
-export const mm = (metres) => Math.round(metres * 1000) / 1000;
+export const roundMm = (metres) => Math.round(metres * 1000) / 1000;
 
 // Where a set of parts turns about: the middle of their positions.
 export function pivotOf(parts) {
@@ -58,8 +58,8 @@ export function turned(parts, degrees, [px, py]) {
   const sin = Math.sin(angle);
   return parts.map((part) => ({
     id: part.id,
-    x: mm(px + cos * (part.x - px) - sin * (part.y - py)),
-    y: mm(py + sin * (part.x - px) + cos * (part.y - py)),
+    x: roundMm(px + cos * (part.x - px) - sin * (part.y - py)),
+    y: roundMm(py + sin * (part.x - px) + cos * (part.y - py)),
     yaw: ((Math.round(part.yaw + degrees) % 360) + 360) % 360,
   }));
 }
@@ -143,7 +143,7 @@ export class PlanView {
     this.render();
   }
 
-  mmPerPixel() {
+  metresPerPixel() {
     const rect = this.svg.getBoundingClientRect();
     return rect.width && this.view ? this.view.width / rect.width : 1;
   }
@@ -158,7 +158,7 @@ export class PlanView {
   }
 
   render() {
-    const px = this.mmPerPixel();
+    const px = this.metresPerPixel();
     const nodes = [];
     const { minX, maxX, minY, maxY } = this.area;
     if (this.terrain) {
@@ -184,7 +184,7 @@ export class PlanView {
     north.textContent = "北 ↑";
     nodes.push(north);
     const size = svg("text", { x: 0, y: -minY + 18 * px, class: "label-area", "font-size": 11 * px }, []);
-    size.textContent = `${mm(maxX - minX)} m × ${mm(maxY - minY)} m（原点は中心）`;
+    size.textContent = `${roundMm(maxX - minX)} m × ${roundMm(maxY - minY)} m（原点は中心）`;
     nodes.push(size);
 
     // Larger parts first, so smaller ones (a cone on a platform) stay in
@@ -346,7 +346,7 @@ export class PlanView {
     const drag = this.drag;
     if (!drag) return;
     if (drag.mode === "pan") {
-      const px = this.mmPerPixel();
+      const px = this.metresPerPixel();
       this.view.x = drag.view.x - (event.clientX - drag.start[0]) * px;
       this.view.y = drag.view.y - (event.clientY - drag.start[1]) * px;
       this.applyView();
@@ -385,12 +385,12 @@ export class PlanView {
     if (drag.base) {
       // The others follow the dragged part by the same amount.
       const primary = drag.base.find((item) => item.id === part.id);
-      const dx = mm(nx) - primary.x;
-      const dy = mm(ny) - primary.y;
+      const dx = roundMm(nx) - primary.x;
+      const dy = roundMm(ny) - primary.y;
       this.onChangeMany(drag.base.map((item) => ({ id: item.id, x: item.x + dx, y: item.y + dy })));
       return;
     }
-    this.onChange(part.id, { x: mm(nx), y: mm(ny) });
+    this.onChange(part.id, { x: roundMm(nx), y: roundMm(ny) });
   }
 
   // Parts whose outline contains a point, smallest first.
@@ -431,19 +431,19 @@ export class PlanView {
   //     along up to two different directions (e.g. into a corner);
   //  3. alignment: on an axis contact left free, its box edges line up with
   //     another part's (walls or rails in a row).
-  // Furniture placed alone (part.snap false: rental equipment) stops after 1,
+  // A part that does not snap (part.snap false: a cone, a sign) stops after 1,
   // and is never a target for other parts either.
   // this.guides records what it snapped to, for render().
   snap(part, x, y) {
     if (this.grid) {
-      x = mm(Math.round(x / this.grid) * this.grid);
-      y = mm(Math.round(y / this.grid) * this.grid);
+      x = roundMm(Math.round(x / this.grid) * this.grid);
+      y = roundMm(Math.round(y / this.grid) * this.grid);
     }
     if (part.snap === false) {
       this.guides = null;
       return [x, y];
     }
-    const reach = EDGE_SNAP_PX * this.mmPerPixel();
+    const reach = EDGE_SNAP_PX * this.metresPerPixel();
     // Push out of an overlap only when it is shallow, so a part never jumps far.
     const pushLimit = Math.max(reach, 0.4 * Math.min(part.width, part.depth));
     // Parts drawn by their solids (footprints, roads) are no snap targets: their envelope is not their shape.

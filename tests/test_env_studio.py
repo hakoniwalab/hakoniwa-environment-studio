@@ -53,6 +53,20 @@ class StudioServerTest(unittest.TestCase):
         except HTTPError as error:
             return error.code, json.loads(error.read())
 
+    def test_only_this_studios_pages_may_change_things(self):
+        def post(headers):
+            request = Request(f"http://127.0.0.1:{self.port}/api/validate", data=b"{}", method="POST", headers=headers)
+            try:
+                with urlopen(request, timeout=10) as response:
+                    return response.status
+            except HTTPError as error:
+                return error.code
+
+        self.assertEqual(post({"Content-Type": "text/plain"}), 415)  # a plain form or no-cors fetch
+        self.assertEqual(post({"Content-Type": "application/json", "Origin": "https://example.com"}), 403)
+        self.assertEqual(post({"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.port}"}), 200)
+        self.assertEqual(self.call("GET", "/api/no-such")[0], 404)
+
     def test_the_page_is_served_without_caching(self):
         with urlopen(f"http://127.0.0.1:{self.port}/", timeout=10) as response:
             self.assertIn(b"Environment Studio", response.read())
@@ -232,6 +246,9 @@ class BrowserModulesTest(unittest.TestCase):
 
     def test_the_browser_undo_history(self):
         self.check("history_check.mjs")
+
+    def test_the_browser_problem_list(self):
+        self.check("problems_check.mjs")
 
 
 class LifecycleTest(unittest.TestCase):

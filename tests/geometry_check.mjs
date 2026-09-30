@@ -1,6 +1,6 @@
 // Checks web/geometry.js (run by tests/test_env_studio.py when Node.js is present).
 import assert from "node:assert/strict";
-import { mm, pivotOf, turned as turnedGroup } from "../web/plan2d.js";
+import { pivotOf, roundMm, turned as turnedGroup } from "../web/plan2d.js";
 import { checkLayout, contact, footprint, heightOverlap, normalizeYaw, outsideBy, overlapDepth, penetration, slideDistance, solidFootprint } from "../web/geometry.js";
 
 const area = { minX: -10, maxX: 10, minY: -15, maxY: 15 }; // 20 m x 30 m about the centre
@@ -80,7 +80,7 @@ assert.deepEqual(pivotOf(group), [2, 1]);
 assert.deepEqual(turnedGroup(group, 90, pivotOf(group)).map(({ id, x, y, yaw }) => [id, x, y, yaw]),
   [["t", 2, 1, 90], ["c1", 2, 0, 90], ["c2", 2, 2, 270]]);
 
-assert.equal(mm(1.23456), 1.235);
+assert.equal(roundMm(1.23456), 1.235);
 assert.equal(normalizeYaw(-90), 270);
 assert.equal(normalizeYaw(450), 90);
 console.log("geometry OK");

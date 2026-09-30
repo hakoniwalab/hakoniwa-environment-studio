@@ -38,7 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import yaml  # noqa: E402
 
+import env_envsim  # noqa: E402
 import env_polygon  # noqa: E402
+import env_rules  # noqa: E402
 import env_schema  # noqa: E402
 from env_diagnostics import DiagnosticError, fail  # noqa: E402
 
@@ -63,45 +65,11 @@ NS = {"gml": "http://www.opengis.net/gml", "bldg": "http://www.opengis.net/cityg
       "gen": "http://www.opengis.net/citygml/generics/2.0"}
 
 
-def envsim_root() -> Path:
-    root = Path(os.environ.get("HAKONIWA_ENVSIM_ROOT") or ROOT.parent / "hakoniwa-envsim").resolve()
-    if not (root / "src/city_pipeline/gml_lod1_extract.py").is_file():
-        raise fail("envsim", "missing_field",
-                   "hakoniwa-envsim is needed for CityGML (set HAKONIWA_ENVSIM_ROOT or clone it next to this repository)",
-                   expected=str(root))
-    return root
-
-
-def envsim_modules():
-    """Envsim's CityGML extractors (imported from its checkout)."""
-    pipeline = str(envsim_root() / "src/city_pipeline")
-    if pipeline not in sys.path:
-        sys.path.insert(0, pipeline)
-    import geodesy
-    import gml_lod1_extract
-    import road_terrain_probe
-
-    return geodesy, gml_lod1_extract, road_terrain_probe
-
-
-def osm2citygml():
-    """Envsim's OpenStreetMap / GeoJSON -> CityGML LOD1 converter."""
-    envsim_modules()
-    import osm2citygml as module
-
-    return module
-
-
-def bounding_box(center: tuple[float, float], half_extent: tuple[float, float]) -> tuple[float, float, float, float]:
-    """(south, west, north, east) of a selection, as Envsim (and the PLATEAU
-    City World browser) computes it from its centre and half extents."""
-    tools = str(envsim_root() / "tools")
-    if tools not in sys.path:
-        sys.path.insert(0, tools)
-    import plateau_citygml
-
-    west, south, east, north = plateau_citygml.bounding_box(center[0], center[1], half_extent[0], half_extent[1])
-    return south, west, north, east
+# Envsim access lives in env_envsim.py; these names stay for callers of this module.
+envsim_root = env_envsim.root
+envsim_modules = env_envsim.pipeline
+osm2citygml = env_envsim.osm2citygml
+bounding_box = env_envsim.bounding_box
 
 
 def _sha256(path: Path) -> str:
@@ -435,7 +403,7 @@ def convert_build(build: Path, use_dem: bool = True, **options) -> tuple[dict, d
 def write_recipe(recipe: dict, out: Path) -> None:
     env_schema.parse_recipe(recipe, out)  # valid before it is written
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
+    env_schema.save_yaml(recipe, out)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -461,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.out is None:
         parser.error("--out is required")
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", args.out.stem):
+    if not env_rules.ID_PATTERN.match(args.out.stem):
         parser.error(f"--out file name {args.out.name!r} is not a Recipe id (lower case letters, digits, - and _; "
                      "the Studio opens a Recipe by its file name)")
     try:
