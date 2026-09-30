@@ -208,7 +208,7 @@ connections:
         - tools/env_roundtrip.py matched three workspace City Worlds after an unedited import and export.
 
 data_flow:
-  - Browser -> Studio (tools/env_studio.py, 127.0.0.1:8097) -> Environment Recipe in work/recipes/environment-studio/recipes
+  - Browser -> Studio (tools/env_studio.py, 127.0.0.1:28097) -> Environment Recipe in work/recipes/environment-studio/recipes
   - OpenStreetMap / GeoJSON -> envsim osm2citygml.py -> CityGML -> tools/env_citygml.py -> Recipe of parts
   - PLATEAU selection -> envsim tools/hako.py (work/recipes/environment-studio/city-worlds) -> City World -> Recipe of parts
   - Recipe -> MuJoCo validation -> environment.glb / environment.xml
@@ -290,7 +290,7 @@ demo:
       expected: All Studio unit tests pass with Foundation Python.
     - id: start_studio
       command: python ../hakoniwa-environment-studio/tools/env_studio.py start
-      expected: The Studio runs in the background at http://127.0.0.1:8097/ and prints its URL, state file, and log.
+      expected: The Studio runs in the background at http://127.0.0.1:28097/ and prints its URL, state file, and log.
     - id: studio_status
       command: python ../hakoniwa-environment-studio/tools/env_studio.py status
       expected: Report the running Studio's pid, port, and URL.
@@ -301,14 +301,14 @@ demo:
     expected_behavior:
       - Run python ../hakoniwa-environment-studio/tools/env_studio.py stop before leaving the Workspace.
     verification_checks:
-      - The Studio's port 8097 is free and work/recipes/environment-studio/studio/studio.json is removed.
+      - The Studio's port 28097 is free and work/recipes/environment-studio/studio/studio.json is removed.
     cautions:
       - exit leaves the Workspace shell but does not stop a background Studio.
 
 expected_result: >
   From the Business Pack Workspace, configure prepares the Studio's sources and
   Python packages in Foundation Python, and the Studio starts at
-  http://127.0.0.1:8097/, keeping its Recipes, City Worlds, and Urban exports in
+  http://127.0.0.1:28097/, keeping its Recipes, City Worlds, and Urban exports in
   work/recipes/environment-studio.
 
 source_catalogs:

@@ -82,7 +82,9 @@ CATALOGS = ROOT / "catalogs"
 DEFAULT_CATALOG_ID = "starter"
 EXAMPLE_RECIPES = ROOT / "recipes/examples"
 USER_RECIPES = env_workspace.recipe_workspace() / "recipes"
-DEFAULT_PORT = 8097  # Booth Studio uses 8096
+# Uncommon ports below the OS ephemeral ranges (Linux 32768+, macOS/Windows
+# 49152+), clear of common services (8000, 8080, 8765); Booth Studio uses 28096.
+DEFAULT_PORT = 28097
 STATE_DIR = env_workspace.recipe_workspace() / "studio"
 APP_NAME = "environment-studio"
 START_TIMEOUT_SEC = 15.0
