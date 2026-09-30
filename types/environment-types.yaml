@@ -245,6 +245,20 @@ types:
       - {name: lane-3, primitive: ribbon, points: $centerline, w: 0.12, h: 0.004,
          x: -$width_m / 2 + 3 * $width_m / $lanes, z: 0.022, color: $line_color, collide: false, when: $lanes >= 4}
 
+  # A road surface of any outline (a CityGML tran:Road LOD1 surface): surface layer.
+  - id: road_area
+    extends: object
+    label: 道路（面）
+    description: A road surface of any outline (for example a CityGML road), lying on the ground.
+    id_prefix: road
+    params:
+      color: {kind: color, label: 路面の色, default: "#4a4d52", level: placement}
+      outline: {kind: polygon, label: 外形, default: [[-3.5, -10], [3.5, -10], [3.5, 10], [-3.5, 10]], level: placement,
+                description: "The surface's outline, [[x, y], ...] in metres in the object's frame."}
+    behavior: {layer: surface}
+    shapes:
+      - {name: slab, primitive: prism, points: $outline, h: 0.02}
+
   # A building from its footprint (a map outline, #10): the outline raised to
   # its height with a flat roof (from min_height_m: a canopy or a skyway).
   # Concave outlines are split into convex pieces.

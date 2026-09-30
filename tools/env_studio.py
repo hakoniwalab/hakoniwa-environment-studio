@@ -55,7 +55,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
-import env_map  # noqa: E402
+import env_citygml  # noqa: E402
 import env_schema  # noqa: E402
 import env_validate  # noqa: E402
 import env_version  # noqa: E402
@@ -268,18 +268,22 @@ def map_config() -> dict:
     return {
         "tiles": {"url": os.environ.get("HAKONIWA_MAP_TILES", DEFAULT_TILES),
                   "attribution": os.environ.get("HAKONIWA_MAP_TILES_ATTRIBUTION", DEFAULT_TILES_ATTRIBUTION)},
-        "overpass": os.environ.get("HAKONIWA_OVERPASS_URL") or env_map.DEFAULT_OVERPASS,
-        "max_side_m": env_map.MAX_SIDE_M,
+        "overpass": os.environ.get("HAKONIWA_OVERPASS_URL") or "https://overpass-api.de/api/interpreter",
+        "max_side_m": 2000.0,
     }
 
 
 def import_map(body: object) -> dict:
-    """Make a Recipe from map data and save it under work/recipes/ (#10).
+    """Make a Recipe of parts from map data and save it under work/recipes/ (#10).
+
+    Map data goes through CityGML, the shared intermediate representation:
+    hakoniwa-envsim's osm2citygml.py turns OpenStreetMap (Overpass) or GeoJSON
+    into LOD1 CityGML, and the parts converter (env_citygml.py) turns that
+    into one part per building and road surface. The map data and the CityGML
+    are kept in work/map-data/<id>/, so the import can be redone offline.
 
     Body: {id, name?, bbox: {south, west, north, east}, source: "overpass" |
-    "geojson", geojson?, terrain?, catalog_id?, overwrite?}. The map data as
-    fetched is kept in work/map-data/<id>.json, so the import can be redone
-    without the network.
+    "geojson", geojson?, terrain?, catalog_id?, overwrite?}.
     """
     if not isinstance(body, dict):
         raise StudioError("the request body must be {id, bbox, source}")
@@ -288,26 +292,45 @@ def import_map(body: object) -> dict:
     target = directory / f"{recipe_id}.yaml"
     if (target.exists() or recipe_id in _recipe_files()) and not body.get("overwrite"):
         raise StudioError(f"Recipe {recipe_id} はもうあります（別の ID にしてください）", HTTPStatus.CONFLICT)
-    box = body.get("bbox")
     source = body.get("source", "overpass")
+    data_dir = directory.parent / "map-data" / recipe_id
     try:
-        bbox = env_map.Box.of(box["south"], box["west"], box["north"], box["east"]) if isinstance(box, dict) else None
+        osm = env_citygml.osm2citygml()
+        box = body.get("bbox")
+        bbox = osm.Box.of(box["south"], box["west"], box["north"], box["east"]) if isinstance(box, dict) else None
+        geojson = body.get("geojson") if source == "geojson" else None
+        osm_json = None if geojson is not None else osm.fetch_overpass(bbox) if bbox else None
+        receipt = osm.run(bbox, data_dir, "map", overpass=source == "overpass", osm_json=osm_json, geojson=geojson)
+        selection = receipt["selection"]
         catalog = _catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID)
-        recipe, report, data = env_map.import_map(
-            bbox, overpass=source == "overpass", geojson=body.get("geojson") if source == "geojson" else None,
-            name=body.get("name") or None, catalog=_catalog_reference(catalog, directory),
+        recipe, report = env_citygml.convert(
+            data_dir, (selection["center"]["latitude"], selection["center"]["longitude"]),
+            (selection["half_extent_m"]["north_south"], selection["half_extent_m"]["east_west"]),
+            catalog=_catalog_reference(catalog, directory), name=body.get("name") or None,
             terrain_item=body.get("terrain") or "city-ground")
+        if receipt.get("data_timestamp"):
+            recipe["geo"]["data_timestamp"] = receipt["data_timestamp"]
+        if receipt.get("query"):
+            query = json.loads(recipe["geo"]["query"])
+            recipe["geo"]["query"] = json.dumps({**query, "overpass": receipt["query"]}, ensure_ascii=False, sort_keys=True)
         env_schema.parse_recipe(recipe, target)
     except (KeyError, TypeError) as exc:
         raise StudioError("bbox must be {south, west, north, east} in degrees") from exc
     except DiagnosticError as exc:
         raise StudioError(f"地図から作れません: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 - Envsim's converter reports its own errors
+        if type(exc).__name__ != "OsmConversionError":
+            raise
+        raise StudioError(f"地図から作れません: {exc}") from exc
     directory.mkdir(parents=True, exist_ok=True)
     target.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
-    data_dir = directory.parent / "map-data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / f"{recipe_id}.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    return {"id": recipe_id, "path": str(target), "size_m": recipe["size_m"], **report.as_json()}
+    (data_dir / "map.json").write_text(json.dumps(osm_json or geojson, ensure_ascii=False), encoding="utf-8")
+    return {
+        "id": recipe_id, "path": str(target), "citygml": str(data_dir), "size_m": recipe["size_m"],
+        "buildings": report["buildings"], "roads": report["roads"],
+        "skipped": receipt["skipped"] + report["skipped"], "assumed": receipt["assumed"],
+        "notes": receipt["notes"] + report["notes"],
+    }
 
 
 def save_recipe(recipe_id: str, body: object) -> dict:

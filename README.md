@@ -200,23 +200,25 @@ python tools/env_studio.py stop
 
 Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `work/recipes/`（例の環境は保存するとコピーになります）。
 
-地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、枠（東西 × 南北 m、地図の中心）を合わせて取り込むと、その範囲の建物と道路の Recipe ができます。
+地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、枠（東西 × 南北 m、地図の中心）を合わせて取り込むと、その範囲の建物と道路が部品になった Recipe ができます。
 
-- **取得元**：OpenStreetMap（Overpass API。接続先は `HAKONIWA_OVERPASS_URL`、地図タイルは `HAKONIWA_MAP_TILES` で変更可）か GeoJSON ファイル。
-- **座標**：緯度経度は環境の中心を原点とするローカルの m（ENU）に変換します。
-- **建物**：外形を押し出した `building-footprint`。高さは height タグ、無ければ階数 × 3 m、それも無ければ種類ごとの既定値。屋根だけの構造（building=roof）は宙に浮いた板にします。
-- **道路**：中心線に沿った `road-path`。幅と車線数は、無ければ道路の種類ごとの既定値で補います。
-- **出典の記録**：出典（OSM の要素と主なタグ、原点・範囲・投影・© OpenStreetMap contributors / ODbL）は Recipe の `geo` と各物体の `source` に残ります。取得したデータは `work/map-data/<id>.json` に保存されます。
-- **取り込み後**：普通の部品として編集・検証・生成できます。
+- **経路**：地図データは、街データの標準の中間表現である CityGML を経由します。
+  1. hakoniwa-envsim の `osm2citygml.py` が、OpenStreetMap（Overpass API）か GeoJSON を CityGML LOD1 にします（変換規則は envsim の `docs/osm-to-citygml.md`）。
+  2. このリポジトリの部品変換ツール `tools/env_citygml.py` が、それを部品にします。
+- **部品の単位**：建物 1 棟（CityGML の `bldg:Building`）＝ `building-footprint` の部品 1 つ。道路の面は `road-area` です。建物は切らずに丸ごと使い、はみ出す建物があれば環境のほうを広げます。
+- **PLATEAU**：PLATEAU の CityGML（envsim が取得したもの）も、同じツールで部品になります。
+- **出典の記録**：部品は gml:id・元のファイル・OSM のタグを `source` に、Recipe は原点・範囲・出典（© OpenStreetMap contributors / ODbL、PLATEAU）を `geo` に持ちます。取得した地図データと CityGML は `work/map-data/<id>/` に残ります。
+- **準備**：hakoniwa-envsim が必要です（`../hakoniwa-envsim` か `HAKONIWA_ENVSIM_ROOT`）。Workspace Recipe `hakoniwa/recipes/citygml-parts.yaml` で用意できます。依存は `python -m venv .venv && .venv/bin/pip install -r requirements.txt` で入ります。
 
-コマンドでも取り込めます：
+コマンドでも変換できます：
 
 ```bash
-python tools/env_map.py --bbox 35.6795,139.7650,35.6822,139.7683 --overpass --out work/recipes/tokyo-station.yaml
+python ../hakoniwa-envsim/src/city_pipeline/osm2citygml.py --bbox 35.6795,139.7650,35.6822,139.7683 --overpass --out-dir work/map-data/tokyo
+python tools/env_citygml.py --citygml work/map-data/tokyo --center 35.68085,139.76665 --half-extent 149.787,149.367 --out work/recipes/tokyo.yaml
 ```
 
 - データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)
-- 地図からの変換仕様（取得・座標変換・高さや幅の補完表・出典）：[docs/map-import.md](docs/map-import.md)
+- CityGML から部品への変換仕様：[docs/citygml-parts.md](docs/citygml-parts.md)
 - AI エージェント向けの契約（contract / inspect / validate → repair のループ）：[docs/ai-contract.md](docs/ai-contract.md)
 - 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`
 - 例の環境：`recipes/examples/`（ドローン練習場 20 m × 30 m、車のテストコース、丘のフィールド）

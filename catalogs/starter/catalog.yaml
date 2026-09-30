@@ -79,6 +79,10 @@ items:
     type: road_path
     name: 道路（中心線・地図から）
 
+  - id: road-area
+    type: road_area
+    name: 道路（面・CityGML から）
+
   - id: building-footprint
     type: building_footprint
     name: 建物（外形・地図から）

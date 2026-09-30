@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""Turn CityGML into editable Environment Studio parts (the parts converter).
+
+CityGML is the shared intermediate representation for city data: PLATEAU
+delivers it, and hakoniwa-envsim's osm2citygml.py makes it from OpenStreetMap
+or GeoJSON. This tool reads it with Envsim's own extractors and makes a
+Recipe of parts (docs/citygml-parts.md):
+
+* one building-footprint object per bldg:Building (its gml:id; the LOD1
+  footprint and heights), whole: a building is never cut, the environment
+  grows to hold every building the selection takes (Envsim's rule: its
+  footprint's centroid lies in the selection);
+* one road-area object per tran:Road LOD1 surface, clipped to the selection.
+
+Each part keeps where it came from (gml:id, source file, OSM tags when the
+CityGML came from OpenStreetMap) in its `source`, so later stages can attach
+the same building's LOD2 geometry and move it with the part.
+
+    env_citygml.py --citygml DIR --center LAT,LON --half-extent NS,EW --out work/recipes/x.yaml
+
+Envsim is found at $HAKONIWA_ENVSIM_ROOT or ../hakoniwa-envsim (the Workspace
+Recipe hakoniwa/recipes/citygml-parts.yaml materializes it there).
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import yaml  # noqa: E402
+
+import env_polygon  # noqa: E402
+import env_schema  # noqa: E402
+from env_diagnostics import DiagnosticError, fail  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CATALOG = ROOT / "catalogs/starter/catalog.yaml"
+CONVERTER_VERSION = "1"
+ITEMS = {"building": "building-footprint", "road": "road-area"}
+# Points closer than this are merged (the same step as osm2citygml).
+MIN_STEP_M = 0.05
+# A road surface keeps at most this many corners (simplified further when it has more).
+MAX_ROAD_POINTS = 400
+MIN_ROAD_AREA_M2 = 1.0
+GML_ID = "{http://www.opengis.net/gml}id"
+NS = {"gml": "http://www.opengis.net/gml", "bldg": "http://www.opengis.net/citygml/building/2.0",
+      "gen": "http://www.opengis.net/citygml/generics/2.0"}
+
+
+def envsim_root() -> Path:
+    root = Path(os.environ.get("HAKONIWA_ENVSIM_ROOT") or ROOT.parent / "hakoniwa-envsim").resolve()
+    if not (root / "src/city_pipeline/gml_lod1_extract.py").is_file():
+        raise fail("envsim", "missing_field",
+                   "hakoniwa-envsim is needed for CityGML (set HAKONIWA_ENVSIM_ROOT or clone it next to this repository)",
+                   expected=str(root))
+    return root
+
+
+def envsim_modules():
+    """Envsim's CityGML extractors (imported from its checkout)."""
+    pipeline = str(envsim_root() / "src/city_pipeline")
+    if pipeline not in sys.path:
+        sys.path.insert(0, pipeline)
+    import geodesy
+    import gml_lod1_extract
+    import road_terrain_probe
+
+    return geodesy, gml_lod1_extract, road_terrain_probe
+
+
+def osm2citygml():
+    """Envsim's OpenStreetMap / GeoJSON -> CityGML LOD1 converter."""
+    envsim_modules()
+    import osm2citygml as module
+
+    return module
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _files(source: Path, pattern: str) -> list[Path]:
+    """The CityGML files of one kind, each content once (an Envsim build keeps
+    copies of its sources under build/source/)."""
+    if source.is_file():
+        paths = [source] if re.fullmatch(pattern.replace("*", ".*"), source.name) else []
+    elif source.is_dir():
+        paths = sorted(source.rglob(pattern), key=lambda path: (len(path.parts), str(path)))
+    else:
+        raise fail("citygml", "missing_field", "no such CityGML file or directory", actual=str(source))
+    unique, seen = [], set()
+    for path in paths:
+        digest = _sha256(path)
+        if digest not in seen:
+            seen.add(digest)
+            unique.append(path)
+    return unique
+
+
+def _part_id(gml_id: str, used: set[str]) -> str:
+    """A Studio object id (lower case, digits, - and _) for a gml:id."""
+    base = re.sub(r"[^a-z0-9_-]", "-", gml_id.lower()).strip("-_") or "part"
+    if not base[0].isalnum():
+        base = f"p{base}"
+    if len(base) > 64:
+        base = f"{base[:55]}-{hashlib.sha1(gml_id.encode()).hexdigest()[:8]}"
+    candidate, number = base, 2
+    while candidate in used:
+        suffix = f"-{number}"
+        candidate, number = base[:64 - len(suffix)] + suffix, number + 1
+    used.add(candidate)
+    return candidate
+
+
+def _mm(value: float) -> float:
+    return round(value, 3) + 0.0
+
+
+def _placed(points) -> tuple[dict, list[list[float]]]:
+    """A pose at the middle of the points' box and the points about it."""
+    xs, ys = [x for x, _ in points], [y for _, y in points]
+    cx, cy = _mm((min(xs) + max(xs)) / 2), _mm((min(ys) + max(ys)) / 2)
+    return {"x_m": cx, "y_m": cy, "yaw_deg": 0}, [[_mm(x - cx), _mm(y - cy)] for x, y in points]
+
+
+def _attributes(path: Path) -> dict[str, dict]:
+    """gml:id -> {name, generic attributes} of every bldg:Building in a file."""
+    found = {}
+    for building in ET.parse(path).getroot().iter(f"{{{NS['bldg']}}}Building"):
+        attributes = {item.get("name"): item.findtext("gen:value", namespaces=NS)
+                      for item in building.findall("gen:stringAttribute", NS)}
+        found[building.get(GML_ID)] = {"name": building.findtext("gml:name", namespaces=NS), "gen": attributes}
+    return found
+
+
+def _clean_ring(points) -> list[tuple[float, float]] | None:
+    ring = env_polygon.cleaned([tuple(point) for point in points], True, MIN_STEP_M)
+    if len(ring) < 3 or abs(env_polygon.signed_area(ring)) < 1e-6:
+        return None
+    ring = env_polygon.counter_clockwise(ring)
+    return ring if env_polygon.is_simple(ring) else None
+
+
+def convert(source: Path, center: tuple[float, float], half_extent: tuple[float, float], *,
+            catalog: str = "", name: str | None = None, terrain_item: str = "city-ground",
+            items: dict | None = None) -> tuple[dict, dict]:
+    """(Recipe mapping, report) of the CityGML under `source` for a selection
+    centred on (lat, lon) with (north_south, east_west) half extents."""
+    items = {**ITEMS, **(items or {})}
+    geodesy, extract, roads_probe = envsim_modules()
+    lat0, lon0 = center
+    ns_m, ew_m = half_extent
+    report = {"buildings": 0, "roads": 0, "courtyards_filled": 0, "skipped": [], "notes": []}
+    objects, used, sources = [], set(), []
+    crs_seen, providers = set(), set()
+    reach_e, reach_n = ew_m, ns_m
+    seen_ids: set[str] = set()
+
+    for path in _files(source, "*bldg*_op.gml"):
+        sources.append({"path": str(path.resolve()), "sha256": _sha256(path)})
+        issues: list = []
+        records = extract.extract_buildings_lod1(path, local_origin=center,
+                                                 bounds={"ns_m": ns_m, "ew_m": ew_m}, issues=issues)
+        for issue in issues:
+            report["skipped"].append({"source": issue.get("building_id"), "kind": "building",
+                                      "reason": issue.get("reason_code") or issue.get("message")})
+        attributes = _attributes(path)
+        for record in records:
+            if record["id"] in seen_ids:  # the same building in two files (overlapping meshes)
+                continue
+            seen_ids.add(record["id"])
+            gml_id = record["id"].split("__part_")[0]
+            info = attributes.get(gml_id, {"name": None, "gen": {}})
+            ring = _clean_ring(record["vertices"])
+            if ring is None:
+                report["skipped"].append({"source": record["id"], "kind": "building",
+                                          "reason": "its LOD1 footprint is not a simple polygon"})
+                continue
+            if record.get("interior_rings"):
+                report["courtyards_filled"] += 1
+            crs_seen.add(record.get("source_crs", "EPSG:6697"))
+            # Heights above the ground: CityGML from osm2citygml says where its
+            # base is (base_m); otherwise (PLATEAU altitudes) the building's own
+            # bottom is the ground under it (the Studio ground is flat).
+            base_m = info["gen"].get("base_m")
+            ground = record["zmin"] - float(base_m) if base_m is not None else record["zmin"]
+            height = min(max(_mm(record["zmax"] - ground), 1.0), 500.0)
+            base = _mm(min(max(record["zmin"] - ground, 0.0), height - 0.5)) if base_m is not None else 0.0
+            pose, footprint = _placed(ring)
+            reach_e = max(reach_e, *(abs(x) for x, _ in ring))
+            reach_n = max(reach_n, *(abs(y) for _, y in ring))
+            provider = info["gen"].get("source_provider") or ("plateau" if "6697" in record.get("source_crs", "6697")
+                                                              else "citygml")
+            providers.add(provider)
+            tags = {key: value for key, value in info["gen"].items() if value is not None}
+            if info["name"]:
+                tags["name"] = info["name"]
+            source_record = {"provider": provider, "kind": "citygml", "id": record["id"], "note": path.name}
+            if tags:
+                source_record["tags"] = tags
+            objects.append({"id": _part_id(record["id"], used), "item": items["building"], "pose": pose,
+                            "params": {"footprint": footprint, "height_m": height,
+                                       **({"min_height_m": base} if base > 0 else {})},
+                            "source": source_record})
+            report["buildings"] += 1
+
+    for path in _files(source, "*tran*_op.gml"):
+        sources.append({"path": str(path.resolve()), "sha256": _sha256(path)})
+        try:
+            surfaces = roads_probe.extract_lod1_roads(path, lat0, lon0, ns_m, ew_m)
+        except Exception as exc:  # noqa: BLE001 - Envsim raises when none intersect
+            if "no LOD1 road polygon" in str(exc):
+                continue
+            raise
+        crs_seen.add(geodesy.epsg_label(geodesy.file_crs(path, default=6697)))
+        for road_id, polygon in surfaces:
+            # Envsim gives MuJoCo axes (x north, y west); back to east / north.
+            shape = polygon.simplify(MIN_STEP_M / 2)
+            tolerance = MIN_STEP_M
+            while len(shape.exterior.coords) - 1 > MAX_ROAD_POINTS:
+                shape, tolerance = polygon.simplify(tolerance), tolerance * 2
+            if shape.area < MIN_ROAD_AREA_M2:
+                continue
+            ring = _clean_ring([(-y, x) for x, y in list(shape.exterior.coords)[:-1]])
+            if ring is None:
+                report["skipped"].append({"source": road_id, "kind": "road", "reason": "not a simple polygon"})
+                continue
+            pose, outline = _placed(ring)
+            gml_id = road_id.rsplit("-", 2)[0]
+            objects.append({"id": _part_id(road_id, used),
+                            "item": items["road"], "pose": pose, "params": {"outline": outline},
+                            "source": {"provider": "citygml", "kind": "citygml", "id": gml_id, "note": path.name}})
+            report["roads"] += 1
+
+    if not report["buildings"]:
+        raise fail("citygml", "missing_field", "no LOD1 building in the selection", actual=str(source))
+    # The environment holds every whole building (centred on the selection).
+    def size(half: float, reach: float) -> float:
+        # The selection, or (only where a building reaches past it) 0.1 m steps beyond.
+        return _mm(2 * half) if reach <= half + 1e-6 else _mm(2 * math.ceil(reach * 10 - 1e-6) / 10)
+
+    size_east, size_north = size(ew_m, reach_e), size(ns_m, reach_n)
+    if size_east > _mm(2 * ew_m) or size_north > _mm(2 * ns_m):
+        report["notes"].append(f"the environment was widened to {size_east} x {size_north} m to hold whole buildings")
+    corners = geodesy.local_enu_to_geodetic([(-size_east / 2, -size_north / 2, 0.0), (size_east / 2, size_north / 2, 0.0)],
+                                           lat0, lon0, 4326)
+    provider = "openstreetmap" if providers == {"openstreetmap"} else "plateau" if providers == {"plateau"} else "citygml"
+    geo = {"provider": provider, "origin": {"lat_deg": round(lat0, 9), "lon_deg": round(lon0, 9)},
+           "bbox_deg": {"south": round(corners[0][0], 9), "west": round(corners[0][1], 9),
+                        "north": round(corners[1][0], 9), "east": round(corners[1][1], 9)},
+           "projection": f"hakoniwa-envsim local ENU about the origin ({', '.join(sorted(crs_seen)) or 'EPSG:6697'})",
+           "query": json.dumps({"converter": f"env_citygml {CONVERTER_VERSION}", "sources": sources},
+                               ensure_ascii=False, sort_keys=True)}
+    if "openstreetmap" in providers:
+        geo.update(attribution="© OpenStreetMap contributors", license="ODbL-1.0")
+    if "plateau" in providers:
+        geo["attribution"] = "; ".join(filter(None, [geo.get("attribution"), "PLATEAU (国土交通省)"]))
+    recipe = {
+        "schema": env_schema.RECIPE_SCHEMA,
+        "name": name or f"CityGML（{lat0:.5f}, {lon0:.5f}）",
+        "description": f"Parts from CityGML ({provider}): one building-footprint per building, road-area per road surface.",
+        "catalog": catalog,
+        "geo": geo,
+        "size_m": {"east": size_east, "north": size_north},
+        "terrain": {"item": terrain_item},
+        "objects": objects,
+    }
+    report["size_m"] = recipe["size_m"]
+    report["provider"] = provider
+    return recipe, report
+
+
+def write_recipe(recipe: dict, out: Path) -> None:
+    env_schema.parse_recipe(recipe, out)  # valid before it is written
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--citygml", type=Path, required=True, help="a CityGML file or a directory of *_op.gml")
+    parser.add_argument("--center", required=True, help="LAT,LON of the selection centre")
+    parser.add_argument("--half-extent", required=True, help="NS,EW half extents in metres")
+    parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
+    parser.add_argument("--terrain", default="city-ground")
+    parser.add_argument("--name")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        lat, lon = (float(value) for value in args.center.split(","))
+        ns_m, ew_m = (float(value) for value in args.half_extent.split(","))
+        out = args.out.resolve()
+        catalog = Path(os.path.relpath(args.catalog.resolve(), out.parent)).as_posix()
+        recipe, report = convert(args.citygml, (lat, lon), (ns_m, ew_m), catalog=catalog, name=args.name,
+                                 terrain_item=args.terrain)
+        write_recipe(recipe, out)
+    except ValueError as exc:
+        parser.error(str(exc))
+    except DiagnosticError as error:
+        print(json.dumps({"ok": False, "diagnostics": [item.as_json() for item in error.diagnostics]},
+                         ensure_ascii=False, indent=2))
+        return 1
+    result = {"ok": True, "recipe": str(out), **report}
+    print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else
+          f"OK  {out}: {report['buildings']} buildings, {report['roads']} roads, "
+          f"{report['size_m']['east']} x {report['size_m']['north']} m")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

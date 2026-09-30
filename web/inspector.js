@@ -245,13 +245,17 @@ export function createInspector(host, app) {
   function objectSource(part) {
     const source = part.source;
     if (!source) return null;
-    const osm = source.provider === "openstreetmap" && ["node", "way", "relation"].includes(source.kind);
-    const label = `${source.provider} ${source.kind}/${source.id}`;
-    const tags = Object.entries(source.tags || {}).map(([key, value]) => `${key}=${value}`).join("、");
-    return el("div", { class: "source" }, "出典：",
-      osm ? el("a", { href: `https://www.openstreetmap.org/${source.kind}/${source.id}`, target: "_blank", rel: "noopener" }, label)
-        : label,
-      tags ? el("div", {}, tags) : null);
+    // The OSM element: the source itself, or (through CityGML) its source_kind / source_id tags.
+    const tags = source.tags || {};
+    const [kind, id] = ["node", "way", "relation"].includes(source.kind) ? [source.kind, source.id]
+      : [tags.source_kind, tags.source_id];
+    const osm = source.provider === "openstreetmap" && ["node", "way", "relation"].includes(kind);
+    const label = source.kind === "citygml" ? `${source.provider}（CityGML ${source.id}）` : `${source.provider} ${source.kind}/${source.id}`;
+    const text = Object.entries(tags).map(([key, value]) => `${key}=${value}`).join("、");
+    return el("div", { class: "source" }, "出典：", label,
+      osm ? el("span", {}, "・", el("a", { href: `https://www.openstreetmap.org/${kind}/${id}`, target: "_blank", rel: "noopener" },
+        `OpenStreetMap ${kind}/${id}`)) : null,
+      text ? el("div", {}, text) : null);
   }
 
   // Values the item assumes (not in its source), unless this part sets them itself.

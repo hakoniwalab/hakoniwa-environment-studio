@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import env_studio  # noqa: E402
+import test_env_citygml  # noqa: E402
 import env_validate  # noqa: E402
 
 SIZE = {"east": 20, "north": 30}
@@ -138,20 +139,23 @@ class StudioServerTest(unittest.TestCase):
         self.assertEqual([(item["code"], item["path"]) for item in result["diagnostics"]],
                          [("unknown_reference", "objects[0].item")])
 
-    def test_a_map_area_becomes_a_saved_recipe(self):
-        import test_env_map
-
-        box = test_env_map.BOX.as_json()
-        with mock.patch.object(env_studio.env_map, "fetch_overpass", return_value=test_env_map.sample()) as fetch:
+    @unittest.skipUnless(test_env_citygml.ENVSIM, "hakoniwa-envsim is not available")
+    def test_a_map_area_becomes_a_saved_recipe_of_parts(self):
+        box = test_env_citygml.box().as_json()
+        osm = env_studio.env_citygml.osm2citygml()
+        with mock.patch.object(osm, "fetch_overpass", return_value=test_env_citygml.sample()) as fetch:
             status, result = self.call("POST", "/api/map/import", {"id": "my-block", "name": "街区", "bbox": box})
         self.assertEqual(status, 200, result)
         fetch.assert_called_once()
-        self.assertEqual((result["buildings"], result["roads"]), (5, 2))
-        # Saved like any Recipe (and opens in the Studio), with the data as fetched beside it.
+        self.assertEqual(result["buildings"], 4)
+        # Saved like any Recipe (and opens in the Studio); the map data and its CityGML are kept.
         _, loaded = self.call("GET", "/api/recipes/my-block")
         self.assertEqual((loaded["editable"], loaded["recipe"]["terrain"]["item"]), (True, "city-ground"))
-        self.assertEqual(loaded["recipe"]["geo"]["bbox_deg"], box)
-        self.assertTrue((self.user.parent / "map-data/my-block.json").exists())
+        geo = loaded["recipe"]["geo"]
+        self.assertEqual((geo["provider"], geo["data_timestamp"]), ("openstreetmap", "2026-09-01T00:00:00Z"))
+        self.assertIn("overpass", json.loads(geo["query"]))
+        data = self.user.parent / "map-data/my-block"
+        self.assertTrue((data / "map.json").exists() and (data / "map_bldg_op.gml").exists())
         # The same id again is refused; the map settings are there for the page.
         self.assertEqual(self.call("POST", "/api/map/import", {"id": "my-block", "bbox": box})[0], 409)
         _, config = self.call("GET", "/api/map/config")

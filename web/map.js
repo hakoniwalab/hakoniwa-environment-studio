@@ -1,14 +1,16 @@
 // Map import (#10): pick an area on a Leaflet map and have the Studio server
 // make a Recipe of its buildings and roads (POST /api/map/import). Leaflet
 // only shows the map and the area; the data comes from Overpass (through the
-// server) or a GeoJSON file, and the Recipe is made by tools/env_map.py.
+// server) or a GeoJSON file; the server turns it into CityGML (hakoniwa-envsim
+// osm2citygml.py) and that into parts (tools/env_citygml.py).
 
 import { $, api, el } from "./dom.js";
 
 const DEFAULT_CENTER = [35.6809, 139.7667]; // Tokyo Station
 const DEFAULT_ZOOM = 17;
 const STORE_KEY = "hakoniwa-environment-map-view";
-// WGS84, as tools/env_map.py LocalFrame: metres per degree at a latitude.
+// WGS84: metres per degree at a latitude (the area's size; Envsim's geodesy.py
+// does the exact conversion).
 const A = 6378137.0;
 const E2 = 6.69437999014e-3;
 

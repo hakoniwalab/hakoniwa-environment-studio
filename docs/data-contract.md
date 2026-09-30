@@ -130,7 +130,7 @@ objects:
   - {id: landing-pad, item: landing-pad, pose: {x_m: 7, y_m: 12, yaw_deg: 0}, params: {color: "#2f6fb0"}}
 ```
 
-地図から作った Recipe（#10、変換の規則は [map-import.md](map-import.md)）は、出典を持ちます。どちらも世界の形は変えず、そのまま保存・出力（`resolve`、`environment.json`）されます。
+地図や CityGML から作った Recipe（#10、変換の規則は [citygml-parts.md](citygml-parts.md)）は、出典を持ちます。どちらも世界の形は変えず、そのまま保存・出力（`resolve`、`environment.json`）されます。
 
 - `geo`：`provider`、`origin {lat_deg, lon_deg}`（原点 = 環境の中心）、`bbox_deg {south, west, north, east}`、`projection`、`attribution`、`license`、`data_timestamp`、`query`
 - 物体の `source`：`provider`、`kind`（way / relation / feature）、`id`、`tags`
