@@ -216,6 +216,7 @@ python tools/env_map.py --bbox 35.6795,139.7650,35.6822,139.7683 --overpass --ou
 ```
 
 - データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)
+- 地図からの変換仕様（取得・座標変換・高さや幅の補完表・出典）：[docs/map-import.md](docs/map-import.md)
 - AI エージェント向けの契約（contract / inspect / validate → repair のループ）：[docs/ai-contract.md](docs/ai-contract.md)
 - 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`
 - 例の環境：`recipes/examples/`（ドローン練習場 20 m × 30 m、車のテストコース、丘のフィールド）
