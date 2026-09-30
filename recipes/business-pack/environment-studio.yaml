@@ -10,7 +10,9 @@ goal:
     (Type / Catalog / Recipe), validates them with MuJoCo, generates GLB and
     MJCF, turns CityGML (PLATEAU, OpenStreetMap converted by hakoniwa-envsim)
     and hakoniwa-envsim City Worlds into editable parts without losing their
-    fidelity, and exports a Recipe as a hakoniwa-urban-mobility City World job.
+    fidelity, and writes Recipes and City Worlds as City World jobs (the
+    World format of hakoniwa-urban-mobility) to the export folder it is
+    started with.
 
 feasibility:
   status: feasible
@@ -18,7 +20,7 @@ feasibility:
   rationale:
     - Environment Studio owns the Type / Catalog / Recipe contract, the browser editor, MuJoCo validation, and GLB / MJCF generation.
     - hakoniwa-envsim owns CityGML extraction, OpenStreetMap to CityGML conversion, PLATEAU City World builds, and the MJCF collider GLB converter.
-    - hakoniwa-urban-mobility owns the City World job contract (schemas/city-world-job.yaml) and City registration (tools/urban_assets.py register-city).
+    - The City World job format is hakoniwa-urban-mobility's schemas/city-world-job.yaml (the layout Envsim's builds already have); the Studio only writes jobs in it and does not depend on urban-mobility.
 
 validation:
   status: partially_verified
@@ -170,22 +172,6 @@ recipe_local_requirements:
         kind: file
       - path: src/city_pipeline/mjcf_colliders2glb.py
         kind: file
-  hakoniwa-urban-mobility:
-    root:
-      default_path: ../hakoniwa-urban-mobility
-      override_env: HAKONIWA_URBAN_MOBILITY_ROOT
-      relative_to: recipe_repository
-    source:
-      type: git
-      url: https://github.com/hakoniwalab/hakoniwa-urban-mobility.git
-      revision: main
-    required_artifacts:
-      - path: schemas/city-world-job.yaml
-        kind: file
-      - path: tools/city_world_job.py
-        kind: file
-      - path: tools/urban_assets.py
-        kind: file
 
 components:
   - id: hakoniwa-environment-studio
@@ -194,9 +180,6 @@ components:
   - id: hakoniwa-envsim
     roles: [asset_generator, environment_model]
     purpose: Read CityGML (PLATEAU, converted OpenStreetMap), build PLATEAU City Worlds, and convert MJCF colliders to GLB.
-  - id: hakoniwa-urban-mobility
-    roles: [integration_boundary]
-    purpose: Receive the Cities the Studio makes (City World job contract, urban_assets.py register-city / unregister-city) and run them with vehicles.
 
 connections:
   - from: hakoniwa-envsim
@@ -209,24 +192,15 @@ connections:
         - An imported City World keeps Envsim's colliders, terrain hfield, and visuals unchanged (docs/citygml-parts.md section 7).
       validation_notes:
         - tools/env_roundtrip.py matched three workspace City Worlds after an unedited import and export.
-  - from: hakoniwa-environment-studio
-    to: hakoniwa-urban-mobility
-    interface: City World job, City registration
-    contract:
-      status: partially_verified
-      requires:
-        - An exported Recipe or an Envsim City World build follows hakoniwa-urban-mobility schemas/city-world-job.yaml and passes its tools/city_world_job.py check before registration.
-        - The Studio registers and unregisters Cities with tools/urban_assets.py register-city / unregister-city and reads the catalog with urban_assets.py list --json; Urban Studio only lists and uses them.
-      validation_notes:
-        - car-test-course, sapporo-351-exact, and sapporo-lod2 were registered from the Studio; an EAMS Hexa flew on sapporo-lod2 in Urban Studio (2026-09-30).
 
 data_flow:
   - Browser -> Studio (tools/env_studio.py, 127.0.0.1:28097) -> Environment Recipe in work/recipes/environment-studio/recipes
   - OpenStreetMap / GeoJSON -> envsim osm2citygml.py -> CityGML -> tools/env_citygml.py -> Recipe of parts
   - PLATEAU selection -> envsim tools/hako.py (work/recipes/environment-studio/city-worlds) -> City World -> Recipe of parts
   - Recipe -> MuJoCo validation -> environment.glb / environment.xml
-  - Recipe -> tools/env_urban.py -> City World job (work/recipes/environment-studio/urban) -> urban_assets.py register-city
-  - PLATEAU City World build (work/recipes/environment-studio/city-worlds) -> urban_assets.py register-city as it is (no Recipe in between); unregister-city removes it
+  - Recipe -> tools/env_urban.py -> City World job in the export folder (env_studio.py start --export-dir DIR)
+  - PLATEAU City World build (work/recipes/environment-studio/city-worlds) -> a small City World job in the export folder as it is (receipt, outlines, viewer)
+  - The export folder is the hand-off: a tool that takes Worlds (hakoniwa-urban-mobility's urban-city-authoring Recipe) starts the Studio with its folder and registers what appears there; the Studio does not call it
 
 time_model:
   mode: wall-clock
@@ -242,10 +216,10 @@ artifact_sets:
     status: partially_verified
     description: PLATEAU City Worlds the Studio asked Envsim to build.
     artifacts: [work/recipes/environment-studio/city-worlds]
-  urban_exports:
+  city_world_jobs:
     status: partially_verified
-    description: City World jobs exported for hakoniwa-urban-mobility.
-    artifacts: [work/recipes/environment-studio/urban]
+    description: City World jobs written to the export folder given by env_studio.py start --export-dir (chosen by the tool that starts the Studio).
+    artifacts: [<export folder>/<id>]
 
 artifacts:
   - id: environment_recipes
@@ -254,9 +228,6 @@ artifacts:
   - id: city_worlds
     kind: generated-directory
     path: work/recipes/environment-studio/city-worlds
-  - id: urban_exports
-    kind: generated-directory
-    path: work/recipes/environment-studio/urban
   - id: studio_state
     kind: generated-directory
     path: work/recipes/environment-studio/studio
@@ -292,7 +263,7 @@ demo:
   steps:
     - id: inspect_plan
       command: python tools/recipe.py plan --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
-      expected: Show hakoniwa-envsim and hakoniwa-urban-mobility (clone or reuse) and the Recipe Python requirements; no Foundation build.
+      expected: Show hakoniwa-envsim (clone or reuse) and the Recipe Python requirements; no Foundation build.
     - id: configure
       command: python tools/recipe.py configure --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
       expected: Clone missing source repositories and install the Recipe Python packages into Foundation Python.
@@ -328,7 +299,6 @@ expected_result: >
 source_catalogs:
   - component_id: hakoniwa-environment-studio
   - component_id: hakoniwa-envsim
-  - component_id: hakoniwa-urban-mobility
 
 source_artifacts:
   - repository: hakoniwalab/hakoniwa-environment-studio
@@ -346,4 +316,4 @@ source_artifacts:
   - repository: hakoniwalab/hakoniwa-urban-mobility
     path: schemas/city-world-job.yaml
     revision: main
-    description: The City World job contract the Urban export follows.
+    description: The City World job format the Studio writes.

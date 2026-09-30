@@ -86,6 +86,10 @@ USER_RECIPES = env_workspace.recipe_workspace() / "recipes"
 # 49152+), clear of common services (8000, 8080, 8765); Booth Studio uses 28096.
 DEFAULT_PORT = 28097
 STATE_DIR = env_workspace.recipe_workspace() / "studio"
+# Where City World jobs are written (serve/start --export-dir); None: the
+# Studio is used on its own and offers no export of City Worlds. A tool that
+# takes the Worlds (hakoniwa-urban-mobility) starts the Studio with its folder.
+EXPORT_DIR: Path | None = None
 APP_NAME = "environment-studio"
 START_TIMEOUT_SEC = 15.0
 STOP_TIMEOUT_SEC = 5.0
@@ -386,6 +390,7 @@ def map_config() -> dict:
         "overpass": os.environ.get("HAKONIWA_OVERPASS_URL") or "https://overpass-api.de/api/interpreter",
         "max_side_m": 2000.0,
         "terrains": _ready_terrains(),
+        "export_dir": str(EXPORT_DIR) if EXPORT_DIR else None,
     }
 
 
@@ -507,40 +512,46 @@ def list_city_worlds(root: str | None) -> dict:
         builds = env_citygml.discover(roots)
     except DiagnosticError as exc:
         raise StudioError(str(exc)) from exc
-    # Which of them are registered in Urban (a City Asset on this build's receipt).
-    urban_error = None
-    try:
-        registered = env_urban.urban_cities()
-    except (env_urban.ExportError, OSError, ValueError) as exc:
-        registered, urban_error = {}, str(exc)
+    # Which of them are in the export folder.
+    written = env_urban.exported(EXPORT_DIR) if EXPORT_DIR else {}
     for build in builds:
-        receipt = env_urban.city_world_receipt(Path(build["path"]))
-        found = registered.get(str(receipt.resolve())) if receipt.is_file() else None
-        build["urban"] = {"id": found["id"], "title": found["title"]} if found else None
-        build["urban_ready"] = receipt.is_file()
-    return {"roots": [str(item) for item in roots], "builds": builds, "urban_error": urban_error}
+        found = written.get(str(Path(build["path"]).resolve()))
+        build["exported"] = {"id": found["id"], "title": found["title"]} if found else None
+        build["exportable"] = env_urban.city_world_receipt(Path(build["path"])).is_file()
+    return {"roots": [str(item) for item in roots], "builds": builds,
+            "export_dir": str(EXPORT_DIR) if EXPORT_DIR else None}
 
 
-def register_city_world(body: object) -> dict:
-    """Register an Envsim City World build in Urban as it is (env_urban.py).
-    Body: {path, title?}."""
+def _export_dir() -> Path:
+    if EXPORT_DIR is None:
+        raise StudioError("書き出し先が指定されていません（env_studio.py start --export-dir で起動してください）",
+                          HTTPStatus.CONFLICT)
+    return EXPORT_DIR
+
+
+def export_city_world(body: object) -> dict:
+    """Write an Envsim City World build to the export folder as it is
+    (env_urban.export_city_world). Body: {path, title?}."""
     if not isinstance(body, dict) or not body.get("path"):
         raise StudioError("the request body must be {path, title?}")
-    build = Path(str(body["path"])).expanduser().resolve()
     try:
-        result = env_urban.register_city_world(build, title=body.get("title") or None)
+        return env_urban.export_city_world(Path(str(body["path"])).expanduser(), _export_dir(),
+                                           title=body.get("title") or None)
     except env_urban.ExportError as exc:
-        raise StudioError(f"urban-mobility に登録できません: {exc}") from exc
+        raise StudioError(f"書き出せません: {exc}") from exc
     except OSError as exc:
-        raise StudioError(f"urban-mobility に登録できません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
-    return {"id": build.parent.name, **result}
+        raise StudioError(f"書き出せません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
 
 
-def unregister_city(asset_id: str) -> dict:
-    """Remove a City from Urban (its City World job is kept)."""
-    if not ID_PATTERN.match(asset_id or ""):
-        raise StudioError(f"not a City id: {asset_id!r}")
-    return {"id": asset_id, **env_urban.unregister(asset_id)}
+def remove_export(job_id: str) -> dict:
+    """Delete a job this Studio wrote to the export folder (the build stays)."""
+    if not ID_PATTERN.match(job_id or ""):
+        raise StudioError(f"not a job id: {job_id!r}")
+    try:
+        env_urban.remove_export(_export_dir(), job_id)
+    except env_urban.ExportError as exc:
+        raise StudioError(str(exc), HTTPStatus.NOT_FOUND) from exc
+    return {"id": job_id, "removed": True}
 
 
 def import_city_world(body: object) -> dict:
@@ -651,23 +662,17 @@ def _own_assets(data: dict, directory: Path, recipe_id: str) -> tuple[list[Path]
 
 
 def export_urban(recipe_id: str, body: object) -> dict:
-    """Write a saved Recipe as a hakoniwa-urban-mobility World (a City World
-    job under <ws>/urban/<id>/, env_urban.py) and, with register, register it
-    there as a City Asset. Body: {register?: bool}."""
+    """Write a saved Recipe as a City World job (env_urban.py) to the export
+    folder, as <id>/. Body: {} (kept for compatibility)."""
     found = _recipe_files().get(_check_id(recipe_id))
     if found is None:
         raise StudioError(f"Recipe {recipe_id} not found（保存してから書き出してください）", HTTPStatus.NOT_FOUND)
     try:
-        result = env_urban.export(found[0])
+        result = env_urban.export(found[0], _export_dir() / recipe_id)
     except env_urban.ExportError as exc:
-        raise StudioError(f"urban-mobility に書き出せません: {exc}") from exc
+        raise StudioError(f"書き出せません: {exc}") from exc
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise StudioError(f"urban-mobility に書き出せません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
-    if isinstance(body, dict) and body.get("register"):
-        if result["check"] is not None and not result["check"]["ok"]:
-            result["register"] = {"ok": False, "output": ["the job does not follow urban's contract"]}
-        else:
-            result["register"] = env_urban.register(Path(result["receipt"]), title=result["name"])
+        raise StudioError(f"書き出せません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
     return {"id": recipe_id, **result}
 
 
@@ -764,7 +769,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
     ROUTES = (
         ("GET", ("health",), lambda self, _: self._json({
             "app": APP_NAME, "pid": os.getpid(), "port": self.server.server_address[1],
-            "instance": os.environ.get(INSTANCE_ENV), "version": env_version.build_info(ROOT)})),
+            "instance": os.environ.get(INSTANCE_ENV), "version": env_version.build_info(ROOT),
+            "export_dir": str(EXPORT_DIR) if EXPORT_DIR else None})),
         ("POST", ("shutdown",), lambda self, _: self._shutdown()),
         ("GET", ("catalogs",), lambda self, _: self._json(list_catalogs())),
         ("GET", ("catalogs", "*"), lambda self, parts: self._json(catalog_json(parts[1]))),
@@ -777,8 +783,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("POST", ("city-worlds", "build", "*", "cancel"), lambda self, parts: self._json(
             _built(lambda: env_cityworld.BUILDS.cancel(_check_id(parts[2]))))),
         ("POST", ("city-worlds", "import"), lambda self, _: self._json(import_city_world(self._body()))),
-        ("POST", ("city-worlds", "urban"), lambda self, _: self._json(register_city_world(self._body()))),
-        ("POST", ("urban", "cities", "*", "unregister"), lambda self, parts: self._json(unregister_city(parts[2]))),
+        ("POST", ("city-worlds", "export"), lambda self, _: self._json(export_city_world(self._body()))),
+        ("POST", ("exports", "*", "delete"), lambda self, parts: self._json(remove_export(parts[1]))),
         ("GET", ("recipes",), lambda self, _: self._json(list_recipes())),
         ("GET", ("recipes", "*"), lambda self, parts: self._json(read_recipe(parts[1]))),
         ("PUT", ("recipes", "*"), lambda self, parts: self._json(save_recipe(parts[1], self._body()))),
@@ -896,9 +902,15 @@ def _port_free(port: int) -> bool:
     return True
 
 
-def start(port: int, open_browser: bool, state_dir: Path) -> int:
+def start(port: int, open_browser: bool, state_dir: Path, export_dir: Path | None = None) -> int:
     running = _running(state_dir)
     if running:
+        wanted = str(export_dir.expanduser().resolve()) if export_dir else None
+        current = (_health(int(running["port"])) or {}).get("export_dir")
+        if wanted != current:
+            print(f"ERROR: Environment Studio is already running with export folder {current or 'none'} "
+                  f"(asked for {wanted or 'none'}); stop it first: {command_hint('stop')}", file=sys.stderr)
+            return 1
         print(f"Environment Studio is already running: {running['url']} (pid {running['pid']})")
         if open_browser:
             webbrowser.open(running["url"])
@@ -910,7 +922,8 @@ def start(port: int, open_browser: bool, state_dir: Path) -> int:
     log = state_dir / "studio.log"
     # Keep the interpreter's UTF-8 mode (the portable entrypoints use -X utf8).
     flags = ["-X", "utf8"] if sys.flags.utf8_mode else []
-    command = [sys.executable, *flags, str(Path(__file__).resolve()), "serve", "--port", str(port)]
+    command = [sys.executable, *flags, str(Path(__file__).resolve()), "serve", "--port", str(port),
+               *(["--export-dir", str(export_dir)] if export_dir else [])]
     instance = secrets.token_hex(16)
     options: dict = {"cwd": ROOT, "stdin": subprocess.DEVNULL, "env": {**os.environ, INSTANCE_ENV: instance}}
     if os.name == "nt":
@@ -1016,7 +1029,9 @@ def _port_in_use(port: int) -> str:
     return f"port {port} is in use by another program; stop it, or pass --port"
 
 
-def serve(port: int, open_browser: bool) -> int:
+def serve(port: int, open_browser: bool, export_dir: Path | None = None) -> int:
+    global EXPORT_DIR
+    EXPORT_DIR = export_dir.expanduser().resolve() if export_dir else None
     if not _port_free(port):
         running = _health(port)
         if running and open_browser:
@@ -1029,7 +1044,7 @@ def serve(port: int, open_browser: bool) -> int:
         return 1
     server = make_server(port)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
-    print(f"Environment Studio: {url}", flush=True)
+    print(f"Environment Studio: {url}" + (f" (export folder {EXPORT_DIR})" if EXPORT_DIR else ""), flush=True)
     if open_browser:
         webbrowser.open(url)
     try:
@@ -1046,17 +1061,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", nargs="?", default="serve", choices=("serve", "start", "status", "open", "stop"))
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--open-browser", action="store_true")
+    parser.add_argument("--export-dir", type=Path,
+                        help="serve/start: write City World jobs here (the folder a tool that takes them watches)")
     parser.add_argument("--state-dir", type=Path, default=STATE_DIR, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.command == "start":
-        return start(args.port, args.open_browser, args.state_dir)
+        return start(args.port, args.open_browser, args.state_dir, args.export_dir)
     if args.command == "status":
         return status(args.state_dir)
     if args.command == "open":
         return open_studio(args.state_dir, args.port)
     if args.command == "stop":
         return stop(args.state_dir)
-    return serve(args.port, args.open_browser)
+    return serve(args.port, args.open_browser, args.export_dir)
 
 
 if __name__ == "__main__":

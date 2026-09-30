@@ -60,12 +60,12 @@
 
       <section class="panel">
         <h2>PLATEAU から City World を作る</h2>
-        <p class="hint">青い範囲の PLATEAU データを hakoniwa-envsim でダウンロードして変換し（LOD2 の見た目・建物の当たり判定・地形・道路・路面標示）、終わったら下で選んだとおり urban-mobility に登録し、部品として取り込みます。範囲と建物の数によって数分〜数十分かかります。ダウンロードしたデータは共有のキャッシュに残り、次から使い回します。</p>
+        <p class="hint">青い範囲の PLATEAU データを hakoniwa-envsim でダウンロードして変換し（LOD2 の見た目・建物の当たり判定・地形・道路・路面標示）、終わったら下で選んだとおり書き出し先に書き出し、部品として取り込みます。範囲と建物の数によって数分〜数十分かかります。ダウンロードしたデータは共有のキャッシュに残り、次から使い回します。</p>
         <label class="field">ID<input id="build-id" placeholder="sapporo-station" autocomplete="off"></label>
         <label class="field inline" title="同じ ID・同じ範囲で前に作った City World を、そのとき取得したカタログと CityGML だけで作り直します（ネットワークを使いません）。"><input type="checkbox" id="build-offline"> 前に作った同じ ID・同じ範囲を、取得済みのデータで作り直す（オフライン）</label>
         <p class="hint">チェックしなくても、ダウンロード済みの CityGML は共有のキャッシュから使い回します（ネットワークはカタログの問い合わせと、まだ無いデータの取得だけに使います）。</p>
-        <label class="field inline" title="作った City World を、変換せずにそのまま urban-mobility の City として登録します（ID は City の ID になります）。"><input type="checkbox" id="build-register" checked> できあがったら urban-mobility にそのまま登録する</label>
-        <label class="field inline" title="作った City World を、この Studio で編集できる部品にします。編集したものは「urban-mobility へ」で書き出して登録します。"><input type="checkbox" id="build-import" checked> できあがったら部品として取り込む（編集用）</label>
+        <label class="field inline" id="build-register-field" hidden title="作った City World を、変換せずにそのまま書き出し先に書き出します（書き出し先を見ているツール、例えば hakoniwa-urban-mobility が World として取り込みます。ID がその World の ID になります）。"><input type="checkbox" id="build-register" checked> できあがったら書き出し先にそのまま書き出す</label>
+        <label class="field inline" title="作った City World を、この Studio で編集できる部品にします。編集したものは Studio の画面の「書き出す」で書き出します。"><input type="checkbox" id="build-import" checked> できあがったら部品として取り込む（編集用）</label>
         <div class="row">
           <button id="build-start">この範囲の City World を作る</button>
           <button id="build-cancel" class="secondary" hidden>中止</button>

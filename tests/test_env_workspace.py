@@ -40,10 +40,10 @@ class WorkspaceTest(unittest.TestCase):
         recipe = yaml.safe_load(env_workspace.RECIPE.read_text(encoding="utf-8"))
         self.assertEqual(recipe["id"], env_workspace.RECIPE_ID)
         self.assertTrue((ROOT / recipe["runtime_dependencies"]["python"]["requirements"]).is_file())
-        with mock.patch.dict(os.environ, {"HAKONIWA_ENVSIM_ROOT": "", "HAKONIWA_URBAN_MOBILITY_ROOT": ""}):
+        with mock.patch.dict(os.environ, {"HAKONIWA_ENVSIM_ROOT": ""}):
             self.assertEqual(env_workspace.dependency_root("hakoniwa-envsim"), (ROOT.parent / "hakoniwa-envsim").resolve())
-            self.assertEqual(env_workspace.dependency_root("hakoniwa-urban-mobility"),
-                             (ROOT.parent / "hakoniwa-urban-mobility").resolve())
+        # The Studio does not depend on urban-mobility: it writes City World jobs to its export folder.
+        self.assertNotIn("hakoniwa-urban-mobility", recipe["recipe_local_requirements"])
         with tempfile.TemporaryDirectory() as elsewhere, \
                 mock.patch.dict(os.environ, {"HAKONIWA_ENVSIM_ROOT": elsewhere}):
             self.assertEqual(env_workspace.dependency_root("hakoniwa-envsim"), Path(elsewhere).resolve())

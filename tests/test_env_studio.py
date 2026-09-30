@@ -383,6 +383,18 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(closed.returncode, 1)
         self.assertIn("start --open-browser", closed.stderr)
 
+    def test_the_export_folder_is_given_at_start_and_reported(self):
+        exports = self.state.parent / "exports"
+        started = self.run_tool("start", "--port", str(self.port), "--export-dir", str(exports))
+        self.assertEqual(started.returncode, 0, started.stderr)
+        with urlopen(f"http://127.0.0.1:{self.port}/api/health", timeout=5) as response:
+            self.assertEqual(json.loads(response.read())["export_dir"], str(exports.resolve()))
+        # Started again for the same folder: the running one; for another: refused, not silently reused.
+        self.assertEqual(self.run_tool("start", "--port", str(self.port), "--export-dir", str(exports)).returncode, 0)
+        other = self.run_tool("start", "--port", str(self.port), "--export-dir", str(self.state.parent / "other"))
+        self.assertEqual(other.returncode, 1)
+        self.assertIn("already running with export folder", other.stderr)
+
     def test_a_port_taken_by_another_program_is_explained(self):
         with socket.socket() as other:
             other.bind(("127.0.0.1", 0))

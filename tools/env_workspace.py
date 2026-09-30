@@ -11,7 +11,7 @@ its Business Pack Recipe prepares:
 - Its data is in the Recipe workspace, $HAKONIWA_WORK_DIR/recipes/environment-studio.
 - The Business Pack work directory ($HAKONIWA_WORK_DIR) is where other Recipes'
   City Worlds and the shared PLATEAU cache are.
-- The repositories it uses (hakoniwa-envsim, hakoniwa-urban-mobility) are the
+- The repositories it uses (hakoniwa-envsim) are the
   Recipe's recipe_local_requirements, found as the Business Pack recipe.py
   finds them: the override variable, else default_path from this repository.
 """

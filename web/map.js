@@ -209,42 +209,41 @@ async function searchWorlds(map, layer) {
     const bounds = worldBounds(build);
     L.rectangle(bounds, { color: "#e07b00", weight: 2, fillOpacity: 0.05 }).bindTooltip(build.title).addTo(layer);
     const importButton = el("button", { class: "secondary", onclick: () => importWorld(build) }, "取り込む");
-    const urbanButton = build.urban
-      ? el("button", { class: "secondary", title: `urban の City ${build.urban.id}`,
-        onclick: () => unregisterWorld(build, () => searchWorlds(map, layer)) }, "urban の登録を外す")
-      : el("button", { class: "secondary", disabled: !build.urban_ready || Boolean(found.urban_error),
-        title: build.urban_ready ? "作った City World をそのまま urban-mobility の City として登録します" : "City World がないビルドです",
-        onclick: () => registerWorld(build, () => searchWorlds(map, layer)) }, "urban に登録");
+    const exportButton = !found.export_dir ? null : build.exported
+      ? el("button", { class: "secondary", title: `書き出し先の ${build.exported.id}（City World 自体は残ります）`,
+        onclick: () => removeExport(build, () => searchWorlds(map, layer)) }, "書き出しを消す")
+      : el("button", { class: "secondary", disabled: !build.exportable,
+        title: build.exportable ? "作った City World をそのまま書き出し先に書き出します" : "City World がないビルドです",
+        onclick: () => exportWorld(build, () => searchWorlds(map, layer)) }, "書き出す");
     return el("li", {},
       el("button", { onclick: () => map.fitBounds(bounds, { padding: [30, 30] }) },
         el("span", {}, build.title),
-        el("span", { class: "meta" }, `建物 ${build.buildings}・${build.feature_types.join(" / ")}${build.world ? "・City World あり" : ""}${build.dem ? "・地形（DEM）あり" : ""}${build.urban ? `・urban に登録済み（${build.urban.id}）` : ""}`)),
-      el("span", { class: "row" }, importButton, urbanButton));
+        el("span", { class: "meta" }, `建物 ${build.buildings}・${build.feature_types.join(" / ")}${build.world ? "・City World あり" : ""}${build.dem ? "・地形（DEM）あり" : ""}${build.exported ? `・書き出し済み（${build.exported.id}）` : ""}`)),
+      el("span", { class: "row" }, importButton, ...(exportButton ? [exportButton] : [])));
   }));
   if (!found.builds.length) $("#world-list").replaceChildren(el("li", { class: "hint" }, "Envsim のビルドは見つかりませんでした"));
-  if (found.urban_error) setStatus(`${found.builds.length} 件見つかりました（urban の登録状態は取得できません：${found.urban_error}）`, "error");
-  else setStatus(`${found.builds.length} 件見つかりました`, found.builds.length ? "ok" : "");
+  setStatus(`${found.builds.length} 件見つかりました`, found.builds.length ? "ok" : "");
 }
 
-// A City World registered in hakoniwa-urban-mobility as it is (no Recipe in
-// between): POST /api/city-worlds/urban. The City's id is its job folder name.
-async function registerWorld(build, then = null) {
-  setStatus(`${build.title} を urban に登録しています（高さ計算用のモデルのコンパイルで、大きな街は数分かかります）…`);
+// A City World written to the export folder as it is (no Recipe in between):
+// POST /api/city-worlds/export. The tool watching that folder
+// (hakoniwa-urban-mobility) takes it as a World named after the job folder.
+async function exportWorld(build, then = null) {
+  setStatus(`${build.title} を書き出しています…`);
   try {
-    const result = await api("POST", "city-worlds/urban", { path: build.path, title: build.title });
-    if (result.register.ok) setStatus(`${build.title} を urban-mobility の City ${result.id} として登録しました。Urban Studio の Compose で World に選べます。`, "ok");
-    else setStatus(`urban に登録できませんでした：${[...(result.check?.problems || []).map((problem) => problem.message), ...result.register.output].slice(-3).join(" / ")}`, "error");
+    const result = await api("POST", "city-worlds/export", { path: build.path, title: build.title });
+    setStatus(`${build.title} を ${result.id} として書き出しました（${result.job}）`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
   if (then) await then();
 }
 
-async function unregisterWorld(build, then = null) {
-  if (!window.confirm(`urban-mobility の City ${build.urban.id} の登録を外しますか？（City World 自体は残ります）`)) return;
+async function removeExport(build, then = null) {
+  if (!window.confirm(`書き出し先の ${build.exported.id} を消しますか？（City World 自体は残ります）`)) return;
   try {
-    const result = await api("POST", `urban/cities/${encodeURIComponent(build.urban.id)}/unregister`, {});
-    setStatus(result.ok ? `City ${build.urban.id} の登録を外しました` : `登録を外せませんでした：${result.output.slice(-2).join(" / ")}`, result.ok ? "ok" : "error");
+    await api("POST", `exports/${encodeURIComponent(build.exported.id)}/delete`, {});
+    setStatus(`書き出し先の ${build.exported.id} を消しました`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -336,6 +335,8 @@ function report(result) {
 
 async function init() {
   const config = await api("GET", "map/config");
+  // Started with an export folder: offer writing City Worlds there.
+  $("#build-register-field").hidden = !config.export_dir;
   const saved = loadSelection();
   $("#latitude").value = saved.latitude.toFixed(6);
   $("#longitude").value = saved.longitude.toFixed(6);
@@ -358,7 +359,7 @@ async function init() {
 
   const imported = async (status) => {
     const build = { path: status.build, title: $("#recipe-name").value.trim() || status.id };
-    if ($("#build-register").checked) await registerWorld(build);
+    if (config.export_dir && $("#build-register").checked) await exportWorld(build);
     if ($("#build-import").checked) await importWorld(build, status.id);
     searchWorlds(map, worlds);
   };

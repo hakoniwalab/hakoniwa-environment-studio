@@ -711,26 +711,20 @@ async function saveRecipe() {
   }
 }
 
-// The saved Recipe as a hakoniwa-urban-mobility World, registered there as a
-// City Asset (POST /api/recipes/<id>/urban; tools/env_urban.py).
+// The saved Recipe as a City World job in the export folder the Studio was
+// started with (POST /api/recipes/<id>/urban; tools/env_urban.py). The tool
+// watching that folder (hakoniwa-urban-mobility) takes it as a World.
 async function exportUrban() {
   // A saved Recipe as it is on disk (an example too): unsaved edits would not be in it.
   const id = state.current?.id;
   if (!id || isDirty() || !state.recipes.some((item) => item.id === id && !item.error)) {
-    setStatus("urban-mobility へ書き出す前に、環境を保存してください", "error");
+    setStatus("書き出す前に、環境を保存してください", "error");
     return;
   }
-  setStatus(`${id} を urban-mobility の World にしています…`);
+  setStatus(`${id} を City World ジョブにしています…`);
   try {
-    const result = await api("POST", `recipes/${encodeURIComponent(id)}/urban`, { register: true });
-    const problems = (result.check?.problems || []).filter((item) => item.severity === "error");
-    if (problems.length) {
-      setStatus(`${id} は urban の決まりに合いません：${problems.map((item) => `${item.where}: ${item.message}`).join(" / ")}`, "error");
-    } else if (result.register && !result.register.ok) {
-      setStatus(`${id} を書き出しましたが、登録できませんでした：${result.register.output.slice(-2).join(" ")}`, "error");
-    } else {
-      setStatus(`${id} を urban-mobility に登録しました（City Asset ${id}、${result.kind === "city" ? "地図の原点あり" : "平らな World"}：${result.job}）`, "ok");
-    }
+    const result = await api("POST", `recipes/${encodeURIComponent(id)}/urban`, {});
+    setStatus(`${id} を書き出しました（${result.kind === "city" ? "地図の原点あり" : "平らな World"}：${result.job}）`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -777,6 +771,8 @@ async function init() {
   $("#new-recipe").addEventListener("click", newRecipe);
   $("#save").addEventListener("click", saveRecipe);
   $("#urban").addEventListener("click", exportUrban);
+  // Export only when started with an export folder (a tool that takes the Worlds).
+  try { $("#urban").hidden = !(await api("GET", "health")).export_dir; } catch { /* keep it hidden */ }
   $("#fit").addEventListener("click", () => state.plan.fit());
   for (const button of document.querySelectorAll("#view-mode button")) {
     button.addEventListener("click", () => setViewMode(button.dataset.mode));

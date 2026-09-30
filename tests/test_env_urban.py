@@ -102,9 +102,13 @@ class UrbanExportTest(unittest.TestCase):
         _recipe, _studio, urban_model, checked = self.assert_same_world(path, job / "build/world/city-world.xml")
         self.assertGreater(checked, 10)
         self.assertEqual(urban_model.hfield_nrow[0], 2)  # the flat ground as an hfield
-        if result["check"] is not None:  # Urban's own check (its schemas/city-world-job.yaml)
-            self.assertTrue(result["check"]["ok"], result["check"])  # a temporary folder lies outside the workspace: a warning
-            self.assertEqual([p for p in result["check"]["problems"] if p["severity"] == "error"], [])
+        # The job was written next to its place and moved in whole; job.json names it.
+        self.assertFalse(job.with_name(job.name + ".partial").exists())
+        self.assertEqual(json.loads((job / "job.json").read_text())["title"], recipe.name)
+        self.assertNotIn(".partial", (job / "build/world/city-world-receipt.json").read_text())
+        problems = urban_contract_errors(job / "build/world/city-world-receipt.json")
+        if problems is not None:  # urban-mobility's own check of the format, when it is next to the Studio
+            self.assertEqual(problems, [])
 
     def test_hills_keep_their_heights_and_their_cells(self):
         import numpy
@@ -122,80 +126,78 @@ class UrbanExportTest(unittest.TestCase):
         self.assertEqual((nrow, ncol), (recipe.terrain.ncol, recipe.terrain.nrow))
         self.assertAlmostEqual(terrain_receipt["maximum_altitude_m"], recipe.terrain.max_height_m, places=5)
 
-    def test_registering_calls_urban(self):
-        urban = self.dir / "hakoniwa-urban-mobility"
-        (urban / "tools").mkdir(parents=True)
-        (urban / "tools/urban_assets.py").write_text(
-            "import sys\nprint('Registered City Asset:', sys.argv[sys.argv.index('--receipt') + 1],"
-            " sys.argv[sys.argv.index('--title') + 1])\n", encoding="utf-8")
-        with mock.patch.dict("os.environ", {"HAKONIWA_URBAN_MOBILITY_ROOT": str(urban)}):
-            done = env_urban.register(self.dir / "job/build/world/city-world-receipt.json", precompile=False,
-                                      title="車のテストコース")
-        self.assertTrue(done["ok"])
-        self.assertIn("job/build/world/city-world-receipt.json 車のテストコース", done["output"][-1])
 
 
 
-class CityWorldRegistrationTest(unittest.TestCase):
-    """An Envsim City World build registered in Urban as it is, unregistered,
-    and found in Urban's City list (a stand-in urban_assets.py)."""
+def urban_contract_errors(receipt: Path) -> list | None:
+    """urban-mobility's own check of a City World job (its tools/city_world_job.py),
+    when it is next to the Studio: the format the Studio writes is urban's."""
+    tools = ROOT.parent / "hakoniwa-urban-mobility" / "tools"
+    if not (tools / "city_world_job.py").is_file():
+        return None
+    sys.path.insert(0, str(tools))
+    try:
+        import city_world_job
+    except SystemExit:  # urban-mobility needs the Business Pack Workspace
+        return None
+    finally:
+        sys.path.remove(str(tools))
+    _job, problems = city_world_job.check(receipt, workspace=ROOT.parent)
+    return [problem.as_json() for problem in problems if problem.severity == "error"]
 
-    FAKE_URBAN_ASSETS = """import json, sys
-args = sys.argv[1:]
-state = __file__ + ".json"
-try:
-    cities = json.load(open(state))
-except OSError:
-    cities = {}
-if args[0] == "register-city":
-    receipt = args[args.index("--receipt") + 1]
-    job = receipt.rsplit("/build/world/", 1)[0].rsplit("/", 1)[-1]
-    cities[job] = {"id": job, "kind": "city", "title": args[args.index("--title") + 1] if "--title" in args else job,
-                   "receipt": receipt}
-    print("Registered City Asset:", job)
-elif args[0] == "unregister-city":
-    cities.pop(args[args.index("--id") + 1])
-    print("Unregistered City Asset")
-elif args[0] == "list":
-    print(json.dumps(list(cities.values())))
-json.dump(cities, open(state, "w"))
-"""
+class CityWorldExportTest(unittest.TestCase):
+    """An Envsim City World build written to the export folder as it is (a
+    small job naming the build's files), listed, and removed."""
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.dir = Path(directory.name).resolve()
-        self.urban = self.dir / "hakoniwa-urban-mobility"
-        (self.urban / "tools").mkdir(parents=True)
-        (self.urban / "tools/urban_assets.py").write_text(self.FAKE_URBAN_ASSETS, encoding="utf-8")
-        patch = mock.patch.dict("os.environ", {"HAKONIWA_URBAN_MOBILITY_ROOT": str(self.urban)})
-        patch.start()
-        self.addCleanup(patch.stop)
         self.build = self.dir / "city-worlds/sapporo/build"
         (self.build / "world").mkdir(parents=True)
-        (self.build / "world/city-world-receipt.json").write_text("{}", encoding="utf-8")
+        (self.build / "world/city-world.xml").write_text("<mujoco/>", encoding="utf-8")
+        (self.build / "world/city-world-receipt.json").write_text(
+            json.dumps({"mjcf": {"path": str(self.build / "world/city-world.xml")}}), encoding="utf-8")
+        (self.build / "city-world-lod1.json").write_text("{}", encoding="utf-8")
+        (self.build.parent / "viewer").mkdir()
+        (self.build.parent / "viewer/city-world-colliders.glb").write_bytes(b"glTF")
+        self.exports = self.dir / "urban-studio-cities"
 
-    def test_a_city_world_is_registered_as_it_is_and_unregistered(self):
-        with mock.patch.object(env_urban, "check", return_value=None):  # no city_world_job.py in the stand-in
-            result = env_urban.register_city_world(self.build, title="札幌", precompile=False)
-        self.assertTrue(result["register"]["ok"], result)
-        receipt = str(self.build / "world/city-world-receipt.json")
-        self.assertEqual(result["receipt"], receipt)
-        self.assertEqual(env_urban.urban_cities()[receipt]["id"], "sapporo")
-        self.assertEqual(env_urban.urban_cities()[receipt]["title"], "札幌")
-        self.assertTrue(env_urban.unregister("sapporo")["ok"])
-        self.assertEqual(env_urban.urban_cities(), {})
+    def test_a_city_world_is_written_as_a_small_job_and_removed(self):
+        result = env_urban.export_city_world(self.build, self.exports, title="札幌")
+        job = self.exports / "sapporo"
+        self.assertEqual((result["id"], result["job"]), ("sapporo", str(job)))
+        for part in ("build/world/city-world-receipt.json", "build/city-world-lod1.json",
+                     "viewer/city-world-colliders.glb", "job.json"):
+            self.assertTrue((job / part).is_file(), part)
+        # The receipt still names the build's MJCF: the job is small.
+        receipt = json.loads((job / "build/world/city-world-receipt.json").read_text())
+        self.assertEqual(receipt["mjcf"]["path"], str(self.build / "world/city-world.xml"))
+        self.assertFalse((job / "build/world/city-world.xml").exists())
+        self.assertFalse((self.exports / "sapporo.partial").exists())
+        listed = env_urban.exported(self.exports)
+        self.assertEqual(listed[str(self.build)], {"id": "sapporo", "title": "札幌", "job": str(job)})
+        # Written again: replaced in place.
+        env_urban.export_city_world(self.build, self.exports, title="札幌 2")
+        self.assertEqual(env_urban.exported(self.exports)[str(self.build)]["title"], "札幌 2")
+        env_urban.remove_export(self.exports, "sapporo")
+        self.assertFalse(job.exists())
+        self.assertTrue((self.build / "world/city-world-receipt.json").is_file())  # the build stays
+        self.assertEqual(env_urban.exported(self.exports), {})
 
-    def test_a_job_that_breaks_urbans_contract_is_not_registered(self):
-        refused = {"ok": False, "problems": [{"severity": "error", "message": "no viewer"}]}
-        with mock.patch.object(env_urban, "check", return_value=refused):
-            result = env_urban.register_city_world(self.build, precompile=False)
-        self.assertFalse(result["register"]["ok"])
-        self.assertEqual(env_urban.urban_cities(), {})
+    def test_only_a_job_this_studio_wrote_can_be_removed(self):
+        (self.exports / "other").mkdir(parents=True)
+        with self.assertRaisesRegex(env_urban.ExportError, "no job other"):
+            env_urban.remove_export(self.exports, "other")
+        self.assertTrue((self.exports / "other").is_dir())
 
-    def test_a_build_without_a_city_world_is_refused(self):
+    def test_a_build_without_a_city_world_or_collider_view_is_refused(self):
         with self.assertRaisesRegex(env_urban.ExportError, "not a City World build"):
-            env_urban.register_city_world(self.dir / "city-worlds/none/build")
+            env_urban.export_city_world(self.dir / "city-worlds/none/build", self.exports)
+        (self.build.parent / "viewer/city-world-colliders.glb").unlink()
+        with self.assertRaisesRegex(env_urban.ExportError, "no collider view"):
+            env_urban.export_city_world(self.build, self.exports)
+
 
 @unittest.skipUnless(READY, "MuJoCo or trimesh is not installed")
 class UrbanExportOfACityWorldTest(unittest.TestCase):
@@ -230,17 +232,20 @@ class UrbanExportOfACityWorldTest(unittest.TestCase):
 
 @unittest.skipUnless(READY, "MuJoCo or trimesh is not installed")
 class UrbanRouteTest(unittest.TestCase):
-    def test_the_studio_exports_a_saved_recipe(self):
+    def test_the_studio_exports_a_saved_recipe_to_its_export_folder(self):
         import env_studio
 
         with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(env_studio, "USER_RECIPES", Path(directory) / "work/recipes"), \
-                mock.patch.object(env_urban, "EXPORTS", Path(directory) / "work/urban"):
-            result = env_studio.export_urban("car-test-course", {})
-            self.assertEqual(result["job"], str((Path(directory) / "work/urban/car-test-course").resolve()))
-            self.assertNotIn("register", result)
-            with self.assertRaises(env_studio.StudioError):
-                env_studio.export_urban("no-such-recipe", {})
+                mock.patch.object(env_studio, "USER_RECIPES", Path(directory) / "work/recipes"):
+            # Started without an export folder: nothing to write to.
+            with mock.patch.object(env_studio, "EXPORT_DIR", None), self.assertRaises(env_studio.StudioError) as caught:
+                env_studio.export_urban("car-test-course", {})
+            self.assertIn("--export-dir", str(caught.exception))
+            with mock.patch.object(env_studio, "EXPORT_DIR", Path(directory) / "exports"):
+                result = env_studio.export_urban("car-test-course", {})
+                self.assertEqual(result["job"], str((Path(directory) / "exports/car-test-course").resolve()))
+                with self.assertRaises(env_studio.StudioError):
+                    env_studio.export_urban("no-such-recipe", {})
 
 
 if __name__ == "__main__":

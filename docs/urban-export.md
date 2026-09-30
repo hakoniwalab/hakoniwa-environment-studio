@@ -6,7 +6,7 @@ Environment Studio で作った環境を、hakoniwa-urban-mobility の World と
 
 ## 1. 受け渡しの決まり
 
-urban-mobility は World を **City World ジョブ**（フォルダ）で受け取り、`tools/urban_assets.py register-city --receipt <レシート>` で City Asset として登録します。ジョブの構成とレシートの中身の決まりは、urban-mobility 側の `schemas/city-world-job.yaml` にあり（`docs/asset-contract.md` 6.3 節）、`tools/city_world_job.py check` で調べられます。Studio はこの決まりに合わせて書き出します。
+urban-mobility は World を **City World ジョブ**（フォルダ）で受け取り、自分で City Asset として登録します（`tools/urban_assets.py register-city`）。ジョブの構成とレシートの中身の決まりは、urban-mobility 側の `schemas/city-world-job.yaml` にあり（`docs/asset-contract.md` 6.3 節）、`tools/city_world_job.py check` で調べられます。Studio はこの決まりに合わせて書き出します。
 
 ## 2. 書き出すもの
 
@@ -32,12 +32,10 @@ Studio の Recipe workspace の `urban/<Recipe ID>/`（`$HAKONIWA_WORK_DIR/recip
 
 ## 3. 使い方
 
-- **Studio の画面**：環境を保存してから、上の「urban-mobility へ」を押します。書き出し、urban のチェック、`register-city` までを行います。
-- **コマンド**：`tools/env_urban.py export <Recipe> [--out DIR] [--register] [--no-precompile]`
-- **PLATEAU の City World をそのまま登録**：地図ページの「ワークスペースの街」の「urban に登録」、または「PLATEAU から City World を作る」の「できあがったら urban-mobility にそのまま登録する」。envsim が作った City World のジョブは、そのまま urban の City World ジョブの形式なので、Recipe を経由せず・変換せずに `register-city` します（先に urban のチェックを通します）。City の ID はジョブのフォルダ名です。「urban の登録を外す」は `unregister-city` です（City World 自体は残ります）。どれが登録済みかは `urban_assets.py list --json` で調べます。
-- **役割の分担**：City を作る・編集する・urban に登録する（登録を外す）のは Environment Studio です。urban の Urban Studio は、登録済みの City を一覧して使うだけで、City タブの「Environment Studio で作る」からこの地図ページを開きます。
-- urban-mobility は、Studio の Business Pack Recipe の依存（`recipe_local_requirements`）として `recipe.py configure` が用意したものを使います（`$HAKONIWA_URBAN_MOBILITY_ROOT`、無ければ `../hakoniwa-urban-mobility`）。登録先は urban の決まりどおり、ビジネスパックの `work/urban/assets/cities/<ID>.asset.yaml` です。
-- 登録の解除は urban 側で `tools/urban_assets.py unregister-city --id <ID>` です。
+- **書き出し先：** Studio は urban を呼びません。`env_studio.py start --export-dir <フォルダ>` で渡されたフォルダに、City World ジョブを `<ID>/` として書き出すだけです。ジョブは隣で書き終えてから一度に移すので、書き出し先を見ているツールが書きかけを拾うことはありません。各ジョブには `job.json`（名前 `title`、元になった Recipe か City World `source`）が付きます。urban-mobility は、Urban Studio の「Environment Studio で作る」でこの書き出し先を自分の受け取りフォルダにして Studio を起動し、現れたジョブを自分で検査して City として登録し、消えたジョブの登録を外します。
+- **Studio の画面：** 環境を保存してから、上の「書き出す」を押します（書き出し先を渡して起動したときだけ出ます）。
+- **PLATEAU の City World をそのまま書き出す：** 地図ページのワークスペースの街の「書き出す」、または「PLATEAU から City World を作る」の「できあがったら書き出し先にそのまま書き出す」。envsim の City World はもともとこの形式なので、変換しません。書き出すのは小さなジョブ（receipt、建物の外形 `build/city-world-lod1.json`、`viewer/`）で、receipt は City World の MJCF や GLB を絶対パスのまま指します。City World を消すと、書き出したジョブも使えなくなります。「書き出しを消す」で書き出し先から消せます（City World 自体は残ります）。
+- **コマンド：** `tools/env_urban.py export <Recipe> [--out DIR]`（Recipe をジョブとして書き出す。登録はしません）
 
 ## 4. 確かめたこと
 

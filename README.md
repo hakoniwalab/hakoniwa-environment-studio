@@ -216,37 +216,17 @@ python -m unittest discover -s ../hakoniwa-environment-studio/tests
 
 Studio の作業データは、Business Pack の Recipe workspace `work/recipes/environment-studio/`（`$HAKONIWA_WORK_DIR/recipes/environment-studio`、以下 `<ws>`）に置きます。Workspace の外では Studio は起動せず、入り方を表示して止まります。
 
-### 作った環境で車を走らせる（通しの手順）
+### 書き出し先と hakoniwa-urban-mobility
 
-Environment Studio で作った環境を hakoniwa-urban-mobility に登録し、車と組み合わせてシミュレーションするまでの流れです。どれも `(hako)` シェルの `hakoniwa-business-pack` で実行します。
+Environment Studio は、ほかのツールを呼びません。作った環境（Recipe）や PLATEAU の City World を、起動時に渡された**書き出し先**のフォルダへ City World ジョブ（hakoniwa-urban-mobility の World の形式、`schemas/city-world-job.yaml`）として書き出すだけです。
 
-1. **Studio を開く**
+```bash
+python ../hakoniwa-environment-studio/tools/env_studio.py start --export-dir <書き出し先のフォルダ>
+```
 
-   ```bash
-   python ../hakoniwa-environment-studio/tools/env_studio.py start --open-browser
-   ```
-
-   動いている Studio をあとで開き直すときは `env_studio.py open` です。
-
-2. **環境を作る**：部品を置くか、「地図から」で街を取り込み、保存します。
-3. **urban に登録する**：上の「urban-mobility へ」を押します。書き出し（`<ws>/urban/<ID>/`）、urban のチェック、City Asset への登録までを行い、登録した ID が表示されます（詳しくは [docs/urban-export.md](docs/urban-export.md)）。PLATEAU で作った City World を編集せずに使うなら、地図ページの「urban に登録」でそのまま登録できます（Recipe を経由しません）。
-4. **Urban Studio を開く**
-
-   ```bash
-   python ../hakoniwa-urban-mobility/tools/urban_studio.py start --open-browser
-   ```
-
-   開き直すときは `urban_studio.py open`、止めるときは `urban_studio.py stop` です。
-5. **車と組み合わせる**：Urban Studio の Compose で、World に 3 で登録した ID を選び、車（ゴルフカート、操作は `rc`）を追加して道路の上に置き、保存します。地図の原点がある環境は地図、原点のない環境は 3D ビューで置きます。
-6. **シミュレーションする**：Simulation でその Composition を選び、`configure` のあと `start` を押します。Viewer が開いたらコントローラで走らせ、終わったら `stop` を押します。
-7. **片付け**：Workspace を抜ける（`exit`）前に、両方の Studio を止めます。
-
-   ```bash
-   python ../hakoniwa-urban-mobility/tools/urban_studio.py stop
-   python ../hakoniwa-environment-studio/tools/env_studio.py stop
-   ```
-
-環境を直したときは、Studio で保存して「urban-mobility へ」を押し直せば、同じ ID の City が新しい版で登録し直されます。
+- **hakoniwa-urban-mobility と使うとき：** Urban Studio の City タブの「Environment Studio で作る」が、urban の受け取りフォルダを書き出し先にして Env Studio を起動し、書き出されたものを World として登録します。作ってから車やドローンで走らせるまでの手順は、[hakoniwa-urban-mobility の Quick start](https://github.com/hakoniwalab/hakoniwa-urban-mobility) にあります。
+- **書き出すもの：** Studio の画面の「書き出す」（保存した Recipe）、地図ページのワークスペースの街の「書き出す」、PLATEAU で作った City World の「できあがったら書き出し先にそのまま書き出す」。「書き出しを消す」で書き出し先から消せます（元の環境や City World は残ります）。詳しくは [docs/urban-export.md](docs/urban-export.md)。
+- **書き出し先なしで起動したとき：** 環境を作る・編集する・検証する・GLB / MJCF を生成する単体のツールとして使えます（書き出しのボタンは出ません）。
 
 Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `<ws>/recipes/`（例の環境は保存するとコピーになります）。一覧の × で環境を削除できます。すぐには消さず、見た目の GLB（`<ID>.assets/`）と地図から取り込んだ元データ（`<ws>/map-data/<ID>/`）と一緒に `<ws>/trash/<日時>-<ID>/` へ移します（戻すときはそこから `<ws>/` へ戻し、要らなければ手で消します）。例の環境は消せません。別の ID で保存すると、見た目の GLB もその ID の `<ID>.assets/` にコピーするので、元の環境を消してもコピーは壊れません（手で書いた Recipe がほかの環境の `.assets/` を指している場合は、削除を止めてその環境を示します）。部品を動かしたときは、3D の部品をその場で動かし、高さ（地形・道路の上）だけをサーバに聞きます（`POST /api/poses`）。GLB を作り直すのは、形・品目・地面・大きさが変わったときだけです。
 
@@ -256,7 +236,7 @@ Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘�
   1. hakoniwa-envsim の `osm2citygml.py` が、OpenStreetMap（Overpass API）か GeoJSON を CityGML LOD1 にします（変換規則は envsim の `docs/osm-to-citygml.md`）。
   2. このリポジトリの部品変換ツール `tools/env_citygml.py` が、それを部品にします。
 - **部品の単位**：建物 1 棟（CityGML の `bldg:Building`）＝ `building-footprint` の部品 1 つ。道路の面は `road-area` です。建物は切らずに丸ごと使い、はみ出す建物があれば環境のほうを広げます。
-- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。City World に地形（PLATEAU の DEM）があれば、それが地面になり、建物は移動先の地面の高さに合わせて立ちます。LOD2 のある建物は、PLATEAU のテクスチャ付きの見た目（建物ごとの GLB）で表示され、部品と一緒に動きます。envsim が作った地形（hfield と GLB）・建物ごとの当たり判定（P0〜P3）・道路網などの層は作り直さずにそのまま使うので、**取り込んで編集せずに出力すれば envsim の出力と同じ世界になります**（`tools/env_roundtrip.py` で照合。動かした部品は、その分だけ移して使います）。地図ページの「PLATEAU から City World を作る」では、選んだ範囲の City World を hakoniwa-envsim に作らせ（`<ws>/city-worlds/<ID>/`、ダウンロードした CityGML は共有キャッシュで使い回し）、終わったら選んだとおり urban-mobility にそのまま登録し、部品として取り込みます。ワークスペースの街の一覧からも「urban に登録」「urban の登録を外す」ができます。urban 側の City 作成（City World Web UI の起動と自動登録）はなくなり、City を作って登録するのは Environment Studio の役割です。
+- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。City World に地形（PLATEAU の DEM）があれば、それが地面になり、建物は移動先の地面の高さに合わせて立ちます。LOD2 のある建物は、PLATEAU のテクスチャ付きの見た目（建物ごとの GLB）で表示され、部品と一緒に動きます。envsim が作った地形（hfield と GLB）・建物ごとの当たり判定（P0〜P3）・道路網などの層は作り直さずにそのまま使うので、**取り込んで編集せずに出力すれば envsim の出力と同じ世界になります**（`tools/env_roundtrip.py` で照合。動かした部品は、その分だけ移して使います）。地図ページの「PLATEAU から City World を作る」では、選んだ範囲の City World を hakoniwa-envsim に作らせ（`<ws>/city-worlds/<ID>/`、ダウンロードした CityGML は共有キャッシュで使い回し）、終わったら選んだとおり書き出し先にそのまま書き出し、部品として取り込みます。ワークスペースの街の一覧からも「書き出す」「書き出しを消す」ができます（書き出し先を渡して起動したとき）。
 - **出典の記録**：部品は gml:id・元のファイル・OSM のタグを `source` に、Recipe は原点・範囲・出典（© OpenStreetMap contributors / ODbL、PLATEAU）を `geo` に持ちます。取得した地図データと CityGML は `<ws>/map-data/<id>/` に残ります。
 - **準備**：hakoniwa-envsim を使います。Quick start の `recipe.py configure` が、無ければ隣（`../hakoniwa-envsim`）に clone します（`HAKONIWA_ENVSIM_ROOT` で別の場所を指せます）。
 
@@ -269,7 +249,7 @@ python ../hakoniwa-environment-studio/tools/env_citygml.py --citygml work/recipe
 
 - データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)
 - CityGML から部品への変換仕様：[docs/citygml-parts.md](docs/citygml-parts.md)
-- hakoniwa-urban-mobility への書き出し（「urban-mobility へ」ボタン、`tools/env_urban.py`）：[docs/urban-export.md](docs/urban-export.md)
+- City World ジョブの書き出し（書き出し先、「書き出す」ボタン、`tools/env_urban.py`）：[docs/urban-export.md](docs/urban-export.md)
 - AI エージェント向けの契約（contract / inspect / validate → repair のループ）：[docs/ai-contract.md](docs/ai-contract.md)
 - 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`
 - 例の環境：`recipes/examples/`（ドローン練習場 20 m × 30 m、車のテストコース、丘のフィールド）
