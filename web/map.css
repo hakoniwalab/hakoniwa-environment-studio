@@ -28,24 +28,23 @@
 /* PLATEAU / OpenStreetMap: one selection, two ways to make it. */
 #source-mode { width: 100%; }
 #source-mode button { flex: 1; }
-#to-osm, #to-plateau { margin-top: 8px; }
 /* PLATEAU mode: the City World Web UI (Business Pack tools/remote_operation/city_world/web). */
-#mode-plateau { display: flex; flex-direction: column; gap: 16px; }
-#mode-plateau[hidden] { display: none; }
-#mode-plateau .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 8px; }
-#mode-plateau .grid .checkbox-option, #mode-plateau .grid .full { grid-column: 1 / -1; }
-#mode-plateau .grid .checkbox-option { display: flex; align-items: flex-start; gap: 8px; }
-#mode-plateau .grid .checkbox-option input { width: auto; margin-top: 2px; }
-#mode-plateau label { display: grid; gap: 4px; font-size: .78rem; color: var(--muted); }
-#mode-plateau .grid select, #mode-plateau .grid input:not([type="checkbox"]), .artifact-controls select { width: 100%; }
-#mode-plateau .mono { margin-top: 9px; font: .78rem ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
-#mode-plateau button.wide { width: 100%; margin-top: 12px; padding: 11px; font-weight: 700; }
+:is(#mode-plateau, #mode-osm, #city-worlds) { display: flex; flex-direction: column; gap: 16px; }
+:is(#mode-plateau, #mode-osm)[hidden] { display: none; }
+:is(#mode-plateau, #mode-osm, #city-worlds) .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 8px; }
+:is(#mode-plateau, #mode-osm, #city-worlds) .grid .checkbox-option, :is(#mode-plateau, #mode-osm, #city-worlds) .grid .full { grid-column: 1 / -1; }
+:is(#mode-plateau, #mode-osm, #city-worlds) .grid .checkbox-option { display: flex; align-items: flex-start; gap: 8px; }
+:is(#mode-plateau, #mode-osm, #city-worlds) .grid .checkbox-option input { width: auto; margin-top: 2px; }
+:is(#mode-plateau, #mode-osm, #city-worlds) label { display: grid; gap: 4px; font-size: .78rem; color: var(--muted); }
+:is(#mode-plateau, #mode-osm, #city-worlds) .grid select, :is(#mode-plateau, #mode-osm, #city-worlds) .grid input:not([type="checkbox"]), .artifact-controls select { width: 100%; }
+:is(#mode-plateau, #mode-osm, #city-worlds) .mono { margin-top: 9px; font: .78rem ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+:is(#mode-plateau, #mode-osm, #city-worlds) button.wide { width: 100%; margin-top: 12px; padding: 11px; font-weight: 700; }
 #inspect { background: #1367a8; border-color: #1367a8; color: #fff; }
-#generate { background: #18864b; border-color: #18864b; color: #fff; }
-#generate:hover:not(:disabled) { background: #126d3c; }
-#cancel { background: #a96b18; border-color: #a96b18; color: #fff; }
-#cancel:hover:not(:disabled) { background: #895511; }
-#mode-plateau button:disabled { opacity: .55; }
+#generate, #osm-generate { background: #18864b; border-color: #18864b; color: #fff; }
+#generate:hover:not(:disabled), #osm-generate:hover:not(:disabled) { background: #126d3c; }
+#cancel, #osm-cancel { background: #a96b18; border-color: #a96b18; color: #fff; }
+#cancel:hover:not(:disabled), #osm-cancel:hover:not(:disabled) { background: #895511; }
+:is(#mode-plateau, #mode-osm, #city-worlds) button:disabled { opacity: .55; }
 #overall { padding: 10px; border-radius: 7px; background: #f2f5f7; color: #17222d; font-weight: 650; overflow-wrap: anywhere; }
 #overall.available { background: #e8f7ef; color: #17613a; }
 #overall.unavailable, #overall.failed { background: #fff0ee; color: #9b2c24; }
@@ -66,7 +65,7 @@
 #artifact-detail { margin-top: 7px; font: .75rem ui-monospace, monospace; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.45; }
 .viewer-layers { display: flex; gap: 16px; margin: 10px 0 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; }
 .viewer-layers legend { padding: 0 4px; color: var(--muted); font-size: .75rem; }
-#mode-plateau .viewer-layers label { display: flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--text); }
+:is(#mode-plateau, #mode-osm, #city-worlds) .viewer-layers label { display: flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--text); }
 .artifact-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 .artifact-actions button { padding: 9px; font-weight: 700; }
 #view3d { background: #6c42a1; border-color: #6c42a1; color: #fff; }

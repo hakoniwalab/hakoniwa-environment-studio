@@ -1,12 +1,13 @@
-// The map page's PLATEAU mode: the Business Pack City World Web UI
+// City Worlds on the map page: the Business Pack City World Web UI
 // (tools/remote_operation/city_world/web/city-world-ui.js) on the Studio's
-// server instead of its Worker. Diagnose the selection (POST
-// /api/plateau/inspect), generate a City World with hakoniwa-envsim (POST
-// /api/city-worlds/build, followed by GET /api/city-worlds/build/<id>), and
-// look at the results (GET /api/city-worlds/jobs): the area on the map, the
-// colliders, a 3D viewer of the Visual and Collider GLBs, the ZIP, delete.
-// The Studio adds writing a result to the export folder and taking it in as
-// parts to edit.
+// server instead of its Worker. PLATEAU: diagnose the selection (POST
+// /api/plateau/inspect) and generate a City World with hakoniwa-envsim (POST
+// /api/city-worlds/build, followed by GET /api/city-worlds/build/<id>).
+// OpenStreetMap generates one the same way, from the selection's map data
+// (flat ground). Both are looked at in one result list (GET
+// /api/city-worlds/jobs): the area on the map, the colliders, a 3D viewer of
+// the Visual and Collider GLBs, the ZIP, delete. The Studio adds writing a
+// result to the export folder and taking it in as parts to edit (in Studio).
 
 import { $, api, el } from "./dom.js";
 
@@ -105,12 +106,12 @@ function disposeObject(root) {
 
 // page: {map, exportDir, selection(), selectionIsValid(), selectionBounds(),
 // applySelection(selection), setStatus(message, kind), importWorld(build, id), toOsm()}.
-export function plateauMode(page) {
+export function cityWorlds(page) {
   const { map } = page;
   const elements = Object.fromEntries([
     "physics-level", "terrain-uncovered-policy", "coplanar-union", "convex-decompose", "tolerant-planar",
     "inspect", "generate", "cancel", "mesh-summary", "overall", "municipality", "capabilities", "generation",
-    "to-osm",
+    "to-osm", "osm-generate", "osm-cancel", "osm-generation", "artifact-status",
     "artifact-select", "artifact-path", "artifact-detail", "cache-info", "download", "view3d", "delete-artifact",
     "export-artifact", "import-artifact", "viewer-visual", "viewer-collider", "viewer-panel", "viewer-status",
     "viewer-canvas", "log",
@@ -126,6 +127,11 @@ export function plateauMode(page) {
   let viewerModels = { visual: null, collider: null };
   let viewerJobId = null;
   let viewerLoadSequence = 0;
+  // The generate button, cancel button and status line of each mode.
+  const controls = {
+    plateau: { generate: elements.generate, cancel: elements.cancel, status: elements.generation, label: "3. City Worldを生成" },
+    osm: { generate: elements["osm-generate"], cancel: elements["osm-cancel"], status: elements["osm-generation"], label: "City Worldを生成" },
+  };
 
   const generatedRectangle = L.rectangle([[0, 0], [0, 0]], {
     color: "#e06b23", weight: 5, opacity: 0, fill: false, dashArray: "10 7", interactive: false,
@@ -166,6 +172,7 @@ export function plateauMode(page) {
   function refresh(valid = page.selectionIsValid()) {
     elements.inspect.disabled = !valid || inspecting || generating;
     elements.generate.disabled = !valid || inspecting || generating || lastAvailable === null;
+    elements["osm-generate"].disabled = !valid || generating;
   }
 
   function invalidateInspection() {
@@ -281,87 +288,109 @@ export function plateauMode(page) {
     if (page.exportDir) await exportWorld({ path: build, title: id });
   }
 
-  async function follow(id) {
+  function saveRunning(value) {
+    try {
+      if (value) localStorage.setItem(BUILD_KEY, JSON.stringify(value));
+      else localStorage.removeItem(BUILD_KEY);
+    } catch { /* storage unavailable */ }
+  }
+
+  function loadRunning() {
+    try {
+      const saved = localStorage.getItem(BUILD_KEY);
+      if (!saved) return null;
+      try { return JSON.parse(saved); } catch { return { id: saved, mode: "plateau" }; }  // saved before modes
+    } catch { return null; }
+  }
+
+  async function follow(id, mode) {
+    const ui = controls[mode] ?? controls.plateau;
     generating = true;
     refresh();
-    elements.generate.textContent = "生成中…";
-    elements.cancel.disabled = false;
-    elements.generation.className = "generation running";
-    try { localStorage.setItem(BUILD_KEY, id); } catch { /* storage unavailable */ }
+    ui.generate.textContent = "生成中…";
+    ui.cancel.disabled = false;
+    ui.status.className = "generation running";
+    saveRunning({ id, mode });
     try {
       for (;;) {
         const status = await api("GET", `city-worlds/build/${encodeURIComponent(id)}`);
         if (status.state === "running") {
-          if (!canceling) elements.generation.textContent = progressText(status.progress);
+          if (!canceling) ui.status.textContent = progressText(status.progress);
           await new Promise((resolve) => setTimeout(resolve, 2000));
           continue;
         }
         writeLog({ type: "BUILD_FINISHED", status: { ...status, log_tail: undefined } });
         if (status.state === "done") {
-          elements.generation.className = "generation ready";
-          elements.generation.textContent = `Generate成功 — ${id}`;
+          ui.status.className = "generation ready";
+          ui.status.textContent = `Generate成功 — ${id}`;
           await afterGenerated(id, status.build);
           await refreshGeneratedJobs(id);
         } else if (status.state === "canceled") {
-          elements.generation.className = "generation canceled";
-          elements.generation.textContent = "Generateをキャンセルしました。";
+          ui.status.className = "generation canceled";
+          ui.status.textContent = "Generateをキャンセルしました。";
         } else {
-          elements.generation.className = "generation failed";
+          ui.status.className = "generation failed";
           const lines = status.errors.length ? status.errors : status.log_tail.slice(-5);
-          elements.generation.replaceChildren(el("div", {}, `Generate失敗 — ${id}（ログ：${status.log}）`),
+          ui.status.replaceChildren(el("div", {}, `Generate失敗 — ${id}（ログ：${status.log}）`),
             ...lines.map((line) => el("div", {}, line)));
         }
         break;
       }
     } catch (error) {
-      elements.generation.className = "generation failed";
-      elements.generation.textContent = `Generateの状態を取得できません — ${error.message}`;
+      ui.status.className = "generation failed";
+      ui.status.textContent = `Generateの状態を取得できません — ${error.message}`;
     } finally {
-      try { localStorage.removeItem(BUILD_KEY); } catch { /* storage unavailable */ }
+      saveRunning(null);
       generating = false;
       canceling = false;
-      elements.cancel.disabled = true;
-      elements.cancel.textContent = "生成をキャンセル";
-      elements.generate.textContent = "3. City Worldを生成";
+      ui.cancel.disabled = true;
+      ui.cancel.textContent = "生成をキャンセル";
+      ui.generate.textContent = ui.label;
       refresh();
     }
   }
 
-  async function generateWorld() {
-    if (generating || lastAvailable === null) return;
-    // The Web UI's id (the municipality and the centre): the same place generated again replaces it.
-    const id = lastAvailable.jobId;
-    elements.generation.className = "generation running";
-    elements.generation.textContent = "Generateを送信しています";
+  // Start a generation (body: POST /api/city-worlds/build) and follow it.
+  async function generate(id, body, mode) {
+    if (generating) return;
+    const ui = controls[mode];
+    ui.status.className = "generation running";
+    ui.status.textContent = mode === "osm" ? "OpenStreetMap から地図データを取得しています…" : "Generateを送信しています";
+    ui.generate.disabled = true;
     try {
-      await call("POST", "city-worlds/build", {
-        id, name: id, ...lastAvailable.request, overwrite: true,
-      });
+      await call("POST", "city-worlds/build", { id, name: id, ...body, overwrite: true });
     } catch (error) {
-      elements.generation.className = "generation failed";
-      elements.generation.textContent = `Generate失敗 — ${error.message}`;
+      ui.status.className = "generation failed";
+      ui.status.textContent = `Generate失敗 — ${error.message}`;
+      refresh();
       return;
     }
-    await follow(id);
+    await follow(id, mode);
+  }
+
+  async function generateWorld() {
+    if (lastAvailable === null) return;
+    // The Web UI's id (the municipality and the centre): the same place generated again replaces it.
+    await generate(lastAvailable.jobId, { ...lastAvailable.request, source: "plateau" }, "plateau");
   }
 
   async function cancelGeneration() {
-    let id = null;
-    try { id = localStorage.getItem(BUILD_KEY); } catch { /* storage unavailable */ }
-    if (!generating || canceling || !id) return;
+    const running = loadRunning();
+    if (!generating || canceling || !running) return;
+    const ui = controls[running.mode] ?? controls.plateau;
     canceling = true;
-    elements.cancel.disabled = true;
-    elements.cancel.textContent = "キャンセル中…";
-    elements.generation.className = "generation running";
-    elements.generation.textContent = "生成処理を終了しています…";
+    ui.cancel.disabled = true;
+    ui.cancel.textContent = "キャンセル中…";
+    ui.status.className = "generation running";
+    ui.status.textContent = "生成処理を終了しています…";
     try {
-      await call("POST", `city-worlds/build/${encodeURIComponent(id)}/cancel`, {});
+      await call("POST", `city-worlds/build/${encodeURIComponent(running.id)}/cancel`, {});
     } catch (error) {
       canceling = false;
-      elements.cancel.disabled = false;
-      elements.cancel.textContent = "生成をキャンセル";
-      elements.generation.className = "generation failed";
-      elements.generation.textContent = `キャンセル要求の送信に失敗しました。生成処理は継続しています — ${error.message}`;
+      ui.cancel.disabled = false;
+      ui.cancel.textContent = "生成をキャンセル";
+      ui.status.className = "generation failed";
+      ui.status.textContent = `キャンセル要求の送信に失敗しました。生成処理は継続しています — ${error.message}`;
     }
   }
 
@@ -421,6 +450,7 @@ export function plateauMode(page) {
     elements["artifact-detail"].textContent = job === null
       ? "Physics Level: — / Collider: —"
       : [
+        `Source: ${job.source === "osm" ? "OpenStreetMap（地面は標高0 mの平面）" : "PLATEAU"}`,
         `Physics Level: ${job.building_physics_level ?? "不明"}`,
         `Collider reduction: ${job.building_collider_reduction ?? "safe"}`,
         `Collider total: ${job.colliders?.total ?? "不明"} geoms`,
@@ -450,7 +480,7 @@ export function plateauMode(page) {
       } else {
         for (const job of generatedJobs) {
           elements["artifact-select"].append(new Option(job.selection
-            ? `${job.job_id} — ${job.selection.half_extent_m.east_west * 2}m × ${job.selection.half_extent_m.north_south * 2}m — ${formatBytes(job.size_bytes)}`
+            ? `${job.job_id} — ${job.source === "osm" ? "OSM" : "PLATEAU"} — ${job.selection.half_extent_m.east_west * 2}m × ${job.selection.half_extent_m.north_south * 2}m — ${formatBytes(job.size_bytes)}`
             : `${job.job_id} — ${formatBytes(job.size_bytes)}`, job.job_id));
         }
         elements["artifact-select"].disabled = false;
@@ -495,12 +525,12 @@ export function plateauMode(page) {
       await call("POST", `city-worlds/jobs/${encodeURIComponent(job.job_id)}/delete`, {});
       closeViewerForJob(job.job_id);
       generatedRectangle.setStyle({ opacity: 0 });
-      elements.generation.className = "generation ready";
-      elements.generation.textContent = `サーバー上のjobを削除しました — ${job.job_id}（共有CityGMLキャッシュは保持）`;
+      elements["artifact-status"].className = "generation ready";
+      elements["artifact-status"].textContent = `サーバー上のjobを削除しました — ${job.job_id}（共有CityGMLキャッシュは保持）`;
       await refreshGeneratedJobs(null, { restoreSelection: false });
     } catch (error) {
-      elements.generation.className = "generation failed";
-      elements.generation.textContent = `生成結果の削除に失敗しました — ${error.message}`;
+      elements["artifact-status"].className = "generation failed";
+      elements["artifact-status"].textContent = `生成結果の削除に失敗しました — ${error.message}`;
       updateArtifactSelection();
     }
   }
@@ -661,6 +691,7 @@ export function plateauMode(page) {
   elements.inspect.addEventListener("click", inspectSelection);
   elements.generate.addEventListener("click", generateWorld);
   elements.cancel.addEventListener("click", cancelGeneration);
+  elements["osm-cancel"].addEventListener("click", cancelGeneration);
   elements["to-osm"].addEventListener("click", () => page.toOsm());
   elements["artifact-select"].addEventListener("change", () => updateArtifactSelection({ restoreSelection: true }));
   elements["viewer-visual"].addEventListener("change", (event) => changeViewerLayer(event.target));
@@ -674,18 +705,17 @@ export function plateauMode(page) {
   elements["export-artifact"].addEventListener("click", exportSelected);
   elements["import-artifact"].addEventListener("click", () => {
     const job = selectedGeneratedJob();
-    if (job !== null) page.importWorld({ path: job.build, title: job.job_id });
+    if (job !== null) page.importWorld({ id: job.job_id, path: job.build, title: job.job_id });
   });
 
   refreshGeneratedJobs(null, { restoreSelection: false });
-  try {  // a generation started before this page was opened again
-    const running = localStorage.getItem(BUILD_KEY);
-    if (running) follow(running);
-  } catch { /* storage unavailable */ }
+  const running = loadRunning();  // a generation started before this page was opened again
+  if (running) follow(running.id, running.mode);
 
   return {
     // The selection moved: a diagnosis is for the selection it was made for.
     selectionChanged(valid) { invalidateInspection(); refresh(valid); },
     inspect: inspectSelection,
+    generate,
   };
 }

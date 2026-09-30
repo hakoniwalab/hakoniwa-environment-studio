@@ -87,8 +87,33 @@
           <div id="generation" class="generation"></div>
         </section>
 
+      </div>
+
+      <div id="mode-osm" hidden>
+        <section class="panel">
+          <h2>OpenStreetMap から作る</h2>
+          <div class="grid">
+            <label class="full" title="範囲の中心から自動で付きます。書き換えることもできます（小文字・数字・- _）。消すと自動に戻ります。">ID<input id="recipe-id" autocomplete="off"></label>
+            <label class="full">地図データ
+              <select id="source">
+                <option value="overpass">OpenStreetMap（Overpass API で取得）</option>
+                <option value="geojson">GeoJSON ファイル</option>
+              </select>
+            </label>
+            <label class="full" id="geojson-field" hidden>GeoJSON<input id="geojson" type="file" accept=".geojson,.json,application/geo+json"></label>
+          </div>
+          <p class="hint">建物は外形と高さ（無ければ階数、それも無ければ種類ごとの既定値）、道路は中心線・幅・車線数（無ければ道路の種類ごとの既定値）で作り、hakoniwa-envsim で PLATEAU と同じ City World（見た目・当たり判定）にします。地面は標高0 mの平面です。</p>
+          <button id="osm-generate" class="wide" type="button">City Worldを生成</button>
+          <button id="osm-cancel" class="wide" type="button" disabled>生成をキャンセル</button>
+          <div id="osm-generation" class="generation"></div>
+          <button id="to-plateau" class="secondary wide" type="button">この範囲が PLATEAU にあるか確かめる</button>
+        </section>
+      </div>
+
+      <div id="city-worlds">
         <section class="panel artifact-controls">
-          <label>生成結果<select id="artifact-select" disabled><option>生成結果はありません</option></select></label>
+          <h2>生成結果</h2>
+          <label><select id="artifact-select" aria-label="生成結果" disabled><option>生成結果はありません</option></select></label>
           <div id="artifact-path" class="mono">—</div>
           <div id="artifact-detail">Physics Level: — / Collider: —</div>
           <div id="cache-info" class="mono">共有キャッシュ: —</div>
@@ -104,31 +129,13 @@
             <button id="import-artifact" class="secondary" type="button" disabled title="この City World を、Studio で編集できる部品にします">部品として取り込む</button>
             <button id="delete-artifact" type="button" disabled>生成結果を削除</button>
           </div>
+          <div id="artifact-status" class="generation"></div>
         </section>
 
         <details class="panel">
           <summary>通信ログ</summary>
           <pre id="log"></pre>
         </details>
-      </div>
-
-      <div id="mode-osm" hidden>
-        <section class="panel">
-          <h2>OpenStreetMap から作る</h2>
-          <label class="field" title="範囲の中心から自動で付きます。書き換えることもできます（小文字・数字・- _）。消すと自動に戻ります。">ID<input id="recipe-id" autocomplete="off"></label>
-          <label class="field">名前（省略可）<input id="recipe-name" placeholder="東京駅周辺" autocomplete="off"></label>
-          <label class="field">地面<select id="terrain"></select></label>
-          <label class="field">地図データ
-            <select id="source">
-              <option value="overpass">OpenStreetMap（Overpass API で取得）</option>
-              <option value="geojson">GeoJSON ファイル</option>
-            </select>
-          </label>
-          <label class="field" id="geojson-field" hidden>GeoJSON<input id="geojson" type="file" accept=".geojson,.json,application/geo+json"></label>
-          <button id="import">この範囲を取り込む</button>
-          <p class="hint">建物は外形と高さ（無ければ階数、それも無ければ種類ごとの既定値）、道路は中心線・幅・車線数（無ければ道路の種類ごとの既定値）で作ります。取り込み後は Studio で普通の部品として編集し、「書き出す」で書き出します。</p>
-          <button id="to-plateau" class="secondary">この範囲が PLATEAU にあるか確かめる</button>
-        </section>
       </div>
 
       <section class="panel">
@@ -141,11 +148,6 @@
         <ul id="world-list" class="list"></ul>
       </section>
 
-      <section class="panel" id="result" hidden>
-        <h2>取り込み結果</h2>
-        <div id="report"></div>
-        <a id="open" class="button">Studio で開く</a>
-      </section>
     </aside>
 
     <section class="panel map-panel">

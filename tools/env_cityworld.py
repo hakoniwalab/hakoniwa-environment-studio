@@ -88,21 +88,33 @@ def build_options(given: object) -> dict:
 
 
 def build_config(job: Path, center: tuple[float, float], half: tuple[float, float], cache: Path,
-                 options: dict | None = None) -> str:
+                 options: dict | None = None, files: Path | None = None) -> str:
     """The Envsim build of a selection, as the business pack's City World
     Web UI makes it (profile visual-physics-v1), with the chosen conditions.
     terrain_uncovered_policy constant makes the ground flat at 0 m where there
-    is no DEM (a whole area without DEM gets a flat ground)."""
+    is no DEM (a whole area without DEM gets a flat ground).
+
+    `files`: local CityGML (OpenStreetMap through osm2citygml.py) instead of
+    PLATEAU: buildings and roads, no DEM (the ground is flat at 0 m), no road
+    markings or bridges (Envsim's source.kind files)."""
     lat, lon = center
     ns, ew = half
     options = build_options(options)
-    return f"""version: 1
-component: hakoniwa-envsim
-
-pipeline:
-  type: plateau-citygml-to-assets
-
-source:
+    if files is not None:
+        options["terrain_uncovered_policy"] = "constant"
+        source = f"""source:
+  kind: files
+  path: {files.as_posix()}
+  feature_type: bldg
+  feature_types:
+    bldg: true
+    tran: true
+    dem: false
+    frn: false
+    brid: false
+"""
+    else:
+        source = f"""source:
   api_base_url: https://api.plateauview.mlit.go.jp
   cache_dir: {cache.as_posix()}
   feature_type: bldg
@@ -113,7 +125,14 @@ source:
     frn: true
     brid: true
   year: latest
+"""
+    return f"""version: 1
+component: hakoniwa-envsim
 
+pipeline:
+  type: plateau-citygml-to-assets
+
+{source}
 selection:
   center:
     latitude: {lat:.9f}
@@ -283,6 +302,37 @@ def build_progress(lines: list[str]) -> dict:
     return progress
 
 
+SOURCES = ("plateau", "osm")
+
+
+def osm_citygml(folder: Path, center: tuple[float, float], half: tuple[float, float], body: dict) -> tuple[Path, dict]:
+    """The selection's OpenStreetMap buildings and roads (Overpass, or the
+    GeoJSON given as body.geojson) as CityGML in `folder`, by hakoniwa-envsim's
+    osm2citygml.py, with the map data kept beside it. Returns the folder and
+    what the data was."""
+    osm = env_envsim.osm2citygml()
+    geojson = body.get("geojson") if body.get("map_data") == "geojson" else None
+    if body.get("map_data") == "geojson" and not isinstance(geojson, dict):
+        raise BuildError("map_data geojson needs the GeoJSON (geojson)")
+    try:
+        box = osm.Box.of(*env_envsim.bounding_box(center, half))
+        data = geojson if geojson is not None else osm.fetch_overpass(box)
+        receipt = osm.run(box, folder, "map", overpass=geojson is None, osm_json=None if geojson else data,
+                          geojson=geojson)
+    except osm.OsmConversionError as exc:
+        raise BuildError(f"OpenStreetMap から作れません: {exc}", 502 if geojson is None else 400) from exc
+    except OSError as exc:  # Overpass did not answer
+        raise BuildError(f"OpenStreetMap（Overpass API）から取得できません: {exc}", 502) from exc
+    if not receipt.get("roads"):  # Envsim's City World needs roads (source.kind files: bldg and tran)
+        raise BuildError("この範囲には、City World に使える道路がありません（OpenStreetMap の歩道・階段・トンネルは"
+                         "道路にしません）。車道が入るように範囲を広げるか、動かしてください。")
+    (folder / "map.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return folder, {"provider": "geojson" if geojson is not None else "openstreetmap",
+                    "data_timestamp": receipt.get("data_timestamp"),
+                    "buildings": receipt.get("buildings"), "roads": receipt.get("roads"),
+                    **{key: receipt[key] for key in ("attribution", "license") if receipt.get(key)}}
+
+
 class Builds:
     """The City World builds this Studio started (one runs at a time)."""
 
@@ -304,6 +354,11 @@ class Builds:
             raise BuildError(f"{job_id!r} is not an id (lower case letters, digits, - and _)")
         center, half = _selection(body)
         options = build_options(body.get("options"))
+        source = body.get("source") or "plateau"
+        if source not in SOURCES:
+            raise BuildError(f"source must be one of {', '.join(SOURCES)} (got {source!r})")
+        if source == "osm" and body.get("offline"):
+            raise BuildError("an OpenStreetMap City World is not rebuilt offline (generate it again)")
         with self.lock:
             other = self.running()
             if other is not None:
@@ -320,12 +375,22 @@ class Builds:
                 shutil.rmtree(job)
             job.mkdir(parents=True, exist_ok=True)
             cache = plateau_cache(roots)
+            files = map_data = None
+            if source == "osm":
+                try:
+                    files, map_data = osm_citygml(job / "osm", center, half, body)
+                except BuildError:
+                    shutil.rmtree(job, ignore_errors=True)  # nothing of it is left half made
+                    raise
+                options["terrain_uncovered_policy"] = "constant"
             config = job / "hakoniwa-envsim-build.yaml"
-            config.write_text(build_config(job, center, half, cache, options), encoding="utf-8")
+            config.write_text(build_config(job, center, half, cache, options, files), encoding="utf-8")
             (job / "job.json").write_text(json.dumps({
                 "schema_version": 1, "job_id": job_id, "name": body.get("name") or job_id,
-                "request": {"selection": body["selection"], "profile": "visual-physics-v1",
-                            "options": options, "offline": bool(body.get("offline"))},
+                "request": {"selection": body["selection"], "source": source,
+                            "profile": "visual-physics-v1" if source == "plateau" else "osm-flat-ground",
+                            "options": options, "offline": bool(body.get("offline")),
+                            **({"map_data": map_data} if map_data else {})},
                 "created_by": "hakoniwa-environment-studio",
             }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             log = job / "generation.log"
@@ -508,6 +573,7 @@ def list_jobs() -> list[dict]:
         artifact = artifact_path(job)
         jobs.append({
             "job_id": job.name, "path": str(job), "build": str(job / "build"),
+            "source": request.get("source") or "plateau",
             "selection": request.get("selection"),
             "building_physics_level": options.get("building_physics_level"),
             "building_collider_reduction": options.get("building_collider_reduction"),

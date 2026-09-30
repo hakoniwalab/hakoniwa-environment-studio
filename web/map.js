@@ -1,11 +1,10 @@
-// Map import (#10): pick an area on a Leaflet map and have the Studio server
-// make a Recipe of its buildings and roads (POST /api/map/import). Leaflet
-// only shows the map and the area; the data comes from Overpass (through the
-// server) or a GeoJSON file; the server turns it into CityGML (hakoniwa-envsim
-// osm2citygml.py) and that into parts (tools/env_citygml.py).
+// The map page (#10): pick an area on a Leaflet map and make a City World of
+// it with hakoniwa-envsim, from PLATEAU or from OpenStreetMap (cityworlds.js:
+// generate, look at it in 3D, write it to the export folder). Taking a City
+// World in as parts goes on in Studio.
 
 import { $, api, el } from "./dom.js";
-import { plateauMode } from "./plateau.js";
+import { cityWorlds } from "./cityworlds.js";
 
 const DEFAULT_CENTER = [35.6809, 139.7667]; // Tokyo Station
 const DEFAULT_ZOOM = 17;
@@ -251,43 +250,19 @@ async function removeExport(build, then = null) {
   if (then) await then();
 }
 
+// A City World taken in as parts (POST /api/city-worlds/import), then opened in Studio to edit.
 async function importWorld(build, given = null) {
-  const id = given || window.prompt("作る環境の ID（小文字・数字・- _）", build.id);
+  const id = given || window.prompt("作る環境の ID（小文字・数字・- _）", build.id ?? build.title);
   if (!id) return;
   setStatus(`${build.title} を部品にしています…`);
   try {
     const result = await api("POST", "city-worlds/import", { id, path: build.path, name: build.title });
-    const items = [
-      `大きさ ${result.size_m.east} m × ${result.size_m.north} m（${result.provider}、地面：${result.terrain === "dem" ? "City World の地形（DEM）" : "平ら"}）`,
-      `建物 ${result.buildings}（LOD2 の見た目付き ${result.lod2_visuals ?? 0}）、道路 ${result.roads}`,
-      ...(result.passthrough ? [`envsim の原本をそのまま使用：当たり判定 ${result.passthrough.colliders} 棟、`
-        + `${result.passthrough.terrain ? "地形、" : ""}層 ${result.passthrough.layers.join("・") || "なし"}`] : []),
-      ...(result.courtyards ? [`中庭（穴） ${result.courtyards}`] : []),
-      ...(result.courtyards_filled ? [`小さい・形の崩れた中庭を埋めた数 ${result.courtyards_filled}`] : []),
-      ...(result.clipped ? [`元データで重なっていた外形を切り取った建物 ${result.clipped}`] : []),
-      ...(result.overlaps_left?.length ? [`切り取れずに残った重なり ${result.overlaps_left.length} 組（検証で確認してください）`] : []),
-      ...result.notes.filter((note) => !note.includes("were clipped")),
-    ];
-    $("#report").replaceChildren(el("ul", {}, ...items.map((item) => el("li", {}, item))));
-    $("#open").href = `./?recipe=${encodeURIComponent(result.id)}`;
-    $("#result").hidden = false;
-    setStatus(`${result.id} を作りました（${result.path}）`, "ok");
+    window.location.assign(`./?recipe=${encodeURIComponent(result.id)}`);
   } catch (error) {
     setStatus(error.message, "error");
   }
 }
 
-function report(result) {
-  const assumed = result.assumed;
-  const items = [
-    `大きさ ${result.size_m.east} m × ${result.size_m.north} m`,
-    `建物 ${result.buildings}（高さを既定値で補った ${assumed.building_height}）`,
-    `道路 ${result.roads}（幅を既定値で補った ${assumed.road_width}、車線数 ${assumed.road_lanes}）`,
-  ];
-  if (result.skipped.length) items.push(`取り込まなかった ${result.skipped.length}（範囲外・小さすぎる・形が不完全）`);
-  for (const note of result.notes) items.push(note);
-  return el("ul", {}, ...items.map((item) => el("li", {}, item)));
-}
 
 // PLATEAU or OpenStreetMap: the same selection, two ways to make the area.
 // PLATEAU covers the cities it has modelled (LOD2 buildings, DEM terrain, road
@@ -295,7 +270,7 @@ function report(result) {
 const MODE_KEY = "hakoniwa-environment-map-mode";
 const MODE_HINTS = {
   plateau: "PLATEAU：整備された都市だけですが、LOD2 の建物（テクスチャ付き）・建物ごとの当たり判定・地形（DEM）・道路面まであります。まず「2. Capabilityを診断」でデータがあるか確かめてください。",
-  osm: "OpenStreetMap：世界中どこでも使えます。建物は外形を押し出した箱（高さは推定を含む）、地面は平らです。取り込んだ建物や道路は部品として編集できます。",
+  osm: "OpenStreetMap：世界中どこでも使えます。建物は外形を押し出した箱（高さは推定を含む）、地面は平らです。できた City World は PLATEAU と同じく「生成結果」で 3D で確かめられます。",
 };
 function setMode(mode) {
   for (const button of document.querySelectorAll("#source-mode button")) {
@@ -317,8 +292,7 @@ async function init() {
   const map = L.map("map", { maxZoom: 20 }).setView([saved.latitude, saved.longitude], DEFAULT_ZOOM);
   L.tileLayer(config.tiles.url, { maxZoom: 20, maxNativeZoom: 19, attribution: config.tiles.attribution }).addTo(map);
   L.control.scale().addTo(map);
-  let importing = false;
-  let plateau = null;
+  let worlds = null;
   // OpenStreetMap: a default id from the centre (as PLATEAU's, without a
   // municipality), following the selection until it is typed over.
   let osmIdTyped = false;
@@ -328,15 +302,13 @@ async function init() {
     osmIdTyped = $("#recipe-id").value.trim() !== "";
   });
   const controls = selectionControls(map, (valid) => {
-    $("#import").disabled = importing || !valid;
     if (valid && !osmIdTyped) $("#recipe-id").value = defaultOsmId();
-    plateau?.selectionChanged(valid);
+    worlds?.selectionChanged(valid);
   });
   map.fitBounds(selectionBounds().pad(0.35), { maxZoom: 19 });
-  const update = () => controls.refresh();
 
-  // PLATEAU: the City World Web UI (plateau.js) over the same selection.
-  plateau = plateauMode({
+  // City Worlds: the City World Web UI (cityworlds.js) over the same selection.
+  worlds = cityWorlds({
     map, exportDir: config.export_dir, selection, selectionIsValid, selectionBounds, setStatus, importWorld,
     applySelection(given) {
       $("#latitude").value = Number(given.center.latitude).toFixed(6);
@@ -347,7 +319,7 @@ async function init() {
     },
     toOsm: () => setMode("osm"),
   });
-  plateau.selectionChanged(selectionIsValid());
+  worlds.selectionChanged(selectionIsValid());
 
   $("#source").addEventListener("change", () => { $("#geojson-field").hidden = $("#source").value !== "geojson"; });
 
@@ -358,30 +330,22 @@ async function init() {
     button.addEventListener("click", () => setMode(button.dataset.mode));
   }
   // The same selection in the other source: from OSM to a PLATEAU diagnosis.
-  $("#to-plateau").addEventListener("click", () => { setMode("plateau"); plateau.inspect(); });
+  $("#to-plateau").addEventListener("click", () => { setMode("plateau"); worlds.inspect(); });
 
-  const worlds = L.layerGroup().addTo(map);
+  const workspaceWorlds = L.layerGroup().addTo(map);
   try { $("#world-root").value = localStorage.getItem(ROOT_KEY) || ""; } catch { /* storage unavailable */ }
-  $("#world-search").addEventListener("click", () => searchWorlds(map, worlds));
-  searchWorlds(map, worlds);
+  $("#world-search").addEventListener("click", () => searchWorlds(map, workspaceWorlds));
+  searchWorlds(map, workspaceWorlds);
 
-  // Only grounds that need no data of their own (map data brings no terrain).
-  $("#terrain").replaceChildren(...config.terrains
-    .map((item) => el("option", { value: item.id, selected: item.id === "city-ground" }, item.name)));
-
-  $("#import").addEventListener("click", async () => {
+  // OpenStreetMap: a City World of the selection's map data, generated like PLATEAU's.
+  $("#osm-generate").addEventListener("click", async () => {
     const id = $("#recipe-id").value.trim();
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) {
       setStatus("ID は小文字・数字・- _ で付けてください", "error");
       return;
     }
-    if (!selectionIsValid()) {
-      setStatus("範囲の値を確認してください", "error");
-      return;
-    }
-    const body = { id, name: $("#recipe-name").value.trim(), selection: selection(), terrain: $("#terrain").value,
-      source: $("#source").value };
-    if (body.source === "geojson") {
+    const body = { selection: selection(), source: "osm", map_data: $("#source").value };
+    if (body.map_data === "geojson") {
       const file = $("#geojson").files[0];
       if (!file) { setStatus("GeoJSON ファイルを選んでください", "error"); return; }
       try { body.geojson = JSON.parse(await file.text()); } catch (error) {
@@ -389,21 +353,7 @@ async function init() {
         return;
       }
     }
-    importing = true;
-    $("#import").disabled = true;
-    setStatus(body.source === "overpass" ? "OpenStreetMap から取得して作っています…" : "作っています…");
-    try {
-      const result = await api("POST", "map/import", body);
-      $("#report").replaceChildren(report(result));
-      $("#open").href = `./?recipe=${encodeURIComponent(result.id)}`;
-      $("#result").hidden = false;
-      setStatus(`${result.id} を作りました（${result.path}）`, "ok");
-    } catch (error) {
-      setStatus(error.message, "error");
-    } finally {
-      importing = false;
-      update();
-    }
+    await worlds.generate(id, body, "osm");
   });
 }
 

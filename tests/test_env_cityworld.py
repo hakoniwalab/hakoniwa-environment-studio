@@ -189,6 +189,62 @@ class CityWorldBuildTest(unittest.TestCase):
         self.assertIn("共有キャッシュを再利用しました（1/2）", progress["message"])
         self.assertEqual(env_cityworld.build_progress([])["percent"], 10)
 
+    def test_an_openstreetmap_city_world_is_built_from_its_map_data_on_flat_ground(self):
+        class FakeOsm:
+            class OsmConversionError(Exception):
+                pass
+
+            class Box:
+                @staticmethod
+                def of(south, west, north, east):
+                    return (south, west, north, east)
+
+            fetched = []
+
+            @classmethod
+            def fetch_overpass(cls, box):
+                cls.fetched.append(box)
+                return {"elements": [], "osm3s": {"timestamp_osm_base": "2026-10-01T00:00:00Z"}}
+
+            @staticmethod
+            def run(box, out_dir, name, overpass=False, osm_json=None, geojson=None):
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / f"{name}_bldg_op.gml").write_text("<gml/>", encoding="utf-8")
+                return {"buildings": 3, "roads": 2, "data_timestamp": "2026-10-01T00:00:00Z",
+                        "attribution": "© OpenStreetMap contributors", "license": "ODbL-1.0"}
+
+        with mock.patch.object(env_cityworld.env_envsim, "osm2citygml", lambda: FakeOsm), \
+                mock.patch.object(env_cityworld.env_envsim, "bounding_box", lambda center, half: (0, 0, 1, 1)):
+            status = self.wait(self.builds.start({"id": "osm-block", "selection": SELECTION, "source": "osm",
+                                                  "map_data": "overpass"}, [])["id"])
+        self.assertEqual(status["state"], "done")
+        job = self.dir / "work/city-worlds/osm-block"
+        config = (job / "hakoniwa-envsim-build.yaml").read_text(encoding="utf-8")
+        # Envsim reads the converted files (no PLATEAU), without DEM: the ground is flat at 0 m.
+        self.assertIn(f"kind: files\n  path: {(job / 'osm').as_posix()}", config)
+        self.assertIn("dem: false", config)
+        self.assertIn("terrain_uncovered_policy: constant", config)
+        self.assertNotIn("api_base_url", config)
+        self.assertEqual(len(FakeOsm.fetched), 1)
+        self.assertTrue((job / "osm/map.json").is_file())
+        request = json.loads((job / "job.json").read_text(encoding="utf-8"))["request"]
+        self.assertEqual((request["source"], request["map_data"]["license"], request["map_data"]["buildings"]),
+                         ("osm", "ODbL-1.0", 3))
+        with mock.patch.object(env_cityworld, "BUILDS", self.builds):
+            self.assertEqual([item["source"] for item in env_cityworld.list_jobs()], ["osm"])
+        # An area without roads is refused before anything is built (Envsim's City World needs them).
+        FakeOsm.run = staticmethod(lambda box, out_dir, name, **kw: (out_dir.mkdir(parents=True), {"buildings": 3, "roads": 0})[1])
+        with mock.patch.object(env_cityworld.env_envsim, "osm2citygml", lambda: FakeOsm), \
+                mock.patch.object(env_cityworld.env_envsim, "bounding_box", lambda center, half: (0, 0, 1, 1)), \
+                self.assertRaisesRegex(env_cityworld.BuildError, "道路がありません"):
+            self.builds.start({"id": "no-roads", "selection": SELECTION, "source": "osm", "map_data": "overpass"}, [])
+        self.assertFalse((self.dir / "work/city-worlds/no-roads").exists())
+        # Not rebuilt offline; an unknown source is refused.
+        for body in ({"id": "x", "selection": SELECTION, "source": "osm", "offline": True},
+                     {"id": "x", "selection": SELECTION, "source": "mars"}):
+            with self.assertRaises(env_cityworld.BuildError):
+                self.builds.start(body, [])
+
     def test_bad_requests_are_refused(self):
         for body, words in (({"id": "Bad Id", "selection": SELECTION}, "not an id"),
                             ({"id": "x", "selection": {"center": {}}}, "selection must be"),

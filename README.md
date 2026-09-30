@@ -241,14 +241,16 @@ Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘�
 | 地形・道路 | 地形（DEM）、道路面、路面標示 | 平らな地面、道路の線から作った面 |
 
 - **PLATEAU：** Business Pack の City World Web UI と同じ画面です。生成条件（Building Physics Level、DEM 未被覆領域、Collider 削減）を選び、「2. Capabilityを診断」で範囲に PLATEAU のどのデータがあるか（Building・Terrain・Road・Road markings・Bridge の有無と最大 LOD、自治体、診断した 3 次メッシュを地図に表示）を公式のカタログに問い合わせます（ダウンロードはしません）。「3. City Worldを生成」で hakoniwa-envsim に作らせ、進捗（段階と %）を表示し、キャンセルもできます。「生成結果」で作った City World を選ぶと、範囲を地図にオレンジの破線で示し、Collider の内訳を表示します。3D Viewer で Visual と Collider を重ねて見られ、ZIP の取得と削除もできます。Studio では、書き出し先への書き出しと部品としての取り込みもできます。データがなければ「この範囲を OpenStreetMap で作る」で切り替えられます。DEM がまったく無い範囲は、DEM 未被覆領域を「標高0 mで補完」にすれば平らな地面で作れます。
-- **OpenStreetMap：** 範囲の建物と道路を取り込んで部品にします。「この範囲が PLATEAU にあるか確かめる」で、PLATEAU に切り替えて同じ範囲を診断します。
+- **OpenStreetMap：** 範囲の建物と道路から、PLATEAU と同じ仕組みで City World を生成します（`<ws>/city-worlds/<ID>/`。地面は標高0 mの平面。ID は中心から自動で付き、書き換えられます）。できたものは PLATEAU の City World と同じ「生成結果」に並び、3D Viewer・書き出し・部品として取り込む、が同じようにできます。City World には車道が要るので、車道のない範囲（歩道だけなど）は作れません。「この範囲が PLATEAU にあるか確かめる」で、PLATEAU に切り替えて同じ範囲を診断します。
+- **部品として取り込む：** 生成結果の「部品として取り込む」で、City World を Studio で編集できる部品にし、そのまま Studio の画面に移ります。
 
 - **経路**：地図データは、街データの標準の中間表現である CityGML を経由します。
   1. hakoniwa-envsim の `osm2citygml.py` が、OpenStreetMap（Overpass API）か GeoJSON を CityGML LOD1 にします（変換規則は envsim の `docs/osm-to-citygml.md`）。
-  2. このリポジトリの部品変換ツール `tools/env_citygml.py` が、それを部品にします。
+  2. hakoniwa-envsim がその CityGML から City World を作ります（`source.kind: files`）。
+  3. 部品にするときは、このリポジトリの部品変換ツール `tools/env_citygml.py` が City World の建物・道路を部品にします。
 - **部品の単位**：建物 1 棟（CityGML の `bldg:Building`）＝ `building-footprint` の部品 1 つ。道路の面は `road-area` です。建物は切らずに丸ごと使い、はみ出す建物があれば環境のほうを広げます。
-- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。City World に地形（PLATEAU の DEM）があれば、それが地面になり、建物は移動先の地面の高さに合わせて立ちます。LOD2 のある建物は、PLATEAU のテクスチャ付きの見た目（建物ごとの GLB）で表示され、部品と一緒に動きます。envsim が作った地形（hfield と GLB）・建物ごとの当たり判定（P0〜P3）・道路網などの層は作り直さずにそのまま使うので、**取り込んで編集せずに出力すれば envsim の出力と同じ世界になります**（`tools/env_roundtrip.py` で照合。動かした部品は、その分だけ移して使います）。地図ページの「PLATEAU から City World を作る」では、選んだ範囲の City World を hakoniwa-envsim に作らせ（`<ws>/city-worlds/<ID>/`、ダウンロードした CityGML は共有キャッシュで使い回し）、終わったら選んだとおり書き出し先にそのまま書き出し、部品として取り込みます。ワークスペースの街の一覧からも「書き出す」「書き出しを消す」ができます（書き出し先を渡して起動したとき）。
-- **出典の記録**：部品は gml:id・元のファイル・OSM のタグを `source` に、Recipe は原点・範囲・出典（© OpenStreetMap contributors / ODbL、PLATEAU）を `geo` に持ちます。取得した地図データと CityGML は `<ws>/map-data/<id>/` に残ります。
+- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。City World に地形（PLATEAU の DEM）があれば、それが地面になり、建物は移動先の地面の高さに合わせて立ちます。LOD2 のある建物は、PLATEAU のテクスチャ付きの見た目（建物ごとの GLB）で表示され、部品と一緒に動きます。envsim が作った地形（hfield と GLB）・建物ごとの当たり判定（P0〜P3）・道路網などの層は作り直さずにそのまま使うので、**取り込んで編集せずに出力すれば envsim の出力と同じ世界になります**（`tools/env_roundtrip.py` で照合。動かした部品は、その分だけ移して使います）。地図ページで生成した City World（`<ws>/city-worlds/<ID>/`、ダウンロードした CityGML は共有キャッシュで使い回し）は、書き出し先を渡して起動したときはできあがると書き出し先に書き出します。ワークスペースの街の一覧からも「書き出す」「書き出しを消す」ができます（書き出し先を渡して起動したとき）。
+- **出典の記録**：部品は gml:id・元のファイル・OSM のタグを `source` に、Recipe は原点・範囲・出典（© OpenStreetMap contributors / ODbL、PLATEAU）を `geo` に持ちます。取得した地図データと CityGML は City World のフォルダ（`<ws>/city-worlds/<ID>/osm/`）に残ります。
 - **準備**：hakoniwa-envsim を使います。Quick start の `recipe.py configure` が、無ければ隣（`../hakoniwa-envsim`）に clone します（`HAKONIWA_ENVSIM_ROOT` で別の場所を指せます）。
 
 コマンドでも変換できます（`(hako)` シェルの `hakoniwa-business-pack` で）：
