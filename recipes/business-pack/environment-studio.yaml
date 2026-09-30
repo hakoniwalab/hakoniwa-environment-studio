@@ -213,6 +213,7 @@ data_flow:
   - PLATEAU selection -> envsim tools/hako.py (work/recipes/environment-studio/city-worlds) -> City World -> Recipe of parts
   - Recipe -> MuJoCo validation -> environment.glb / environment.xml
   - Recipe -> tools/env_urban.py -> City World job (work/recipes/environment-studio/urban) -> urban_assets.py register-city
+  - PLATEAU City World build (work/recipes/environment-studio/city-worlds) -> urban_assets.py register-city as it is (no Recipe in between); unregister-city removes it
 
 time_model:
   mode: wall-clock

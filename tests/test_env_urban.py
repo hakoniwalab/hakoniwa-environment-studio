@@ -135,6 +135,68 @@ class UrbanExportTest(unittest.TestCase):
         self.assertIn("job/build/world/city-world-receipt.json 車のテストコース", done["output"][-1])
 
 
+
+class CityWorldRegistrationTest(unittest.TestCase):
+    """An Envsim City World build registered in Urban as it is, unregistered,
+    and found in Urban's City list (a stand-in urban_assets.py)."""
+
+    FAKE_URBAN_ASSETS = """import json, sys
+args = sys.argv[1:]
+state = __file__ + ".json"
+try:
+    cities = json.load(open(state))
+except OSError:
+    cities = {}
+if args[0] == "register-city":
+    receipt = args[args.index("--receipt") + 1]
+    job = receipt.rsplit("/build/world/", 1)[0].rsplit("/", 1)[-1]
+    cities[job] = {"id": job, "kind": "city", "title": args[args.index("--title") + 1] if "--title" in args else job,
+                   "receipt": receipt}
+    print("Registered City Asset:", job)
+elif args[0] == "unregister-city":
+    cities.pop(args[args.index("--id") + 1])
+    print("Unregistered City Asset")
+elif args[0] == "list":
+    print(json.dumps(list(cities.values())))
+json.dump(cities, open(state, "w"))
+"""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name).resolve()
+        self.urban = self.dir / "hakoniwa-urban-mobility"
+        (self.urban / "tools").mkdir(parents=True)
+        (self.urban / "tools/urban_assets.py").write_text(self.FAKE_URBAN_ASSETS, encoding="utf-8")
+        patch = mock.patch.dict("os.environ", {"HAKONIWA_URBAN_MOBILITY_ROOT": str(self.urban)})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.build = self.dir / "city-worlds/sapporo/build"
+        (self.build / "world").mkdir(parents=True)
+        (self.build / "world/city-world-receipt.json").write_text("{}", encoding="utf-8")
+
+    def test_a_city_world_is_registered_as_it_is_and_unregistered(self):
+        with mock.patch.object(env_urban, "check", return_value=None):  # no city_world_job.py in the stand-in
+            result = env_urban.register_city_world(self.build, title="札幌", precompile=False)
+        self.assertTrue(result["register"]["ok"], result)
+        receipt = str(self.build / "world/city-world-receipt.json")
+        self.assertEqual(result["receipt"], receipt)
+        self.assertEqual(env_urban.urban_cities()[receipt]["id"], "sapporo")
+        self.assertEqual(env_urban.urban_cities()[receipt]["title"], "札幌")
+        self.assertTrue(env_urban.unregister("sapporo")["ok"])
+        self.assertEqual(env_urban.urban_cities(), {})
+
+    def test_a_job_that_breaks_urbans_contract_is_not_registered(self):
+        refused = {"ok": False, "problems": [{"severity": "error", "message": "no viewer"}]}
+        with mock.patch.object(env_urban, "check", return_value=refused):
+            result = env_urban.register_city_world(self.build, precompile=False)
+        self.assertFalse(result["register"]["ok"])
+        self.assertEqual(env_urban.urban_cities(), {})
+
+    def test_a_build_without_a_city_world_is_refused(self):
+        with self.assertRaisesRegex(env_urban.ExportError, "not a City World build"):
+            env_urban.register_city_world(self.dir / "city-worlds/none/build")
+
 @unittest.skipUnless(READY, "MuJoCo or trimesh is not installed")
 class UrbanExportOfACityWorldTest(unittest.TestCase):
     """An imported City World (Envsim's outputs passed through) exports as Envsim's world."""

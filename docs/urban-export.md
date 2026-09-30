@@ -34,6 +34,8 @@ Studio の Recipe workspace の `urban/<Recipe ID>/`（`$HAKONIWA_WORK_DIR/recip
 
 - **Studio の画面**：環境を保存してから、上の「urban-mobility へ」を押します。書き出し、urban のチェック、`register-city` までを行います。
 - **コマンド**：`tools/env_urban.py export <Recipe> [--out DIR] [--register] [--no-precompile]`
+- **PLATEAU の City World をそのまま登録**：地図ページの「ワークスペースの街」の「urban に登録」、または「PLATEAU から City World を作る」の「できあがったら urban-mobility にそのまま登録する」。envsim が作った City World のジョブは、そのまま urban の City World ジョブの形式なので、Recipe を経由せず・変換せずに `register-city` します（先に urban のチェックを通します）。City の ID はジョブのフォルダ名です。「urban の登録を外す」は `unregister-city` です（City World 自体は残ります）。どれが登録済みかは `urban_assets.py list --json` で調べます。
+- **役割の分担**：City を作る・編集する・urban に登録する（登録を外す）のは Environment Studio です。urban の Urban Studio は、登録済みの City を一覧して使うだけで、City タブの「Environment Studio で作る」からこの地図ページを開きます。
 - urban-mobility は、Studio の Business Pack Recipe の依存（`recipe_local_requirements`）として `recipe.py configure` が用意したものを使います（`$HAKONIWA_URBAN_MOBILITY_ROOT`、無ければ `../hakoniwa-urban-mobility`）。登録先は urban の決まりどおり、ビジネスパックの `work/urban/assets/cities/<ID>.asset.yaml` です。
 - 登録の解除は urban 側で `tools/urban_assets.py unregister-city --id <ID>` です。
 

@@ -507,7 +507,40 @@ def list_city_worlds(root: str | None) -> dict:
         builds = env_citygml.discover(roots)
     except DiagnosticError as exc:
         raise StudioError(str(exc)) from exc
-    return {"roots": [str(item) for item in roots], "builds": builds}
+    # Which of them are registered in Urban (a City Asset on this build's receipt).
+    urban_error = None
+    try:
+        registered = env_urban.urban_cities()
+    except (env_urban.ExportError, OSError, ValueError) as exc:
+        registered, urban_error = {}, str(exc)
+    for build in builds:
+        receipt = env_urban.city_world_receipt(Path(build["path"]))
+        found = registered.get(str(receipt.resolve())) if receipt.is_file() else None
+        build["urban"] = {"id": found["id"], "title": found["title"]} if found else None
+        build["urban_ready"] = receipt.is_file()
+    return {"roots": [str(item) for item in roots], "builds": builds, "urban_error": urban_error}
+
+
+def register_city_world(body: object) -> dict:
+    """Register an Envsim City World build in Urban as it is (env_urban.py).
+    Body: {path, title?}."""
+    if not isinstance(body, dict) or not body.get("path"):
+        raise StudioError("the request body must be {path, title?}")
+    build = Path(str(body["path"])).expanduser().resolve()
+    try:
+        result = env_urban.register_city_world(build, title=body.get("title") or None)
+    except env_urban.ExportError as exc:
+        raise StudioError(f"urban-mobility に登録できません: {exc}") from exc
+    except OSError as exc:
+        raise StudioError(f"urban-mobility に登録できません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
+    return {"id": build.parent.name, **result}
+
+
+def unregister_city(asset_id: str) -> dict:
+    """Remove a City from Urban (its City World job is kept)."""
+    if not ID_PATTERN.match(asset_id or ""):
+        raise StudioError(f"not a City id: {asset_id!r}")
+    return {"id": asset_id, **env_urban.unregister(asset_id)}
 
 
 def import_city_world(body: object) -> dict:
@@ -744,6 +777,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("POST", ("city-worlds", "build", "*", "cancel"), lambda self, parts: self._json(
             _built(lambda: env_cityworld.BUILDS.cancel(_check_id(parts[2]))))),
         ("POST", ("city-worlds", "import"), lambda self, _: self._json(import_city_world(self._body()))),
+        ("POST", ("city-worlds", "urban"), lambda self, _: self._json(register_city_world(self._body()))),
+        ("POST", ("urban", "cities", "*", "unregister"), lambda self, parts: self._json(unregister_city(parts[2]))),
         ("GET", ("recipes",), lambda self, _: self._json(list_recipes())),
         ("GET", ("recipes", "*"), lambda self, parts: self._json(read_recipe(parts[1]))),
         ("PUT", ("recipes", "*"), lambda self, parts: self._json(save_recipe(parts[1], self._body()))),

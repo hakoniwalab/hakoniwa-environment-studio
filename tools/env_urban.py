@@ -235,6 +235,49 @@ def register(receipt: Path, precompile: bool = True, title: str | None = None) -
     return {"ok": done.returncode == 0, "output": (done.stdout + done.stderr).strip().splitlines()[-20:]}
 
 
+def _urban_assets(*args: str) -> subprocess.CompletedProcess:
+    urban = urban_root()
+    return subprocess.run([sys.executable, str(urban / "tools/urban_assets.py"), *args], cwd=urban,
+                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+
+def urban_cities() -> dict[str, dict]:
+    """The Cities registered in Urban, by their resolved receipt path
+    (urban_assets.py list --json: id, title, receipt, ...)."""
+    done = _urban_assets("list", "--json")
+    if done.returncode:
+        detail = (done.stdout + done.stderr).strip().splitlines()
+        raise ExportError(f"Urban's City list is not available (urban_assets.py list --json): "
+                          f"{detail[-1] if detail else f'exit {done.returncode}'}")
+    return {entry["receipt"]: entry for entry in json.loads(done.stdout) if entry.get("kind") == "city"}
+
+
+def city_world_receipt(build: Path) -> Path:
+    """The receipt of an Envsim build (<job>/build) as an Urban City World job."""
+    return build / "world" / "city-world-receipt.json"
+
+
+def register_city_world(build: Path, title: str | None = None, precompile: bool = True) -> dict:
+    """Register an Envsim City World build as it is (no Recipe in between):
+    its job folder already follows Urban's City World job contract. The City
+    Asset id is the job folder's name."""
+    receipt = city_world_receipt(build.resolve())
+    if not receipt.is_file():
+        raise ExportError(f"not a City World build (no {receipt})")
+    result = {"receipt": str(receipt), "check": check(receipt)}
+    if result["check"] is not None and not result["check"]["ok"]:
+        result["register"] = {"ok": False, "output": ["the City World job does not follow urban's contract"]}
+    else:
+        result["register"] = register(receipt, precompile=precompile, title=title)
+    return result
+
+
+def unregister(asset_id: str) -> dict:
+    """Remove a City Asset from Urban (urban_assets.py unregister-city); its job is kept."""
+    done = _urban_assets("unregister-city", "--id", asset_id)
+    return {"ok": done.returncode == 0, "output": (done.stdout + done.stderr).strip().splitlines()[-20:]}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
