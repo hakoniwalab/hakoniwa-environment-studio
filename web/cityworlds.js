@@ -330,9 +330,15 @@ export function cityWorlds(page) {
           ui.status.textContent = "Generateをキャンセルしました。";
         } else {
           ui.status.className = "generation failed";
-          const lines = status.errors.length ? status.errors : status.log_tail.slice(-5);
-          ui.status.replaceChildren(el("div", {}, `Generate失敗 — ${id}（ログ：${status.log}）`),
-            ...lines.map((line) => el("div", {}, line)));
+          if (status.failure?.code === "DEM_UNCOVERED") {
+            ui.status.replaceChildren(el("div", {}, `地形生成を停止しました — DEM が範囲の一部（${status.failure.uncovered_samples} 点：川や海の上など）を覆っていません。`
+              + "生成条件の「DEM未被覆領域」を「標高0 mで補完（水面向け）」にして、もう一度診断・生成してください。"),
+              el("div", {}, `（ログ：${status.log}）`));
+          } else {
+            const lines = status.errors.length ? status.errors : status.log_tail.slice(-5);
+            ui.status.replaceChildren(el("div", {}, `Generate失敗 — ${id}（ログ：${status.log}）`),
+              ...lines.map((line) => el("div", {}, line)));
+          }
         }
         break;
       }

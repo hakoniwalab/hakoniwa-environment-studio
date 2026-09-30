@@ -180,6 +180,14 @@ class CityWorldBuildTest(unittest.TestCase):
             self.assertFalse((self.dir / "work/city-worlds/sapporo").exists())
             self.assertEqual(env_cityworld.list_jobs(), [])
 
+    def test_a_dem_that_leaves_part_uncovered_is_told_apart(self):
+        lines = ["Traceback (most recent call last):", '  File "dem2hfield.py", line 357',
+                 "DemError: height field has 132 uncovered samples; first MuJoCo (X,Y) coordinates=[(88.0, -150.0)]",
+                 "ERROR: Command 'dem2hfield.py' returned non-zero exit status 1."]
+        self.assertEqual(env_cityworld.build_failure(lines), {"code": "DEM_UNCOVERED", "uncovered_samples": 132})
+        self.assertIsNone(env_cityworld.build_failure(["ERROR: no cached catalog response"]))
+        self.assertEqual([line for line in lines if env_cityworld.EXCEPTION_LINE.match(line)], [lines[2]])
+
     def test_progress_is_a_percentage_that_does_not_go_back(self):
         lines = ["[HAKO_PROGRESS] " + json.dumps(event) for event in (
             {"phase": "building_glb"}, {"phase": "source_download", "feature": "bldg", "current": 1, "total": 2,

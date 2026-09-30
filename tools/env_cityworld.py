@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -338,6 +339,21 @@ def osm_citygml(folder: Path, center: tuple[float, float], half: tuple[float, fl
                     **{key: receipt[key] for key in ("attribution", "license") if receipt.get(key)}}
 
 
+EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception): ")
+DEM_UNCOVERED = re.compile(r"DemError: height field has (\d+) uncovered samples")
+
+
+def build_failure(lines: list[str]) -> dict | None:
+    """A failure the page can explain, as the City World Web UI does:
+    DEM_UNCOVERED (the DEM leaves part of the area uncovered, over water
+    for instance, and terrain_uncovered_policy is error)."""
+    for line in lines:
+        found = DEM_UNCOVERED.search(line)
+        if found:
+            return {"code": "DEM_UNCOVERED", "uncovered_samples": int(found.group(1))}
+    return None
+
+
 class Builds:
     """The City World builds this Studio started (one runs at a time)."""
 
@@ -429,12 +445,14 @@ class Builds:
             state = "done" if built else "failed"
         else:
             state = "canceled" if job is not None and job.get("canceled") else "failed"
-        errors = [line for line in lines if line.startswith("ERROR") or "Traceback" in line][-5:]
+        # What went wrong: Envsim's ERROR lines and the exceptions' own lines (not the traceback's header).
+        errors = [line for line in lines if line.startswith("ERROR") or EXCEPTION_LINE.match(line)][-5:]
         if state == "done":
             progress = {"percent": 100, "phase": "ready", "message": "City Worldができました"}
         return {"id": job_id, "state": state, "returncode": code, "progress": progress,
                 "elapsed_s": round(time.time() - job["started"], 1) if job else None,
                 "build": str(folder / "build") if built else None, "errors": errors,
+                "failure": build_failure(lines) if state == "failed" else None,
                 "log": str(log), "log_tail": lines[-LOG_TAIL_LINES:], "cache": job["cache"] if job else None}
 
     def cancel(self, job_id: str) -> dict:
