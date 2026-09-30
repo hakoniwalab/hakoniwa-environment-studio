@@ -205,7 +205,7 @@ def export(recipe_path: Path, job: Path | None = None) -> dict:
     }
     receipt_path = world_dir / "city-world-receipt.json"
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"job": str(job), "receipt": str(receipt_path), "kind": receipt["kind"],
+    return {"job": str(job), "receipt": str(receipt_path), "kind": receipt["kind"], "name": recipe.name,
             "fingerprint": receipt["producer"]["fingerprint"], "check": check(receipt_path)}
 
 
@@ -224,11 +224,12 @@ def check(receipt: Path) -> dict | None:
             "problems": [problem.as_json() for problem in problems]}
 
 
-def register(receipt: Path, precompile: bool = True) -> dict:
-    """Register the job as an Urban City Asset (urban_assets.py register-city)."""
+def register(receipt: Path, precompile: bool = True, title: str | None = None) -> dict:
+    """Register the job as an Urban City Asset (urban_assets.py register-city),
+    shown under `title` (the Recipe's name) in Urban Studio."""
     urban = urban_root()
     command = [sys.executable, str(urban / "tools/urban_assets.py"), "register-city", "--receipt", str(receipt),
-               *([] if precompile else ["--no-precompile"])]
+               *(["--title", title] if title else []), *([] if precompile else ["--no-precompile"])]
     done = subprocess.run(command, cwd=urban, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     return {"ok": done.returncode == 0, "output": (done.stdout + done.stderr).strip().splitlines()[-20:]}
 
@@ -248,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"NG  {exc}", file=sys.stderr)
         return 1
     if args.register:
-        result["register"] = register(Path(result["receipt"]), precompile=not args.no_precompile)
+        result["register"] = register(Path(result["receipt"]), precompile=not args.no_precompile, title=result["name"])
     print(json.dumps(result, ensure_ascii=False, indent=2))
     ok = (result["check"] is None or result["check"]["ok"]) and result.get("register", {"ok": True})["ok"]
     return 0 if ok else 1

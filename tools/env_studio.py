@@ -622,7 +622,7 @@ def export_urban(recipe_id: str, body: object) -> dict:
         if result["check"] is not None and not result["check"]["ok"]:
             result["register"] = {"ok": False, "output": ["the job does not follow urban's contract"]}
         else:
-            result["register"] = env_urban.register(Path(result["receipt"]))
+            result["register"] = env_urban.register(Path(result["receipt"]), title=result["name"])
     return {"id": recipe_id, **result}
 
 

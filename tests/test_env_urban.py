@@ -126,11 +126,13 @@ class UrbanExportTest(unittest.TestCase):
         urban = self.dir / "hakoniwa-urban-mobility"
         (urban / "tools").mkdir(parents=True)
         (urban / "tools/urban_assets.py").write_text(
-            "import sys\nprint('Registered City Asset:', sys.argv[sys.argv.index('--receipt') + 1])\n", encoding="utf-8")
+            "import sys\nprint('Registered City Asset:', sys.argv[sys.argv.index('--receipt') + 1],"
+            " sys.argv[sys.argv.index('--title') + 1])\n", encoding="utf-8")
         with mock.patch.dict("os.environ", {"HAKONIWA_URBAN_MOBILITY_ROOT": str(urban)}):
-            done = env_urban.register(self.dir / "job/build/world/city-world-receipt.json", precompile=False)
+            done = env_urban.register(self.dir / "job/build/world/city-world-receipt.json", precompile=False,
+                                      title="車のテストコース")
         self.assertTrue(done["ok"])
-        self.assertIn("job/build/world/city-world-receipt.json", done["output"][-1])
+        self.assertIn("job/build/world/city-world-receipt.json 車のテストコース", done["output"][-1])
 
 
 @unittest.skipUnless(READY, "MuJoCo or trimesh is not installed")
