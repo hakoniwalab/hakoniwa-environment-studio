@@ -298,9 +298,24 @@ class Solid:
     visible: bool = True
 
     def as_json(self) -> dict:
-        return {key: getattr(self, key) for key in (
+        data = {key: getattr(self, key) for key in (
             "name", "primitive", "width_m", "depth_m", "height_m", "x_m", "y_m", "z_m",
             "roll_deg", "pitch_deg", "yaw_deg", "color", "collide", "visible")}
+        # For the browser, which does no tilt maths: the outline seen from above
+        # and the height range, both in the object's frame.
+        corners = self.corners()
+        data["outline"] = [[round(x, 6), round(y, 6)] for x, y in self.outline()]
+        data["z_range_m"] = [round(min(z for _, _, z in corners), 6), round(max(z for _, _, z in corners), 6)]
+        return data
+
+    def outline(self) -> list[tuple[float, float]]:
+        """Seen from above, counter-clockwise: a circle's polygon for an upright
+        cylinder, otherwise the convex hull of the tilted corners."""
+        if self.primitive == "cylinder" and abs(self.roll_deg) < 1e-9 and abs(self.pitch_deg) < 1e-9:
+            r = self.width_m / 2
+            return [(self.x_m + r * math.cos(2 * math.pi * i / 32), self.y_m + r * math.sin(2 * math.pi * i / 32))
+                    for i in range(32)]
+        return convex_hull([(x, y) for x, y, _ in self.corners()])
 
     def rotation(self) -> list[list[float]]:
         """Its rotation matrix (yaw about z, then pitch about y, then roll about x)."""
@@ -318,6 +333,27 @@ class Solid:
         return [(self.x_m + r[0][0] * x + r[0][1] * y + r[0][2] * z,
                  self.y_m + r[1][0] * x + r[1][1] * y + r[1][2] * z,
                  self.z_m + r[2][0] * x + r[2][1] * y + r[2][2] * z) for x, y, z in local]
+
+
+def convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Counter-clockwise hull (Andrew's monotone chain)."""
+    points = sorted(set((round(x, 9), round(y, 9)) for x, y in points))
+    if len(points) <= 2:
+        return points
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower, upper = [], []
+    for point in points:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    for point in reversed(points):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    return lower[:-1] + upper[:-1]
 
 
 def rotation_matrix(roll_deg: float, pitch_deg: float, yaw_deg: float) -> list[list[float]]:

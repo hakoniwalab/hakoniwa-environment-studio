@@ -1,0 +1,729 @@
+// Environment Studio: edits one Environment Recipe (docs/data-contract.md) in
+// the browser. The Recipe is kept as its YAML mapping (size_m, terrain,
+// objects); the plan view gets resolved objects. The browser knows no types:
+// the server sends each Catalog item's resolved solids, envelope and
+// behaviour, and the parameters a placement may change; a placement whose
+// parameters change the shape is resolved by the server too (POST
+// /api/resolve, cached). Metres, ENU, origin at the environment's centre.
+
+import { $, api, el } from "./dom.js";
+import { History } from "./history.js";
+import { createInspector } from "./inspector.js";
+import { Parts } from "./parts.js";
+import { PlanView, mm, pivotOf, turned } from "./plan2d.js";
+import { checkLayout, normalizeYaw, slideDistance } from "./geometry.js";
+
+const PREVIEW_DELAY_MS = 300;
+const VALIDATE_DELAY_MS = 300;
+const EDGE_NAMES = { north: "北", south: "南", east: "東", west: "西" };
+const NUDGE_FAR = 10; // Shift + arrow moves ten grid steps
+const NUDGE_FINE_M = 0.01; // Alt + arrow
+const HISTORY_LIMIT = 200; // undo steps kept
+// Copied objects go to the system clipboard as JSON text with this format tag
+// (the browser's own copy / cut / paste events, so the Edit menu works too).
+const CLIPBOARD_FORMAT = "hakoniwa-environment-objects/v1";
+const PASTE_STEP_M = 1; // each paste of the same objects lands this much further
+const DEFAULT_SIZE = { east: 20, north: 30 };
+
+// The Catalog's items and the objects resolved from them (web/parts.js).
+const catalog = new Parts({
+  resolve: (item, params) => api("POST", "resolve", { catalog_id: state.catalogId, item, params }),
+  onShape: () => render({ live: true }),
+  onError: (error) => setStatus(error.message, "error"),
+});
+
+const state = {
+  catalogs: [], // [{id, name, description, items}] from GET /api/catalogs
+  catalogId: null, // the Catalog the current Recipe uses
+  catalogInfo: null, // its name and description
+  recipes: [],
+  current: null, // {id, editable, recipe}
+  selection: [], // ids of the selected objects (one: the inspector edits it; several: move and turn together)
+  // Undo / redo (web/history.js): the Recipe as JSON is recorded whenever
+  // editing settles, so a drag or a slider counts as one step.
+  history: new History(HISTORY_LIMIT),
+  lastPaste: { text: null, count: 0 },
+  saved: null, // snapshot of the last saved or opened Recipe
+  plan: null,
+  view3d: null, // web/view3d.js, created when the 3D view is first shown
+  previewTimer: null,
+  previewVersion: 0,
+  validation: null, // {layout, result}: the server's check and the layout it covered
+  validateTimer: null,
+  terrain: { key: null, image: null }, // the ground's image on the plan, and what it shows
+};
+
+function setStatus(message, kind = "") {
+  const node = $("#status");
+  node.textContent = message;
+  node.className = `status ${kind}`;
+}
+
+function snapshot() {
+  return state.current ? JSON.stringify({ id: state.current.id, recipe: state.current.recipe }) : null;
+}
+
+const isDirty = () => state.current && snapshot() !== state.saved;
+
+// --- Recipe helpers ---------------------------------------------------------------
+
+function recipe() {
+  return state.current.recipe;
+}
+
+function objectById(id) {
+  return recipe().objects.find((obj) => obj.id === id);
+}
+
+function selectedObjects() {
+  return state.selection.map(objectById).filter(Boolean);
+}
+
+function select(ids) {
+  state.selection = ids;
+  render();
+}
+
+// A Recipe object resolved for the plan and the checks (web/parts.js).
+const resolved = (obj) => catalog.resolved(obj);
+
+// The environment's extent, centred on the origin.
+function area() {
+  const size = recipe().size_m;
+  return { minX: -size.east / 2, maxX: size.east / 2, minY: -size.north / 2, maxY: size.north / 2 };
+}
+
+function uniqueId(prefix) {
+  const used = new Set(recipe().objects.map((obj) => obj.id));
+  let index = 1;
+  while (used.has(`${prefix}-${index}`)) index += 1;
+  return `${prefix}-${index}`;
+}
+
+function snapToGrid(value) {
+  const grid = Number($("#grid").value);
+  return grid ? mm(Math.round(value / grid) * grid) : mm(value);
+}
+
+// What the server needs to check, preview or save the Recipe as it is now.
+function recipeBody() {
+  const { name, description, size_m: size, terrain, objects } = recipe();
+  return { name, description, size_m: size, terrain, objects, catalog_id: state.catalogId };
+}
+
+// --- Rendering --------------------------------------------------------------------
+
+// live: while a slider is being dragged, update the plan and the 3D view but
+// leave the panels (and the slider in them) alone.
+function render({ live = false } = {}) {
+  const current = state.current;
+  $("#recipe-id").value = current.id;
+  $("#recipe-name").value = recipe().name || "";
+  const size = recipe().size_m;
+  $("#size-east").value = size.east;
+  $("#size-north").value = size.north;
+  const preset = `${size.east}x${size.north}`;
+  $("#size-preset").value = [...$("#size-preset").options].some((option) => option.value === preset) ? preset : "";
+
+  const views = recipe().objects.map(resolved);
+  // The server's check once it covers this exact layout; the quick check until then.
+  const checked = state.validation?.layout === layoutKey() ? state.validation.result : null;
+  const problems = checked ? fromServer(checked) : quickProblems(views);
+  state.plan.setScene({
+    area: area(), parts: views, selected: state.selection, terrain: state.terrain.image,
+    problems: { outside: problems.outside, overlapping: problems.overlapping },
+  });
+  renderProblems(problems, Boolean(checked));
+  scheduleValidation();
+  refreshTerrain();
+  // While a slider is held, rebuilding the panels would drop it.
+  if (!live && !inspector.sliding) {
+    renderCatalogSelect();
+    renderTerrainPanel();
+    inspector.render();
+    renderRecipeList();
+  }
+  state.view3d?.setSelected(state.selection);
+  schedulePreview();
+  if (!live && !inspector.sliding && !state.plan.drag) checkpoint();
+}
+
+// --- Undo / redo (Cmd / Ctrl + Z, Cmd / Ctrl + Shift + Z or Ctrl + Y) ------------
+
+function resetHistory() {
+  state.history.reset(JSON.stringify(recipe()));
+}
+
+function checkpoint() {
+  state.history.record(JSON.stringify(recipe()));
+}
+
+function showSnapshot(snapshot, message) {
+  if (snapshot === null) return;
+  state.current.recipe = JSON.parse(snapshot);
+  const ids = new Set(recipe().objects.map((obj) => obj.id));
+  state.selection = state.selection.filter((id) => ids.has(id));
+  render();
+  setStatus(message);
+}
+
+// Record first: an edit that has not settled yet (just after a drag) is a step too.
+const undo = () => { checkpoint(); showSnapshot(state.history.undo(), "元に戻しました"); };
+const redo = () => { checkpoint(); showSnapshot(state.history.redo(), "やり直しました"); };
+
+// --- Copy, cut and paste (the browser's clipboard events) -------------------------
+
+const editingText = (event) => event.target.closest?.("input, select, textarea");
+
+function onCopy(event, cut) {
+  const chosen = selectedObjects();
+  if (!state.current || editingText(event) || !chosen.length) return;
+  event.clipboardData.setData("text/plain", JSON.stringify({
+    format: CLIPBOARD_FORMAT, catalog_id: state.catalogId, objects: chosen,
+  }, null, 2));
+  event.preventDefault();
+  if (cut) deleteSelected();
+  setStatus(`${chosen.length} 個の部品を${cut ? "切り取り" : "コピーし"}ました`);
+}
+
+// Paste copied objects with new ids, a little further from the originals each time.
+function onPaste(event) {
+  if (!state.current || editingText(event)) return;
+  const text = event.clipboardData.getData("text/plain");
+  let data;
+  try { data = JSON.parse(text); } catch { return; }
+  if (data?.format !== CLIPBOARD_FORMAT) return;
+  event.preventDefault();
+  if (data.catalog_id !== state.catalogId) {
+    setStatus("コピーした部品は別の Catalog の品目です。同じ Catalog の環境に貼り付けてください。", "error");
+    return;
+  }
+  state.lastPaste = { text, count: state.lastPaste.text === text ? state.lastPaste.count + 1 : 1 };
+  const offset = PASTE_STEP_M * state.lastPaste.count;
+  const pasted = data.objects.filter((obj) => catalog.item(obj.item));
+  state.selection = pasted.map((obj) => {
+    const copy = JSON.parse(JSON.stringify(obj));
+    copy.id = uniqueId(catalog.item(obj.item).id_prefix || "object");
+    copy.pose.x_m = mm(obj.pose.x_m + offset);
+    copy.pose.y_m = mm(obj.pose.y_m - offset);
+    recipe().objects.push(copy);
+    return copy.id;
+  });
+  render();
+  setStatus(`${pasted.length} 個の部品を貼り付けました`);
+}
+
+// --- 3D preview -------------------------------------------------------------------
+
+function viewMode() {
+  return $("#view-mode [aria-pressed='true']").dataset.mode;
+}
+
+function setViewMode(mode) {
+  for (const button of document.querySelectorAll("#view-mode button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+  }
+  $("#views").className = `views mode-${mode}`;
+  if (mode !== "plan") ensure3d();
+  schedulePreview();
+}
+
+async function ensure3d() {
+  if (state.view3d || state.view3dFailed) return;
+  const host = $("#view3d");
+  try {
+    const { View3D } = await import("./view3d.js");
+    state.view3d = new View3D(host);
+    host.querySelector(".view3d-message")?.remove();
+    schedulePreview(0);
+  } catch (error) {
+    state.view3dFailed = true;
+    host.querySelector(".view3d-message").textContent =
+      `3D を表示できません（WebGL と、three.js の取得にネットワークが必要です）: ${error.message}`;
+  }
+}
+
+// Ask the server for the Recipe's GLB once editing pauses; a newer edit wins.
+function schedulePreview(delay = PREVIEW_DELAY_MS) {
+  if (!state.view3d || !state.current || viewMode() === "plan") return;
+  clearTimeout(state.previewTimer);
+  state.previewTimer = setTimeout(refreshPreview, delay);
+}
+
+async function refreshPreview() {
+  const version = (state.previewVersion += 1);
+  try {
+    const response = await fetch("/api/glb", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(recipeBody()),
+    });
+    if (!response.ok) throw new Error((await response.json()).error);
+    const buffer = await response.arrayBuffer();
+    if (version !== state.previewVersion) return;
+    await state.view3d.setGlb(buffer, recipe().size_m);
+    state.view3d.setSelected(state.selection);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+// --- Problems: the quick check, then the server's (schema and MuJoCo) -------------
+
+// The layout a check covers: the size, the terrain and every object.
+function layoutKey() {
+  const { size_m: size, terrain, objects } = recipe();
+  return JSON.stringify({ catalog: state.catalogId, size, terrain, objects });
+}
+
+function quickProblems(views) {
+  const check = checkLayout(views, area());
+  return {
+    outside: new Set(check.outside), overlapping: new Set(check.overlaps.flatMap((pair) => [pair.a, pair.b])),
+    lines: [
+      ...check.outside.map((id) => `${id} が環境の外にはみ出しています`),
+      ...check.overlaps.map((pair) => `${pair.a} と ${pair.b} が ${Math.round(pair.depth * 1000)} mm 重なっています`),
+    ],
+  };
+}
+
+// The object an objects[i] path points at (diagnostics use the Recipe's paths).
+function objectAt(path) {
+  const match = /^objects\[(\d+)\]/.exec(path || "");
+  return match ? recipe().objects[Number(match[1])] : null;
+}
+
+function fromServer(result) {
+  const outside = new Set();
+  const overlapping = new Set();
+  const lines = result.diagnostics.filter((item) => item.severity !== "warning").map((item) => {
+    const obj = objectAt(item.path);
+    const other = objectAt(item.related?.[0]);
+    const depth = (value) => Math.round(value * 1000);
+    if (item.code === "overlap" && obj && other) {
+      overlapping.add(obj.id).add(other.id);
+      return `${obj.id} と ${other.id} が ${depth(item.actual)} mm 重なっています`;
+    }
+    if (item.code === "outside" && obj) {
+      outside.add(obj.id);
+      return `${obj.id} が${EDGE_NAMES[item.actual.edge] || item.actual.edge}の端から ${depth(item.actual.depth_m)} mm はみ出しています`;
+    }
+    if (item.code === "below_terrain" && obj) {
+      overlapping.add(obj.id);
+      return `${obj.id} が地面に ${depth(item.actual)} mm めり込んでいます`;
+    }
+    if (obj) overlapping.add(obj.id);
+    return `${item.path}: ${item.reason}`;
+  });
+  return { outside, overlapping, lines, stage: result.stage };
+}
+
+function renderProblems(problems, byServer) {
+  const source = byServer ? (problems.stage === "schema" ? "スキーマ" : "MuJoCo") : "簡易チェック・MuJoCo 検証中";
+  const items = problems.lines.map((line) => el("li", {}, line));
+  const summary = items.length
+    ? el("li", { class: "summary" }, `NG（${source}）`)
+    : el("li", { class: "ok" }, recipe().objects.length
+      ? `OK：重なり・はみ出し・地面へのめり込みはありません（${source}）` : "");
+  $("#problems").replaceChildren(summary, ...items);
+}
+
+// Check the layout on the server once editing pauses; a stale answer is ignored.
+function scheduleValidation() {
+  if (!state.current || state.validation?.layout === layoutKey()) return;
+  clearTimeout(state.validateTimer);
+  state.validateTimer = setTimeout(async () => {
+    const layout = layoutKey();
+    try {
+      const result = await api("POST", "validate", recipeBody());
+      state.validation = { layout, result };
+      if (layout === layoutKey()) render();
+    } catch (error) {
+      setStatus(error.message, "error");
+    }
+  }, VALIDATE_DELAY_MS);
+}
+
+function renameObject(obj, id) {
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) {
+    setStatus("ID は小文字・数字・- _ で付けてください", "error");
+  } else if (id !== obj.id && objectById(id)) {
+    setStatus(`ID ${id} はもう使われています`, "error");
+  } else {
+    obj.id = id;
+    state.selection = [id];
+    setStatus("");
+  }
+  render();
+}
+
+// --- Terrain ----------------------------------------------------------------------
+
+const terrainItems = () => [...catalog.items.values()].filter((item) => item.kind === "terrain");
+
+// The ground on the plan: an image of the terrain's heights (lighter is
+// higher), fetched when the terrain, its parameters or the size change.
+async function refreshTerrain() {
+  const { terrain, size_m: size } = recipe();
+  const key = JSON.stringify([state.catalogId, terrain, size]);
+  if (state.terrain.key === key) return;
+  state.terrain.key = key;
+  try {
+    const ground = await api("POST", "terrain", { catalog_id: state.catalogId, terrain, size_m: size });
+    if (state.terrain.key !== key) return;
+    state.terrain.image = { href: terrainImage(ground) };
+    render({ live: true });
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+function terrainImage(ground) {
+  const canvas = document.createElement("canvas");
+  const rows = ground.heights || [[0]];
+  canvas.width = rows[0].length;
+  canvas.height = rows.length;
+  const context = canvas.getContext("2d");
+  const image = context.createImageData(canvas.width, canvas.height);
+  const [r, g, b] = [1, 3, 5].map((index) => parseInt(ground.color.slice(index, index + 2), 16));
+  const top = ground.max_height_m || 1;
+  rows.forEach((row, y) => row.forEach((height, x) => {
+    const shade = 0.72 + 0.5 * (height / top); // rows run north to south, as the image does
+    const offset = (y * canvas.width + x) * 4;
+    image.data.set([Math.min(255, r * shade), Math.min(255, g * shade), Math.min(255, b * shade), 255], offset);
+  }));
+  context.putImageData(image, 0, 0);
+  return canvas.toDataURL();
+}
+
+function renderTerrainPanel() {
+  const select = $("#terrain-select");
+  const current = recipe().terrain?.item;
+  select.replaceChildren(...terrainItems().map((item) => el("option", { value: item.id, selected: item.id === current }, item.name)));
+  select.value = current;
+  const item = catalog.item(current);
+  if (!item) {
+    $("#terrain-params").replaceChildren();
+    return;
+  }
+  const store = (name, value) => {
+    const terrain = recipe().terrain;
+    terrain.params = { ...(terrain.params || {}) };
+    if (value === undefined) delete terrain.params[name];
+    else terrain.params[name] = value;
+    if (!Object.keys(terrain.params).length) delete terrain.params;
+  };
+  $("#terrain-params").replaceChildren(
+    ...inspector.paramFields(item.placement_params, recipe().terrain.params || {}, item.params, store));
+}
+
+function setTerrain(itemId) {
+  recipe().terrain = { item: itemId };
+  render();
+}
+
+// --- Catalogs (catalogs/<id>/catalog.yaml) -----------------------------------------
+
+async function loadCatalog(id) {
+  if (!id || (id === state.catalogId && catalog.items.size)) return;
+  const loaded = await api("GET", `catalogs/${id}`);
+  state.catalogId = id;
+  state.catalogInfo = { name: loaded.name, description: loaded.description };
+  catalog.setCatalog(loaded.items);
+  state.terrain = { key: null, image: null };
+  renderCatalog();
+}
+
+// A Recipe keeps its Catalog; it can change only while the Recipe has no objects.
+async function switchCatalog(id) {
+  if (state.current && recipe().objects.length) {
+    $("#catalog-select").value = state.catalogId;
+    setStatus("部品がある環境の Catalog は変えられません。新規作成で選んでください。", "error");
+    return;
+  }
+  await loadCatalog(id);
+  if (state.current && !catalog.item(recipe().terrain?.item)) recipe().terrain = { item: terrainItems()[0]?.id };
+  render();
+}
+
+function renderCatalogSelect() {
+  const select = $("#catalog-select");
+  select.replaceChildren(...state.catalogs.filter((item) => !item.error).map((item) =>
+    el("option", { value: item.id, selected: item.id === state.catalogId }, item.name || item.id)));
+  select.value = state.catalogId;
+  select.disabled = Boolean(state.current && recipe().objects.length);
+  $("#catalog-source").textContent = state.catalogInfo?.description || "";
+}
+
+const metres = (value) => `${Math.round(value * 100) / 100}`;
+
+function renderCatalog() {
+  const objects = [...catalog.items.values()].filter((item) => item.kind !== "terrain");
+  $("#catalog-list").replaceChildren(...objects.map((entry) => {
+    const { envelope, height_m: height } = entry;
+    const size = envelope.primitive === "cylinder"
+      ? `φ${metres(envelope.width_m)}×H${metres(height)} m`
+      : `${metres(envelope.width_m)}×${metres(envelope.depth_m)}×${metres(height)} m`;
+    return el("li", {},
+      el("button", { onclick: () => addObject(entry.id), title: `${entry.category}：${entry.description || ""}` },
+        el("span", {}, entry.name),
+        el("span", { class: "meta" }, size),
+        el("span", { class: "swatch", style: `background:${entry.params.color || "#cccccc"}` })));
+  }));
+}
+
+function renderRecipeList() {
+  $("#recipe-list").replaceChildren(...state.recipes.map((item) => el("li", {},
+    el("button", {
+      "aria-current": String(state.current?.id === item.id),
+      onclick: () => { if (confirmDiscard()) openRecipe(item.id); },
+    }, el("span", {}, item.id), el("span", { class: "meta" }, item.error ? "エラー"
+      : `${item.size_m.east}×${item.size_m.north} m・${item.objects} 部品${item.terrain === "hfield" ? "・丘" : ""}${
+        item.editable ? "" : "・例"}`)))));
+}
+
+// --- Editing ----------------------------------------------------------------------
+
+function addObject(itemId) {
+  const entry = catalog.item(itemId);
+  const id = uniqueId(entry.id_prefix || "object");
+  recipe().objects.push({ id, item: itemId, pose: { x_m: 0, y_m: 0, yaw_deg: 0 } });
+  state.selection = [id];
+  render();
+}
+
+function changeObject(id, change) {
+  const obj = objectById(id);
+  if (!obj) return;
+  if ("x" in change) obj.pose.x_m = change.x;
+  if ("y" in change) obj.pose.y_m = change.y;
+  if ("yaw" in change) obj.pose.yaw_deg = normalizeYaw(change.yaw);
+  render();
+}
+
+// Poses [{id, x, y, yaw}] for several objects at once (a group drag or turn).
+function applyPoses(poses) {
+  for (const pose of poses) {
+    const obj = objectById(pose.id);
+    if (!obj) continue;
+    if ("x" in pose) obj.pose.x_m = pose.x;
+    if ("y" in pose) obj.pose.y_m = pose.y;
+    if ("yaw" in pose) obj.pose.yaw_deg = normalizeYaw(pose.yaw);
+  }
+  render({ live: true });
+}
+
+function deleteSelected() {
+  if (!state.selection.length) return;
+  const gone = new Set(state.selection);
+  recipe().objects = recipe().objects.filter((obj) => !gone.has(obj.id));
+  state.selection = [];
+  render();
+}
+
+function duplicateSelected() {
+  const chosen = selectedObjects();
+  if (!chosen.length) return;
+  let offset;
+  if (chosen.length === 1) {
+    // Next to the original along its width, so a row of walls or rails grows naturally.
+    const width = resolved(chosen[0]).width;
+    const yaw = (normalizeYaw(chosen[0].pose.yaw_deg ?? 0) * Math.PI) / 180;
+    offset = [Math.cos(yaw) * width, Math.sin(yaw) * width];
+  } else {
+    // Several: the copies stand beside them, one group width along x.
+    const xs = chosen.map(resolved).flatMap((view) => [view.x - view.width / 2, view.x + view.width / 2]);
+    offset = [Math.max(...xs) - Math.min(...xs), 0];
+  }
+  const copies = chosen.map((obj) => {
+    const copy = JSON.parse(JSON.stringify(obj));
+    copy.id = uniqueId(catalog.item(obj.item)?.id_prefix || "object");
+    copy.pose.x_m = mm(obj.pose.x_m + offset[0]);
+    copy.pose.y_m = mm(obj.pose.y_m + offset[1]);
+    recipe().objects.push(copy);
+    return copy.id;
+  });
+  state.selection = copies;
+  render();
+}
+
+// Turn the selection: one object in place, several about their centre.
+function rotateSelected(degrees) {
+  const chosen = selectedObjects();
+  if (!chosen.length) return;
+  const views = chosen.map(resolved);
+  applyPoses(chosen.length === 1
+    ? [{ id: views[0].id, yaw: views[0].yaw + degrees }]
+    : turned(views, degrees, pivotOf(views)));
+  render();
+}
+
+function moveSelected(dx, dy) {
+  for (const obj of selectedObjects()) {
+    obj.pose.x_m = mm(obj.pose.x_m + dx);
+    obj.pose.y_m = mm(obj.pose.y_m + dy);
+  }
+  render();
+}
+
+// Slide the selection until one of its objects touches another or an edge.
+function slideSelected([dx, dy]) {
+  const chosen = selectedObjects();
+  if (!chosen.length) return;
+  const ids = new Set(chosen.map((obj) => obj.id));
+  const others = recipe().objects.filter((item) => !ids.has(item.id)).map(resolved);
+  // To the millimetre: a rounding up of under 0.5 mm stays within the checks' tolerance.
+  const distance = Math.round(1000 * Math.min(...chosen.map((obj) => slideDistance(resolved(obj), [dx, dy], others, area())))) / 1000;
+  moveSelected(dx * distance, dy * distance);
+  const name = chosen.length === 1 ? chosen[0].id : `${chosen.length} 個の部品`;
+  setStatus(distance ? `${name}を ${distance} m 寄せました` : `${name}はその方向にもう接しています`);
+}
+
+function nudgeSelected(dx, dy, far, fine) {
+  const step = fine ? NUDGE_FINE_M : (Number($("#grid").value) || NUDGE_FINE_M) * (far ? NUDGE_FAR : 1);
+  moveSelected(dx * step, dy * step);
+}
+
+function onKey(event) {
+  if (!state.current || event.target.closest?.("input, select, textarea")) return;
+  const meta = event.metaKey || event.ctrlKey;
+  const key = event.key.toLowerCase();
+  if (event.key === "Delete" || event.key === "Backspace") deleteSelected();
+  else if (meta && key === "z") (event.shiftKey ? redo : undo)();
+  else if (meta && key === "y") redo();
+  else if (meta && key === "a") select(recipe().objects.map((obj) => obj.id));
+  else if (meta && key === "d") duplicateSelected();
+  else if (!meta && key === "r") rotateSelected(event.shiftKey ? -90 : 90);
+  else if (event.key.startsWith("Arrow")) {
+    const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[event.key];
+    if (event.altKey && event.shiftKey) slideSelected(direction);
+    else nudgeSelected(direction[0], direction[1], event.shiftKey, event.altKey);
+  } else if (event.key === "Escape") {
+    state.selection = [];
+    render();
+  } else return;
+  event.preventDefault();
+}
+
+// --- Recipes ----------------------------------------------------------------------
+
+function confirmDiscard() {
+  return !isDirty() || window.confirm("保存していない変更があります。破棄して開きますか？");
+}
+
+async function loadRecipes() {
+  state.recipes = await api("GET", "recipes");
+  if (state.current) renderRecipeList();
+}
+
+async function openRecipe(id) {
+  const loaded = await api("GET", `recipes/${id}`);
+  loaded.recipe.objects = loaded.recipe.objects || [];
+  await loadCatalog(loaded.catalog_id || state.catalogId);
+  state.current = { id, editable: loaded.editable, recipe: loaded.recipe };
+  state.selection = [];
+  state.saved = snapshot();
+  resetHistory();
+  state.plan.fit();
+  render();
+  state.plan.fit();
+  setStatus(loaded.editable ? "" : "例の環境です。保存するとコピーが作られます。");
+}
+
+function newRecipe() {
+  if (!confirmDiscard()) return;
+  state.current = {
+    id: "", editable: true,
+    recipe: { name: "", size_m: { ...DEFAULT_SIZE }, terrain: { item: terrainItems()[0]?.id }, objects: [] },
+  };
+  state.selection = [];
+  state.saved = null;
+  resetHistory();
+  render();
+  state.plan.fit();
+  setStatus("");
+  $("#recipe-id").focus();
+}
+
+async function saveRecipe() {
+  const id = $("#recipe-id").value.trim();
+  if (!id) { setStatus("ID を入力してください", "error"); return; }
+  recipe().name = $("#recipe-name").value.trim() || id;
+  try {
+    const saved = await api("PUT", `recipes/${id}`, recipeBody());
+    state.current.id = id;
+    state.current.editable = true;
+    state.saved = snapshot();
+    await loadRecipes();
+    render();
+    setStatus(`保存しました（${saved.path}）`, "ok");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+function setSize(east, north) {
+  if (!(east > 0 && north > 0)) return;
+  recipe().size_m = { east: mm(east), north: mm(north) };
+  render();
+  state.plan.fit();
+}
+
+// The right panel (web/inspector.js) and what it may do.
+const inspector = createInspector($("#inspector"), {
+  render: (options) => render(options),
+  recipe: () => recipe(),
+  parts: catalog,
+  resolved: (obj) => resolved(obj),
+  selectedParts: () => selectedObjects(),
+  select: (ids) => select(ids),
+  rename: (obj, id) => renameObject(obj, id),
+  duplicate: () => duplicateSelected(),
+  remove: () => deleteSelected(),
+  slide: (direction) => slideSelected(direction),
+  move: (dx, dy) => moveSelected(dx, dy),
+  applyPoses: (poses) => applyPoses(poses),
+});
+
+async function init() {
+  state.plan = new PlanView($("#plan"), {
+    onSelect: select,
+    onChange: changeObject,
+    onChangeMany: applyPoses,
+  });
+  state.plan.setGrid(Number($("#grid").value));
+  state.catalogs = await api("GET", "catalogs");
+  await loadCatalog(state.catalogs.find((item) => !item.error)?.id);
+  await loadRecipes();
+  $("#catalog-select").addEventListener("change", (event) => switchCatalog(event.target.value));
+  $("#terrain-select").addEventListener("change", (event) => setTerrain(event.target.value));
+
+  $("#new-recipe").addEventListener("click", newRecipe);
+  $("#save").addEventListener("click", saveRecipe);
+  $("#fit").addEventListener("click", () => state.plan.fit());
+  for (const button of document.querySelectorAll("#view-mode button")) {
+    button.addEventListener("click", () => setViewMode(button.dataset.mode));
+  }
+  $("#view-overview").addEventListener("click", () => state.view3d?.overview());
+  $("#view-car").addEventListener("click", () => state.view3d?.carView());
+  $("#view-drone").addEventListener("click", () => state.view3d?.droneView());
+  setViewMode(viewMode());
+  $("#grid").addEventListener("change", (event) => state.plan.setGrid(Number(event.target.value)));
+  $("#size-preset").addEventListener("change", (event) => {
+    if (!event.target.value) return;
+    const [east, north] = event.target.value.split("x").map(Number);
+    setSize(east, north);
+  });
+  $("#size-east").addEventListener("change", (event) => setSize(Number(event.target.value), recipe().size_m.north));
+  $("#size-north").addEventListener("change", (event) => setSize(recipe().size_m.east, Number(event.target.value)));
+  $("#recipe-name").addEventListener("change", (event) => { recipe().name = event.target.value.trim(); });
+  document.addEventListener("keydown", onKey);
+  document.addEventListener("copy", (event) => onCopy(event, false));
+  document.addEventListener("cut", (event) => onCopy(event, true));
+  document.addEventListener("paste", onPaste);
+  window.addEventListener("beforeunload", (event) => { if (isDirty()) event.preventDefault(); });
+
+  const first = state.recipes.find((item) => !item.error);
+  if (first) await openRecipe(first.id);
+  else newRecipe();
+}
+
+init().catch((error) => setStatus(`読み込みに失敗しました: ${error.message}`, "error"));

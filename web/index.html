@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Environment Studio</title>
+  <link rel="stylesheet" href="studio.css">
+  <!-- The same three.js as hakoniwa-threejs-drone, Urban Studio and Booth Studio. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Environment Studio</h1>
+    <div class="row">
+      <label class="field inline">ID<input id="recipe-id" placeholder="my-field" autocomplete="off"></label>
+      <label class="field inline grow">名前<input id="recipe-name" placeholder="試験場" autocomplete="off"></label>
+      <button id="save">保存</button>
+    </div>
+    <div id="status" class="status" role="status"></div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <div class="row between">
+          <h2>環境</h2>
+          <button id="new-recipe" class="secondary">新規</button>
+        </div>
+        <ul id="recipe-list" class="list"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>大きさ</h2>
+        <label class="field">よく使う大きさ
+          <select id="size-preset">
+            <option value="">（自由な大きさ）</option>
+            <option value="20x30">20 m × 30 m</option>
+            <option value="30x40">30 m × 40 m</option>
+            <option value="40x40">40 m × 40 m</option>
+            <option value="100x100">100 m × 100 m</option>
+          </select>
+        </label>
+        <div class="row">
+          <label class="field">東西 (m)<input id="size-east" type="number" min="1" step="1"></label>
+          <label class="field">南北 (m)<input id="size-north" type="number" min="1" step="1"></label>
+        </div>
+        <p class="hint">原点は環境の中心。x が東、y が北。</p>
+      </section>
+
+      <section class="panel">
+        <h2>地面</h2>
+        <label class="field">地形<select id="terrain-select"></select></label>
+        <div id="terrain-params" class="params"></div>
+      </section>
+
+      <section class="panel">
+        <h2>部品</h2>
+        <label class="field">Catalog<select id="catalog-select"></select></label>
+        <p id="catalog-source" class="hint"></p>
+        <p class="hint">クリックで環境の中央に追加します（地面の上に立ちます）。</p>
+        <ul id="catalog-list" class="catalog"></ul>
+      </section>
+    </aside>
+
+    <section class="panel plan-panel">
+      <div class="row between">
+        <div class="row">
+          <div class="segmented" id="view-mode" role="group" aria-label="表示">
+            <button class="secondary" data-mode="plan">上面図</button>
+            <button class="secondary" data-mode="3d">3D</button>
+            <button class="secondary" data-mode="split" aria-pressed="true">並べて表示</button>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row only-3d">
+            <button id="view-overview" class="secondary">3D 全体</button>
+            <button id="view-car" class="secondary" title="南の端から、車の運転席の高さ（1.2 m）で北を見る">車目線</button>
+            <button id="view-drone" class="secondary" title="南の上空から見下ろす">ドローン目線</button>
+          </span>
+          <label class="field inline">グリッド
+            <select id="grid">
+              <option value="0.1">0.1 m</option>
+              <option value="0.5" selected>0.5 m</option>
+              <option value="1">1 m</option>
+              <option value="0">オフ</option>
+            </select>
+          </label>
+          <button id="fit" class="secondary">全体表示</button>
+        </div>
+      </div>
+      <div id="views" class="views mode-split">
+        <div id="plan" class="plan-host"></div>
+        <div id="view3d" class="view3d-host"><p class="hint view3d-message">3D を読み込み中…</p></div>
+      </div>
+      <p class="hint">ドラッグで移動（吸い付く部品は近くの部品・端にぴったり寄る。Alt で解除）／丸いハンドルで回転（15° 刻み、Shift で解除）／R で 90° 回転／矢印キーでグリッド分移動／Shift＋クリックで複数選択／⌘ / Ctrl＋C・V・Z／Delete で削除／背景ドラッグで移動、ホイールで拡大縮小</p>
+      <ul id="problems" class="problems"></ul>
+    </section>
+
+    <aside class="panel inspector">
+      <h2>選択中の部品</h2>
+      <div id="inspector"><p class="hint">部品をクリックすると、ここで位置やパラメータを編集できます。</p></div>
+    </aside>
+  </main>
+
+  <script type="module" src="studio.js"></script>
+</body>
+</html>
