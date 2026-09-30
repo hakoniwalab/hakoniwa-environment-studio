@@ -222,11 +222,15 @@ class _GlbBuilder:
             "buffers": [{"byteLength": 0}],
         }
         self.material_ids: dict[str, int] = {}
+        self.image_ids: dict[str, int] = {}  # image sha256 -> material index
 
-    def _view(self, data: bytes, target: int) -> int:
+    def _view(self, data: bytes, target: int | None) -> int:
         while len(self.binary) % 4:
             self.binary.append(0)
-        self.gltf["bufferViews"].append({"buffer": 0, "byteOffset": len(self.binary), "byteLength": len(data), "target": target})
+        view = {"buffer": 0, "byteOffset": len(self.binary), "byteLength": len(data)}
+        if target is not None:
+            view["target"] = target
+        self.gltf["bufferViews"].append(view)
         self.binary.extend(data)
         return len(self.gltf["bufferViews"]) - 1
 
@@ -244,6 +248,93 @@ class _GlbBuilder:
             self.material_ids[color] = len(self.gltf["materials"]) - 1
         return self.material_ids[color]
 
+    def textured_material(self, image: bytes, mime: str) -> int:
+        """A material showing an image (a JPEG or PNG embedded in the GLB), one per distinct image."""
+        key = hashlib.sha256(image).hexdigest()
+        if key not in self.image_ids:
+            for name in ("images", "textures", "samplers"):
+                self.gltf.setdefault(name, [])
+            if not self.gltf["samplers"]:
+                self.gltf["samplers"].append({"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497})
+            self.gltf["images"].append({"bufferView": self._view(image, None), "mimeType": mime})
+            self.gltf["textures"].append({"sampler": 0, "source": len(self.gltf["images"]) - 1})
+            self.gltf["materials"].append({
+                "name": key[:12], "doubleSided": True,
+                "pbrMetallicRoughness": {"baseColorTexture": {"index": len(self.gltf["textures"]) - 1},
+                                         "metallicFactor": 0.0, "roughnessFactor": 1.0},
+            })
+            self.image_ids[key] = len(self.gltf["materials"]) - 1
+        return self.image_ids[key]
+
+    def surface_primitive(self, positions, normals, uvs, indices, material: int) -> dict:
+        """A primitive already in glTF axes (x east, y up, z -north), with
+        texture coordinates when `uvs` is given (a CityGML LOD2 surface)."""
+        flat = [value for point in positions for value in point]
+        attributes = {"POSITION": self._accessor(
+            self._view(struct.pack(f"<{len(flat)}f", *flat), 34962), 5126, len(positions), "VEC3",
+            min=[min(point[axis] for point in positions) for axis in range(3)],
+            max=[max(point[axis] for point in positions) for axis in range(3)])}
+        flat_normals = [value for normal in normals for value in normal]
+        attributes["NORMAL"] = self._accessor(
+            self._view(struct.pack(f"<{len(flat_normals)}f", *flat_normals), 34962), 5126, len(normals), "VEC3")
+        if uvs is not None:
+            flat_uv = [value for uv in uvs for value in uv]
+            attributes["TEXCOORD_0"] = self._accessor(
+                self._view(struct.pack(f"<{len(flat_uv)}f", *flat_uv), 34962), 5126, len(uvs), "VEC2")
+        big = len(positions) > 65535
+        index = self._accessor(self._view(struct.pack(f"<{len(indices)}{'I' if big else 'H'}", *indices), 34963),
+                               5125 if big else 5123, len(indices), "SCALAR")
+        return {"attributes": attributes, "indices": index, "material": material}
+
+    def asset_primitives(self, glb: bytes) -> list[dict]:
+        """The primitives of a GLB this builder wrote (a part's visual asset),
+        copied in with their data, textures and materials; the asset's own
+        node transforms are not used (its geometry is in its part's frame)."""
+        document, binary = read_glb(glb)
+        views = document.get("bufferViews", [])
+
+        def data(view_index: int) -> bytes:
+            view = views[view_index]
+            start = view.get("byteOffset", 0)
+            return binary[start:start + view["byteLength"]]
+
+        def accessor(index: int) -> int:
+            source = document["accessors"][index]
+            view = views[source["bufferView"]]
+            copied = {key: value for key, value in source.items() if key not in ("bufferView", "byteOffset")}
+            start = source.get("byteOffset", 0)
+            raw = data(source["bufferView"])
+            size = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}[source["type"]] * {5126: 4, 5125: 4, 5123: 2, 5121: 1}[source["componentType"]]
+            chunk = raw[start:start + size * source["count"]]
+            self.gltf["accessors"].append({"bufferView": self._view(chunk, view.get("target")), **copied})
+            return len(self.gltf["accessors"]) - 1
+
+        def material(index: int | None) -> int:
+            if index is None:
+                return self.material("#c9c3b6")
+            source = document["materials"][index]
+            texture = source.get("pbrMetallicRoughness", {}).get("baseColorTexture")
+            if texture is not None:
+                image = document["images"][document["textures"][texture["index"]]["source"]]
+                return self.textured_material(data(image["bufferView"]), image.get("mimeType", "image/jpeg"))
+            factor = source.get("pbrMetallicRoughness", {}).get("baseColorFactor", [0.7, 0.7, 0.7, 1.0])
+            key = f"asset:{json.dumps(factor)}"
+            if key not in self.material_ids:
+                self.gltf["materials"].append({"name": key, "doubleSided": True, "pbrMetallicRoughness": {
+                    "baseColorFactor": factor, "metallicFactor": 0.0, "roughnessFactor": 0.85}})
+                self.material_ids[key] = len(self.gltf["materials"]) - 1
+            return self.material_ids[key]
+
+        primitives = []
+        for mesh in document.get("meshes", []):
+            for primitive in mesh["primitives"]:
+                primitives.append({
+                    "attributes": {name: accessor(index) for name, index in sorted(primitive["attributes"].items())},
+                    "indices": accessor(primitive["indices"]),
+                    "material": material(primitive.get("material")),
+                })
+        return primitives
+
     def _primitive(self, mesh, color: str) -> dict:
         positions, normals, indices = mesh
         flat = [value for point in positions for value in point]
@@ -260,9 +351,12 @@ class _GlbBuilder:
             5125 if big else 5123, len(indices), "SCALAR")
         return {"attributes": {"POSITION": position, "NORMAL": normal}, "indices": index, "material": self.material(color)}
 
-    def node(self, name: str, pieces, translation, yaw_deg: float, extras: dict) -> int:
-        """One node per object, its mesh one primitive per (mesh, colour) piece."""
-        self.gltf["meshes"].append({"name": name, "primitives": [self._primitive(to_gltf(mesh), color) for mesh, color in pieces]})
+    def node(self, name: str, pieces, translation, yaw_deg: float, extras: dict, primitives=None) -> int:
+        """One node per object, its mesh one primitive per (mesh, colour) piece
+        (or the given `primitives`, such as a visual asset's)."""
+        if primitives is None:
+            primitives = [self._primitive(to_gltf(mesh), color) for mesh, color in pieces]
+        self.gltf["meshes"].append({"name": name, "primitives": primitives})
         half = math.radians(yaw_deg) / 2.0
         self.gltf["nodes"].append({
             "name": name, "mesh": len(self.gltf["meshes"]) - 1, "translation": list(translation),
@@ -286,14 +380,34 @@ class _GlbBuilder:
         ))
 
 
+def read_glb(data: bytes) -> tuple[dict, bytes]:
+    """(JSON document, BIN chunk) of a GLB."""
+    magic, version, length = struct.unpack_from("<III", data, 0)
+    if magic != 0x46546C67 or version != 2 or length != len(data):
+        raise ValueError("not a glTF 2.0 binary")
+    json_length, _ = struct.unpack_from("<II", data, 12)
+    document = json.loads(data[20:20 + json_length])
+    rest = 20 + json_length
+    binary = b""
+    if rest + 8 <= len(data):
+        bin_length, _ = struct.unpack_from("<II", data, rest)
+        binary = data[rest + 8:rest + 8 + bin_length]
+    return document, binary
+
+
 def environment_glb(recipe: env_schema.Recipe) -> bytes:
     builder = _GlbBuilder()
     builder.node(TERRAIN_GEOM, [(terrain_mesh(recipe.terrain), recipe.terrain.color)], (0.0, 0.0, 0.0), 0.0,
                  {"terrain": recipe.terrain_item, "kind": recipe.terrain.kind})
     for obj in recipe.objects:
+        extras = {"object": obj.id, "item": obj.item, "type": obj.type}
+        placement = ((obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m), obj.pose.yaw_deg)
+        if obj.visual is not None:  # its LOD2 look (textures included) instead of the solids
+            builder.node(obj.id, None, *placement, {**extras, "visual": obj.visual.name},
+                         primitives=builder.asset_primitives(obj.visual.read_bytes()))
+            continue
         pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
-        builder.node(obj.id, pieces, (obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m), obj.pose.yaw_deg,
-                     {"object": obj.id, "item": obj.item, "type": obj.type})
+        builder.node(obj.id, pieces, *placement, extras)
     return builder.glb()
 
 

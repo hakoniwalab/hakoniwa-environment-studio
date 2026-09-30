@@ -318,6 +318,70 @@ class CommandErrorTest(unittest.TestCase):
         self.assertIn("not a Recipe id", completed.stderr)
 
 
+@unittest.skipUnless(ENVSIM, "hakoniwa-envsim is not available")
+class Lod2VisualTest(unittest.TestCase):
+    """Stage B-1: each building part carries its CityGML LOD2 look (textures
+    included) as a GLB in its own frame, which the generated GLB shows."""
+
+    def setUp(self):
+        from PIL import Image
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+        source = self.dir / "citygml"
+        (source / "tiny_mixed_lod_6697_appearance").mkdir(parents=True)
+        shutil.copy(env_citygml.envsim_root() / "tests/fixtures/tiny_mixed_lod_6697_op.gml",
+                    source / "tiny_mixed_lod_bldg_6697_op.gml")  # the name the building search looks for
+        Image.new("RGB", (4, 4), (200, 40, 40)).save(source / "tiny_mixed_lod_6697_appearance/roof.jpg")
+        self.recipe_path = self.dir / "recipes/city.yaml"
+        self.recipe_path.parent.mkdir()
+        self.recipe, self.report = env_citygml.convert(
+            source, (35.68121, 139.70673), (50.0, 50.0), catalog=CATALOG,
+            visuals={"asset_dir": env_citygml.asset_dir_for(self.recipe_path), "base_dir": self.recipe_path.parent,
+                     "textures": {}})
+        self.parts = {obj["id"]: obj for obj in self.recipe["objects"]}
+
+    def test_a_building_with_lod2_gets_a_textured_glb_in_its_frame(self):
+        import env_generate
+
+        self.assertEqual(self.report["lod2_visuals"], 1)
+        textured = self.parts["textured-building"]
+        self.assertEqual(textured["params"]["visual"], "city.assets/textured-building.glb")
+        self.assertNotIn("visual", self.parts["fallback-building"]["params"])  # LOD1 only: it stays a box
+        document, _ = env_generate.read_glb((self.recipe_path.parent / textured["params"]["visual"]).read_bytes())
+        self.assertEqual(len(document["images"]), 1)
+        primitive = document["meshes"][0]["primitives"][0]
+        self.assertIn("TEXCOORD_0", primitive["attributes"])
+        low, high = (document["accessors"][primitive["attributes"]["POSITION"]][key] for key in ("min", "max"))
+        self.assertGreaterEqual(low[1], -0.01)  # its ground is the part's base
+        self.assertLess(max(abs(low[0]), abs(high[0]), abs(low[2]), abs(high[2])), 5.0)  # about the part's origin
+
+    def test_the_generated_glb_shows_the_look_and_follows_the_part(self):
+        import env_generate
+
+        self.recipe["objects"] = [obj for obj in self.recipe["objects"] if obj["item"] == "building-footprint"]
+        moved = next(obj for obj in self.recipe["objects"] if obj["id"] == "textured-building")
+        moved["pose"]["x_m"] += 10
+        moved["pose"]["yaw_deg"] = 90
+        parsed = env_schema.parse_recipe(self.recipe, self.recipe_path)
+        visual = next(obj for obj in parsed.objects if obj.id == "textured-building")
+        self.assertIsNotNone(visual.visual_sha256)
+        document, _ = env_generate.read_glb(env_generate.environment_glb(parsed))
+        node = next(item for item in document["nodes"] if item["name"] == "textured-building")
+        self.assertEqual(node["extras"]["visual"], "textured-building.glb")
+        self.assertAlmostEqual(node["translation"][0], visual.pose.x_m)
+        self.assertAlmostEqual(node["rotation"][1], math.sin(math.radians(90) / 2))
+        primitives = document["meshes"][node["mesh"]]["primitives"]
+        self.assertIn("TEXCOORD_0", primitives[0]["attributes"])
+        self.assertEqual(len(document["images"]), 1)
+        # A missing asset is a diagnostic, not a silent box.
+        (self.recipe_path.parent / moved["params"]["visual"]).unlink()
+        with self.assertRaises(env_schema.DiagnosticError) as caught:
+            env_schema.parse_recipe(self.recipe, self.recipe_path)
+        self.assertTrue(caught.exception.diagnostics[0].path.endswith(".params.visual"))
+
+
 class IdTest(unittest.TestCase):
     def test_gml_ids_become_part_ids(self):
         used = set()

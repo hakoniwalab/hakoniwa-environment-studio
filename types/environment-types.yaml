@@ -290,6 +290,8 @@ types:
                  description: Height of its top above the ground.}
       min_height_m: {kind: length, label: 下端の高さ, default: 0.0, min: 0, max: 499, level: placement,
                      description: "Where it starts above the ground: > 0 for a canopy (a roof on posts) or a bridge between buildings."}
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: placement,
+               description: "A GLB shown instead of the extruded footprint (its CityGML LOD2 look, textures included), in the part's frame; absolute or relative to the Recipe. Collisions stay the footprint."}
     shapes:
       - {name: body, primitive: prism, points: $footprint, h: $height_m - $min_height_m,
          z: ($height_m + $min_height_m) / 2}

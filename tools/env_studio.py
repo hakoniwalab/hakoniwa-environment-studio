@@ -446,7 +446,8 @@ def import_city_world(body: object) -> dict:
         catalog = _catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID)
         recipe, report = env_citygml.convert_build(
             build, catalog=_catalog_reference(catalog, directory), name=body.get("name") or None,
-            terrain_item=body.get("terrain") or "city-ground")
+            terrain_item=body.get("terrain") or "city-ground",
+            recipe_path=None if body.get("visuals") is False else target)
         env_schema.parse_recipe(recipe, target)
     except DiagnosticError as exc:
         raise StudioError(f"City World から作れません: {exc}") from exc
@@ -455,7 +456,7 @@ def import_city_world(body: object) -> dict:
     return {"id": recipe_id, "path": str(target), "build": str(build), "size_m": recipe["size_m"],
             "buildings": report["buildings"], "roads": report["roads"], "skipped": report["skipped"],
             "courtyards_filled": report["courtyards_filled"], "notes": report["notes"], "provider": report["provider"],
-            "terrain": report["terrain"]}
+            "terrain": report["terrain"], "lod2_visuals": report.get("lod2_visuals", 0)}
 
 
 def save_recipe(recipe_id: str, body: object) -> dict:

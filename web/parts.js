@@ -14,9 +14,9 @@
 
 import { normalizeYaw } from "./geometry.js";
 
-// Placement parameters the plan reads directly (how high it is raised, its
-// colour); only the others change the shape the server resolves.
-export const PLAN_PARAMS = new Set(["z_m", "color"]);
+// Placement parameters that do not change the shape the server resolves (how
+// high it is raised, its colour, its visual asset); the plan reads the first two.
+export const PLAN_PARAMS = new Set(["z_m", "color", "visual"]);
 
 const FALLBACK_SHAPE = { envelope: { primitive: "box", width_m: 0.5, depth_m: 0.5 }, height_m: 0.5, solids: [] };
 

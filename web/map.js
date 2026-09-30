@@ -227,7 +227,7 @@ async function importWorld(build) {
     const result = await api("POST", "city-worlds/import", { id, path: build.path, name: build.title });
     const items = [
       `大きさ ${result.size_m.east} m × ${result.size_m.north} m（${result.provider}、地面：${result.terrain === "dem" ? "City World の地形（DEM）" : "平ら"}）`,
-      `建物 ${result.buildings}、道路 ${result.roads}`,
+      `建物 ${result.buildings}（LOD2 の見た目付き ${result.lod2_visuals ?? 0}）、道路 ${result.roads}`,
       ...(result.courtyards_filled ? [`中庭を埋めた建物 ${result.courtyards_filled}`] : []),
       ...result.notes,
     ];

@@ -99,6 +99,10 @@ class EnvObject:
     params: dict
     shape: Shape
     source: dict | None = None
+    # A visual asset (a GLB the parts converter wrote from CityGML LOD2): what
+    # the generated GLB shows instead of the solids; collisions stay the solids.
+    visual: Path | None = None
+    visual_sha256: str | None = None
 
     @property
     def solids(self):
@@ -358,7 +362,7 @@ def _terrain(value, path: str, catalog: Catalog, size_east: float, size_north: f
     return item.id, make_terrain(settings, params, size_east, size_north, f"{path}.params", base_dir)
 
 
-def _object(value, path: str, catalog: Catalog, terrain: Terrain) -> EnvObject:
+def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path | None = None) -> EnvObject:
     value = mapping(value, path)
     only(value, OBJECT_KEYS, path)
     object_id = _identifier(value.get("id"), f"{path}.id")
@@ -380,8 +384,23 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain) -> EnvObject:
     source = problems.check(_source, value["source"], f"{path}.source") if "source" in value else None
     problems.raise_if_errors()
     params, shape = resolved
+    visual = visual_sha = None
+    if str(params.get("visual") or "").strip():
+        visual = Path(str(params["visual"])).expanduser()
+        if not visual.is_absolute() and base_dir is not None:
+            visual = (base_dir / visual).resolve()
+        try:
+            data = visual.read_bytes()
+        except OSError as exc:
+            raise fail(f"{path}.params.visual", "unknown_reference", f"cannot read the visual asset: {exc}",
+                       actual=str(params["visual"])) from exc
+        if data[:4] != b"glTF":
+            raise fail(f"{path}.params.visual", "wrong_type", "a visual asset is a GLB file", actual=str(params["visual"]))
+        import hashlib
+
+        visual_sha = hashlib.sha256(data).hexdigest()
     obj = EnvObject(id=object_id, item=item.id, type=item.type.id, pose=Pose(x, y, 0.0, float(yaw) % 360.0),
-                    params=params, shape=shape, source=source)
+                    params=params, shape=shape, source=source, visual=visual, visual_sha256=visual_sha)
     # Set on the terrain: its base at the highest ground under its outline
     # (plus its own height above the terrain when elevated). On a height field
     # it keeps HFIELD_CLEARANCE_M above that: the sampled height (bilinear,
@@ -487,7 +506,7 @@ def parse_recipe(data: dict, path: Path, catalog: Catalog | None = None) -> Reci
         problems.add("objects", "wrong_type", "must be a list", expected="list")
         entries = []
     for index, entry in enumerate(entries):
-        obj = problems.check(_object, entry, f"objects[{index}]", catalog, terrain)
+        obj = problems.check(_object, entry, f"objects[{index}]", catalog, terrain, path.parent)
         if obj is None:
             continue
         if obj.id in seen:
@@ -544,6 +563,7 @@ def resolved_json(recipe: Recipe) -> dict:
             "id": obj.id, "item": obj.item, "type": obj.type,
             "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
             "params": obj.params, **obj.shape.as_json(), **({"source": obj.source} if obj.source else {}),
+            **({"visual_sha256": obj.visual_sha256} if obj.visual_sha256 else {}),
         } for obj in recipe.objects],
         **({"geo": recipe.geo} if recipe.geo else {}),
     }

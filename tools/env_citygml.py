@@ -178,14 +178,15 @@ def _road_pieces(polygon, tiled: bool):
 def convert(source: Path, center: tuple[float, float], half_extent: tuple[float, float], *,
             catalog: str = "", name: str | None = None, terrain_item: str = "city-ground",
             items: dict | None = None, prepared: dict[Path, list[dict]] | None = None,
-            dem: Path | None = None) -> tuple[dict, dict]:
+            dem: Path | None = None, visuals: dict | None = None) -> tuple[dict, dict]:
     """(Recipe mapping, report) of the CityGML under `source` for a selection
     centred on (lat, lon) with (north_south, east_west) half extents.
 
     `prepared` gives buildings Envsim already extracted for this selection
     (its <name>-lod1.json records, by source file), so large mesh files are
     only streamed for their attributes. `dem` (an Envsim terrain-receipt.json)
-    makes the ground that City World's terrain (item city-dem)."""
+    makes the ground that City World's terrain (item city-dem). `visuals`
+    ({asset_dir, base_dir, textures}) gives each building part its LOD2 look."""
     items = {**ITEMS, **(items or {})}
     geodesy, extract, roads_probe = envsim_modules()
     lat0, lon0 = center
@@ -195,6 +196,7 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     crs_seen, providers = set(), set()
     reach_e, reach_n = ew_m, ns_m
     seen_ids: set[str] = set()
+    grounds: dict[str, tuple[Path, float, int]] = {}  # part id -> (CityGML file, ground altitude, EPSG)
 
     for path in (list(prepared) if prepared is not None else _files(source, "*bldg*_op.gml")):
         sources.append({"path": str(path.resolve()), "sha256": _sha256(path)})
@@ -242,7 +244,9 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
             source_record = {"provider": provider, "kind": "citygml", "id": record["id"], "note": path.name}
             if tags:
                 source_record["tags"] = tags
-            objects.append({"id": _part_id(record["id"], used), "item": items["building"], "pose": pose,
+            part_id = _part_id(record["id"], used)
+            grounds[part_id] = (path, ground, int(str(record.get("source_crs", "EPSG:6697")).split(":")[-1]))
+            objects.append({"id": part_id, "item": items["building"], "pose": pose,
                             "params": {"footprint": footprint, "height_m": height,
                                        **({"min_height_m": base} if base > 0 else {})},
                             "source": source_record})
@@ -279,6 +283,10 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
 
     if not report["buildings"]:
         raise fail("citygml", "missing_field", "no LOD1 building in the selection", actual=str(source))
+    report["lod2_visuals"] = 0
+    if visuals is not None:
+        report["lod2_visuals"] = attach_visuals(objects, grounds, center, visuals.get("textures") or {},
+                                                visuals["asset_dir"], visuals["base_dir"])
     # The environment holds every whole building (centred on the selection).
     def size(half: float, reach: float) -> float:
         # The selection, or (only where a building reaches past it) 0.1 m steps beyond.
@@ -314,6 +322,164 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     report["terrain"] = "dem" if dem is not None else "flat"
     report["provider"] = provider
     return recipe, report
+
+
+# --- LOD2 visuals (stage B-1) ----------------------------------------------------
+#
+# Each building part gets a GLB of its own CityGML LOD2 surfaces (textures
+# included) in the part's frame: glTF axes, origin at the part's position and
+# its ground, so the Studio moves and turns it with the part. Collisions stay
+# the LOD1 footprint.
+
+APP = "{http://www.opengis.net/citygml/appearance/2.0}"
+BLDG = "{http://www.opengis.net/citygml/building/2.0}"
+GML = "{http://www.opengis.net/gml}"
+LOD2_TAGS = (f"{BLDG}lod2MultiSurface", f"{BLDG}lod2Geometry", f"{BLDG}lod2Solid")
+MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+
+
+def _buildings_and_appearances(path: Path, wanted: set[str]):
+    """The wanted bldg:Building elements of a CityGML file and its appearance
+    map, streamed (a PLATEAU mesh file is hundreds of megabytes)."""
+    helpers = env_envsim.glb_helpers()
+    buildings, appearances = {}, ET.Element("appearances")
+    for _event, element in ET.iterparse(path, events=("end",)):
+        if element.tag == f"{BLDG}Building":
+            gml_id = element.get(GML_ID)
+            if gml_id in wanted:
+                buildings[gml_id] = element
+            else:
+                element.clear()
+        elif element.tag == f"{APP}Appearance":
+            appearances.append(element)
+    return buildings, helpers.appearance_map(appearances)
+
+
+def _lod2_polygons(building) -> list:
+    found, seen = [], set()
+    for tag in LOD2_TAGS:
+        for surface in building.iter(tag):
+            for polygon in surface.iter(f"{GML}Polygon"):
+                key = polygon.get(GML_ID) or id(polygon)
+                if key not in seen:
+                    seen.add(key)
+                    found.append(polygon)
+    return found
+
+
+def _rings(polygon, parse_poslist) -> list[tuple[str, list]]:
+    """(ring id, points) of a polygon's exterior and interiors, without repeated closing points."""
+    exterior = polygon.find(f"{GML}exterior/{GML}LinearRing")
+    if exterior is None:
+        return []
+    rings = []
+    for ring in [exterior, *polygon.findall(f"{GML}interior/{GML}LinearRing")]:
+        pos = ring.find(f"{GML}posList")
+        if pos is None or not pos.text:
+            return []
+        points = parse_poslist(pos.text)
+        if len(points) > 1 and all(abs(a - b) < 1e-10 for a, b in zip(points[0], points[-1])):
+            points = points[:-1]
+        if len(points) < 3:
+            return []
+        rings.append((ring.get(GML_ID, ""), points))
+    return rings
+
+
+def building_visual(building, appearances, gml_path: Path, textures: dict, center, epsg: int,
+                    origin: tuple[float, float], ground: float) -> bytes | None:
+    """The GLB of one building's LOD2 surfaces in its part's frame (None when
+    it has no LOD2). `textures` maps (source file, image uri) to image files;
+    an image next to the CityGML is used when it is not listed."""
+    import env_generate
+
+    geodesy, extract, _probe = env_envsim.pipeline()
+    helpers = env_envsim.glb_helpers()
+    groups: dict[Path | None, dict] = {}
+    for polygon in _lod2_polygons(building):
+        rings = _rings(polygon, extract.parse_poslist)
+        if not rings:
+            continue
+        local = []
+        for _ring_id, points in rings:
+            enu = geodesy.project_to_local_enu(points, center[0], center[1], epsg)
+            local.append([(east - origin[0], altitude - ground, -(north - origin[1])) for east, north, altitude in enu])
+        uv_rings = None
+        image = None
+        found = appearances.get(polygon.get(GML_ID, ""))
+        if found is not None:
+            uri, uv_by_ring = found
+            uv_rings = [uv_by_ring.get(ring_id) for ring_id, _ in rings]
+            if any(uv is None or len(uv) != len(ring) for uv, (_, ring) in zip(uv_rings, rings)):
+                uv_rings = None
+            else:
+                image = textures.get((str(gml_path.resolve()), uri))
+                if image is None and not uri.startswith(("http:", "https:")) and ".." not in Path(uri).parts:
+                    candidate = gml_path.parent / uri
+                    image = candidate if candidate.is_file() else None
+                if image is None:
+                    uv_rings = None
+        try:
+            vertices, faces = helpers.triangulate_rings(local)
+        except Exception:  # noqa: BLE001 - a degenerate surface is left out, as Envsim does
+            continue
+        uv_flat = [uv for ring in uv_rings for uv in ring] if uv_rings else None
+        group = groups.setdefault(image if uv_flat else None, {"positions": [], "normals": [], "uvs": []})
+        for face in faces:
+            a, b, c = (vertices[index] for index in face)
+            ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+            vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+            nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+            length = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+            for index in face:
+                group["positions"].append(tuple(float(value) for value in vertices[index]))
+                group["normals"].append((nx / length, ny / length, nz / length))
+                if uv_flat:
+                    group["uvs"].append(uv_flat[index])
+    if not groups:
+        return None
+    builder = env_generate._GlbBuilder()
+    primitives = []
+    for image, group in sorted(groups.items(), key=lambda item: str(item[0] or "")):
+        if image is not None:
+            material = builder.textured_material(Path(image).read_bytes(), MIME.get(Path(image).suffix.lower(), "image/jpeg"))
+        else:
+            material = builder.material("#c9c3b6")
+        primitives.append(builder.surface_primitive(group["positions"], group["normals"],
+                                                    group["uvs"] if image is not None else None,
+                                                    list(range(len(group["positions"]))), material))
+    builder.node("building", None, (0.0, 0.0, 0.0), 0.0, {"source": building.get(GML_ID)}, primitives=primitives)
+    return builder.glb()
+
+
+def attach_visuals(objects: list[dict], grounds: dict[str, tuple[Path, float, int]], center, textures: dict,
+                   asset_dir: Path, base_dir: Path) -> int:
+    """Write each building part's LOD2 GLB under asset_dir and point its
+    `visual` parameter at it (relative to base_dir); returns how many got one.
+    `grounds` maps a part id to (source file, ground altitude, EPSG)."""
+    by_file: dict[Path, list[dict]] = {}
+    for obj in objects:
+        if obj["id"] in grounds:
+            by_file.setdefault(grounds[obj["id"]][0], []).append(obj)
+    count = 0
+    for path, parts in by_file.items():
+        wanted = {obj["source"]["id"].split("__part_")[0] for obj in parts}
+        buildings, appearances = _buildings_and_appearances(path, wanted)
+        for obj in parts:
+            building = buildings.get(obj["source"]["id"].split("__part_")[0])
+            if building is None:
+                continue
+            _path, ground, epsg = grounds[obj["id"]]
+            glb = building_visual(building, appearances, path, textures, center, epsg,
+                                  (obj["pose"]["x_m"], obj["pose"]["y_m"]), ground)
+            if glb is None:
+                continue
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            target = asset_dir / f"{obj['id']}.glb"
+            target.write_bytes(glb)
+            obj["params"]["visual"] = Path(os.path.relpath(target, base_dir)).as_posix()
+            count += 1
+    return count
 
 
 # --- Envsim builds already in a workspace ----------------------------------------
@@ -390,12 +556,35 @@ def discover(roots: list[Path], max_depth: int = 8) -> list[dict]:
     return found
 
 
-def convert_build(build: Path, use_dem: bool = True, **options) -> tuple[dict, dict]:
+def build_textures(build: Path) -> dict[tuple[str, str], Path]:
+    """(source CityGML, image uri) -> image file, from the City World's
+    buildings GLB receipt (it records where each texture it used is)."""
+    receipt = build / "components" / "buildings" / "buildings-glb-receipt.json"
+    if not receipt.is_file():
+        return {}
+    found = {}
+    for texture in json.loads(receipt.read_text(encoding="utf-8")).get("textures", []):
+        if texture.get("path") and Path(texture["path"]).is_file():
+            found[(str(Path(texture["source_gml"]).resolve()), texture["image_uri"])] = Path(texture["path"])
+    return found
+
+
+def asset_dir_for(recipe_path: Path) -> Path:
+    """Where a Recipe's visual assets go: <recipe>.assets beside it."""
+    return recipe_path.parent / f"{recipe_path.stem}.assets"
+
+
+def convert_build(build: Path, use_dem: bool = True, recipe_path: Path | None = None, **options) -> tuple[dict, dict]:
     """Parts of an Envsim build: its selection, its extracted buildings, its
-    roads, and (when it has one and `use_dem`) its DEM terrain as the ground."""
+    roads, (when it has one and `use_dem`) its DEM terrain as the ground, and
+    (given `recipe_path`) each building's LOD2 look as a visual asset."""
     info = read_envsim_build(build)
+    visuals = None
+    if recipe_path is not None:
+        visuals = {"asset_dir": asset_dir_for(recipe_path), "base_dir": recipe_path.parent,
+                   "textures": build_textures(build)}
     recipe, report = convert(info["source"], info["center"], info["half_extent"], prepared=info["prepared"],
-                             dem=info["dem"] if use_dem else None, **options)
+                             dem=info["dem"] if use_dem else None, visuals=visuals, **options)
     report["build"] = str(build)
     return recipe, report
 
@@ -417,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
     parser.add_argument("--terrain", default="city-ground")
     parser.add_argument("--flat", action="store_true", help="with --envsim-build: flat ground even when it has a DEM")
+    parser.add_argument("--no-visuals", action="store_true", help="with --envsim-build: LOD1 boxes only (no LOD2 GLBs)")
     parser.add_argument("--name")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--json", action="store_true")
@@ -437,7 +627,8 @@ def main(argv: list[str] | None = None) -> int:
         catalog = Path(os.path.relpath(args.catalog.resolve(), out.parent)).as_posix()
         if args.envsim_build:
             recipe, report = convert_build(args.envsim_build.resolve(), use_dem=not args.flat, catalog=catalog,
-                                           name=args.name, terrain_item=args.terrain)
+                                           name=args.name, terrain_item=args.terrain,
+                                           recipe_path=None if args.no_visuals else out)
         else:
             if not args.center or not args.half_extent:
                 parser.error("--citygml needs --center and --half-extent")

@@ -57,3 +57,11 @@ def bounding_box(center: tuple[float, float], half_extent: tuple[float, float]) 
 
     west, south, east, north = plateau_citygml.bounding_box(center[0], center[1], half_extent[0], half_extent[1])
     return south, west, north, east
+
+
+def glb_helpers():
+    """Envsim's CityGML-to-GLB helpers (appearance map, ring triangulation)."""
+    pipeline()
+    import citygml2glb
+
+    return citygml2glb
