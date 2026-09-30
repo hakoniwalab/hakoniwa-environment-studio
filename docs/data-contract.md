@@ -187,4 +187,4 @@ python tools/envstudio.py --json resolve recipes/examples/hills-field.yaml
 python tools/envstudio.py generate recipes/examples/car-test-course.yaml --out-dir build/car-test-course
 ```
 
-終了コードは 0 = OK、1 = 入力に問題あり（診断を出力）、2 = 使い方の誤り。AI 向けの使い方は `docs/ai-contract.md`（#9）にまとめます。
+終了コードは 0 = OK、1 = 入力に問題あり（診断を出力）、2 = 使い方の誤り。AI 向けの使い方は [ai-contract.md](ai-contract.md)（#9）。

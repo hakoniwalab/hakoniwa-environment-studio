@@ -3,6 +3,7 @@
 agents use to discover types and items, and to check and resolve Recipes
 (docs/ai-contract.md).
 
+    envstudio.py contract                     contract and schema versions, commands, diagnostic codes
     envstudio.py types                        placeable types (--all: abstract ones too)
     envstudio.py describe-type <type>         a type's parameters, behaviour, terrain
     envstudio.py catalog <catalog.yaml>       a Catalog's items
@@ -10,6 +11,8 @@ agents use to discover types and items, and to check and resolve Recipes
     envstudio.py validate <file | ->          a Recipe (or a Catalog): {ok, diagnostics}; a Recipe is
                                               also checked with MuJoCo (--no-physics to skip)
     envstudio.py resolve <recipe | ->         a Recipe resolved: terrain, objects, solids
+    envstudio.py inspect <recipe | ->         where each object is: bounds, ground under it, the nearest
+                                              object and the room to each edge (for placing and repairs)
     envstudio.py generate <recipe | -> --out-dir DIR   environment.glb / .xml / .json
 
 --json prints JSON (the default when the output is not a terminal is still
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -30,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import yaml  # noqa: E402
 
 import env_schema  # noqa: E402
-from env_diagnostics import DiagnosticError, fail  # noqa: E402
+from env_diagnostics import CODES, DiagnosticError, fail  # noqa: E402
 
 CONTRACT_VERSION = "1"
 
@@ -58,6 +62,31 @@ def _schemas() -> dict:
     import env_types
 
     return {"types": env_types.TYPES_SCHEMA, "catalog": env_schema.CATALOG_SCHEMA, "recipe": env_schema.RECIPE_SCHEMA}
+
+
+COMMANDS = {
+    "contract": "this summary: versions, commands, frame, diagnostic codes, exit codes",
+    "types": "placeable types (--all: abstract ones too)",
+    "describe-type": "a type's parameters (kind, unit, range, default, level), behaviour, terrain",
+    "catalog": "a Catalog's items",
+    "describe-item": "an item: its parameters, the ones a placement may change, resolved shape",
+    "validate": "schema, then MuJoCo checks: {ok, diagnostics}",
+    "resolve": "the Recipe resolved: terrain, objects with z and solids",
+    "inspect": "bounds, ground, nearest object and room to the edges of each object",
+    "generate": "environment.glb / environment.xml / environment.json",
+}
+FRAME = {"units": "m", "axes": "ENU (x east, y north, z up)", "origin": "centre", "yaw": "deg, counter-clockwise from east"}
+
+
+def cmd_contract(args) -> dict:
+    import env_version
+
+    return {
+        "contract": CONTRACT_VERSION, "version": env_version.VERSION, "schemas": _schemas(),
+        "commands": COMMANDS, "frame": FRAME, "diagnostic_codes": CODES,
+        "diagnostic_fields": ["severity", "path", "code", "expected", "actual", "reason", "related"],
+        "exit_codes": {"0": "OK", "1": "the input has problems (diagnostics)", "2": "bad usage"},
+    }
 
 
 def cmd_types(args) -> dict:
@@ -126,7 +155,7 @@ def resolved_json(recipe) -> dict:
     return {
         "name": recipe.name, "description": recipe.description,
         "size_m": {"east": recipe.size_east_m, "north": recipe.size_north_m},
-        "frame": {"units": "m", "axes": "ENU (x east, y north, z up)", "origin": "centre", "yaw": "deg, counter-clockwise from east"},
+        "frame": FRAME,
         "terrain": {"item": recipe.terrain_item, **recipe.terrain.as_json(with_heights=False)},
         "objects": [{
             "id": obj.id, "item": obj.item, "type": obj.type,
@@ -143,6 +172,67 @@ def cmd_resolve(args) -> dict:
     return resolved_json(parsed)
 
 
+def _gap(a: list[tuple[float, float]], b: list[tuple[float, float]]) -> float:
+    """The distance between two convex outlines on the plan; 0 when they touch or overlap."""
+    for polygon in (a, b):
+        for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1]):
+            nx, ny = y2 - y1, x1 - x2  # outward normal of a counter-clockwise edge
+            edge = nx * x1 + ny * y1
+            if all(nx * x + ny * y >= edge for x, y in (b if polygon is a else a)):
+                break
+        else:
+            continue
+        break
+    else:
+        return 0.0  # no separating edge: they overlap
+
+    def to_segment(point, start, end):
+        (px, py), (x1, y1), (x2, y2) = point, start, end
+        dx, dy = x2 - x1, y2 - y1
+        t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / ((dx * dx + dy * dy) or 1.0)))
+        return math.hypot(px - x1 - t * dx, py - y1 - t * dy)
+
+    return min(to_segment(point, start, end)
+               for points, polygon in ((a, b), (b, a)) for point in points
+               for start, end in zip(polygon, polygon[1:] + polygon[:1]))
+
+
+def cmd_inspect(args) -> dict:
+    """Where everything is, in the numbers an agent needs to place or move an
+    object: its bounds on the plan and in height, the ground under it, the
+    nearest other object (0 when they touch or overlap on the plan) and the
+    room between it and each edge (negative: it sticks out)."""
+    kind, parsed = _parse(args)
+    if kind != "recipe":
+        raise fail("schema", "wrong_schema", "inspect takes a Recipe", expected=env_schema.RECIPE_SCHEMA)
+    round_mm = lambda value: round(value, 3)  # noqa: E731
+    half_east, half_north = parsed.size_east_m / 2, parsed.size_north_m / 2
+    outlines = {obj.id: env_schema.footprint(obj) for obj in parsed.objects}
+    heights = [h for row in parsed.terrain.heights for h in row] or [0.0]  # flat ground has no grid
+    objects = []
+    for obj in parsed.objects:
+        outline = outlines[obj.id]
+        xs, ys = [x for x, _ in outline], [y for _, y in outline]
+        gaps = sorted((_gap(outline, outlines[other.id]), other.id) for other in parsed.objects if other.id != obj.id)
+        objects.append({
+            "id": obj.id, "item": obj.item, "type": obj.type,
+            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
+            "bounds_m": {"x": [round_mm(min(xs)), round_mm(max(xs))], "y": [round_mm(min(ys)), round_mm(max(ys))],
+                         "z": [round_mm(obj.pose.z_m + obj.shape.bottom_m), round_mm(obj.pose.z_m + obj.shape.height_m)]},
+            "ground_m": round_mm(parsed.terrain.highest_under(outline)),
+            "nearest": {"id": gaps[0][1], "gap_m": round_mm(gaps[0][0])} if gaps else None,
+            "room_m": {"east": round_mm(half_east - max(xs)), "west": round_mm(min(xs) + half_east),
+                       "north": round_mm(half_north - max(ys)), "south": round_mm(min(ys) + half_north)},
+        })
+    return {
+        "size_m": {"east": parsed.size_east_m, "north": parsed.size_north_m}, "frame": FRAME,
+        "extent_m": {"x": [-half_east, half_east], "y": [-half_north, half_north]},
+        "terrain": {"item": parsed.terrain_item, "kind": parsed.terrain.kind,
+                    "height_m": [round_mm(min(heights)), round_mm(max(heights))]},
+        "objects": objects,
+    }
+
+
 def cmd_generate(args) -> dict:
     import env_generate
 
@@ -155,6 +245,11 @@ def cmd_generate(args) -> dict:
 
 
 def _text(command: str, result: dict) -> str:
+    if command == "inspect":
+        return "\n".join(
+            f"{row['id']:16} x {row['bounds_m']['x']} y {row['bounds_m']['y']} z {row['bounds_m']['z']}  "
+            f"ground {row['ground_m']}  nearest {row['nearest']['id'] + ' ' + str(row['nearest']['gap_m']) + ' m' if row['nearest'] else '-'}"
+            for row in result["objects"])
     if command == "types":
         return "\n".join(f"{row['id']:18} {row['kind']:8} {row['label']}" for row in result["types"])
     if command == "catalog":
@@ -172,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="envstudio", description=__doc__.splitlines()[0])
     parser.add_argument("--json", action="store_true", help="print JSON")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("contract")
     types_parser = commands.add_parser("types")
     types_parser.add_argument("--all", action="store_true")
     commands.add_parser("describe-type").add_argument("type")
@@ -179,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     describe_item = commands.add_parser("describe-item")
     describe_item.add_argument("catalog")
     describe_item.add_argument("item")
-    for name in ("validate", "resolve", "generate"):
+    for name in ("validate", "resolve", "inspect", "generate"):
         sub = commands.add_parser(name)
         sub.add_argument("file", help="a YAML / JSON file, or - for stdin")
         sub.add_argument("--base", type=Path, help="with -, the folder the catalog path is relative to")
@@ -188,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         if name == "validate":
             sub.add_argument("--no-physics", action="store_true", help="skip the MuJoCo checks")
     args = parser.parse_args(argv)
-    handlers = {"types": cmd_types, "describe-type": cmd_describe_type, "catalog": cmd_catalog,
+    handlers = {"contract": cmd_contract, "inspect": cmd_inspect, "types": cmd_types, "describe-type": cmd_describe_type, "catalog": cmd_catalog,
                 "describe-item": cmd_describe_item, "validate": cmd_validate, "resolve": cmd_resolve,
                 "generate": cmd_generate}
     try:

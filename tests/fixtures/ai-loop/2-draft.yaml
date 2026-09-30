@@ -1,0 +1,14 @@
+# Round 2: the schema diagnostics repaired (yaw_deg, opening in range, the
+# Catalog's landing-pad). The pad was put in the corner without checking its
+# size, so MuJoCo reports it outside; a cone was dropped onto gate-1's post.
+schema: hakoniwa.environment-recipe/v1
+name: ドローン練習場
+catalog: ../../../catalogs/starter/catalog.yaml
+size_m: {east: 20, north: 30}
+terrain: {item: grass-ground}
+objects:
+  - {id: gate-1, item: race-gate, pose: {x_m: 0, y_m: -6, yaw_deg: 0}}
+  - {id: gate-2, item: race-gate, pose: {x_m: 0, y_m: 0, yaw_deg: 0}, params: {opening_width_m: 3}}
+  - {id: gate-3, item: race-gate, pose: {x_m: 0, y_m: 6, yaw_deg: 0}}
+  - {id: pad, item: landing-pad, pose: {x_m: 9.5, y_m: 14.5, yaw_deg: 0}}
+  - {id: marker, item: traffic-cone, pose: {x_m: 0.8, y_m: -6, yaw_deg: 0}}
