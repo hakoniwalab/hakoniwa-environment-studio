@@ -25,6 +25,25 @@ def root() -> Path:
     return found
 
 
+_PLATEAU_CLIENT = None
+
+
+def plateau_client():
+    """Envsim's PLATEAU catalog client (tools/plateau_citygml.py), loaded once."""
+    global _PLATEAU_CLIENT
+    if _PLATEAU_CLIENT is None:
+        import importlib.util
+
+        path = root() / "tools" / "plateau_citygml.py"
+        spec = importlib.util.spec_from_file_location("hakoniwa_envsim_plateau_citygml", path)
+        if spec is None or spec.loader is None:
+            raise fail("envsim", "missing_field", "hakoniwa-envsim's PLATEAU client cannot be loaded", expected=str(path))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _PLATEAU_CLIENT = module
+    return _PLATEAU_CLIENT
+
+
 def _on_path(directory: Path) -> None:
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))

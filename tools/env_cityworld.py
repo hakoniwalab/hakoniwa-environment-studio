@@ -64,11 +64,36 @@ def plateau_cache(roots: list[Path]) -> Path:
     return (WORK / "cache").resolve()
 
 
-def build_config(job: Path, center: tuple[float, float], half: tuple[float, float], cache: Path) -> str:
+# The build conditions the map page offers (hakoniwa-envsim
+# docs/hakoniwa-build-reference.md), with the City World Web UI's defaults.
+BUILD_OPTIONS = {
+    "building_physics_level": (3, (0, 1, 2, 3)),
+    "building_collider_reduction": ("convex-decompose", ("safe", "coplanar-union", "convex-decompose", "tolerant-planar")),
+    "terrain_uncovered_policy": ("error", ("error", "constant")),
+}
+
+
+def build_options(given: object) -> dict:
+    """The build conditions of a request, the defaults filled in."""
+    given = given if isinstance(given, dict) else {}
+    options = {}
+    for name, (default, allowed) in BUILD_OPTIONS.items():
+        value = given.get(name, default)
+        if value not in allowed:
+            raise BuildError(f"{name} must be one of {', '.join(map(str, allowed))} (got {value!r})")
+        options[name] = value
+    return options
+
+
+def build_config(job: Path, center: tuple[float, float], half: tuple[float, float], cache: Path,
+                 options: dict | None = None) -> str:
     """The Envsim build of a selection, as the business pack's City World
-    Web UI makes it (profile visual-physics-v1)."""
+    Web UI makes it (profile visual-physics-v1), with the chosen conditions.
+    terrain_uncovered_policy constant makes the ground flat at 0 m where there
+    is no DEM (a whole area without DEM gets a flat ground)."""
     lat, lon = center
     ns, ew = half
+    options = build_options(options)
     return f"""version: 1
 component: hakoniwa-envsim
 
@@ -105,8 +130,8 @@ mjcf:
   model_name: plateau_city_world
   collision: all
   floor: false
-  building_physics_level: 3
-  building_collider_reduction: convex-decompose
+  building_physics_level: {options["building_physics_level"]}
+  building_collider_reduction: {options["building_collider_reduction"]}
 
 glb:
   enabled: true
@@ -119,7 +144,7 @@ city_world:
   dem_parallel_workers: 4
   building_physics_workers: 4
   terrain_spacing_m: 2
-  terrain_uncovered_policy: error
+  terrain_uncovered_policy: {options["terrain_uncovered_policy"]}
   terrain_uncovered_elevation_m: 0
   marking_vertical_offset_m: 0.055
   bridge_collision_thickness_m: 0.02
@@ -184,11 +209,12 @@ class Builds:
 
     def start(self, body: object, roots: list[Path]) -> dict:
         if not isinstance(body, dict):
-            raise BuildError("the request body must be {id, selection, offline?, overwrite?}")
+            raise BuildError("the request body must be {id, selection, options?, offline?, overwrite?}")
         job_id = str(body.get("id") or "")
         if not env_rules.ID_PATTERN.match(job_id):
             raise BuildError(f"{job_id!r} is not an id (lower case letters, digits, - and _)")
         center, half = _selection(body)
+        options = build_options(body.get("options"))
         with self.lock:
             other = self.running()
             if other is not None:
@@ -203,11 +229,11 @@ class Builds:
             job.mkdir(parents=True, exist_ok=True)
             cache = plateau_cache(roots)
             config = job / "hakoniwa-envsim-build.yaml"
-            config.write_text(build_config(job, center, half, cache), encoding="utf-8")
+            config.write_text(build_config(job, center, half, cache, options), encoding="utf-8")
             (job / "job.json").write_text(json.dumps({
                 "schema_version": 1, "job_id": job_id, "name": body.get("name") or job_id,
                 "request": {"selection": body["selection"], "profile": "visual-physics-v1",
-                            "offline": bool(body.get("offline"))},
+                            "options": options, "offline": bool(body.get("offline"))},
                 "created_by": "hakoniwa-environment-studio",
             }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             log = job / "generation.log"

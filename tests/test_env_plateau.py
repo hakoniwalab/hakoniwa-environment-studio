@@ -1,0 +1,100 @@
+"""What PLATEAU has in a selection (tools/env_plateau.py), with a stand-in for
+hakoniwa-envsim's catalog client (no network), and the build conditions the
+map page offers (env_cityworld.build_options / build_config)."""
+
+from pathlib import Path
+import sys
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+
+import env_cityworld  # noqa: E402
+import env_plateau  # noqa: E402
+
+
+class FakeClient:
+    """Answers the catalog with the files given per feature type."""
+
+    def __init__(self, files):
+        self.files = files
+
+    def bounding_box(self, lat, lon, ns, ew):
+        return (lon - 0.001, lat - 0.001, lon + 0.001, lat + 0.001)
+
+    def third_mesh_codes(self, bbox):
+        return ["64414278"]
+
+    def search_url(self, api, feature_type, bbox, mesh_level=3):
+        return feature_type
+
+    def request_catalog(self, url, allow_not_found=False):
+        return url
+
+    def select_files(self, feature_type, _type, year, allow_empty=False, min_lod=1):
+        return self.files.get(feature_type, [])
+
+
+def file(feature, lod, code="64414278001", size=1000):
+    return {"url": f"https://example/{feature}/{code}", "city_code": "01100", "city_name": "札幌市",
+            "year": 2020, "max_lod": lod, "file_size": size, "code": code}
+
+
+class PlateauInspectionTest(unittest.TestCase):
+    def test_an_area_with_buildings_terrain_and_roads_can_be_built(self):
+        client = FakeClient({"bldg": [file("bldg", 2)], "dem": [file("dem", 1)], "tran": [file("tran", 1)],
+                             "frn": [file("frn", 1)]})
+        result = env_plateau.inspect((43.0668, 141.351), (100, 100), client)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["capabilities"]["building"]["max_lod"], 2)
+        # Road markings below LOD3 are there, but the builder does not use them.
+        self.assertEqual((result["capabilities"]["road_markings"]["available"],
+                          result["capabilities"]["road_markings"]["usable"]), (True, False))
+        self.assertEqual(result["municipalities"], [{"city_code": "01100", "city": "札幌市", "year": 2020}])
+        self.assertEqual((result["files"], result["download_bytes"]), (4, 4000))
+
+    def test_an_area_without_roads_is_not_available(self):
+        result = env_plateau.inspect((35.36, 138.73), (100, 100),
+                                     FakeClient({"bldg": [file("bldg", 1)], "dem": [file("dem", 1)]}))
+        self.assertEqual((result["available"], result["missing"], result["flat_ground_possible"]),
+                         (False, ["road"], False))
+
+    def test_an_area_without_terrain_can_be_built_on_flat_ground(self):
+        result = env_plateau.inspect((35.0, 139.0), (100, 100),
+                                     FakeClient({"bldg": [file("bldg", 1)], "tran": [file("tran", 1)]}))
+        self.assertEqual((result["available"], result["flat_ground_possible"]), (False, True))
+
+    def test_bridges_outside_the_area_are_left_out(self):
+        client = FakeClient({"bldg": [file("bldg", 1)], "dem": [file("dem", 1)], "tran": [file("tran", 1)],
+                             "brid": [file("brid", 3, code="64414278002"), file("brid", 3, code="64414279001")]})
+        self.assertEqual(env_plateau.inspect((43.0, 141.3), (100, 100), client)["capabilities"]["bridge"]["files"], 1)
+
+    def test_a_catalog_that_does_not_answer_is_an_inspection_error(self):
+        class Down(FakeClient):
+            def request_catalog(self, url, allow_not_found=False):
+                raise OSError("network is down")
+
+        with self.assertRaisesRegex(env_plateau.InspectionError, "did not answer"):
+            env_plateau.inspect((43.0, 141.3), (100, 100), Down({}))
+
+
+class BuildConditionsTest(unittest.TestCase):
+    def test_the_defaults_are_the_city_world_web_uis(self):
+        self.assertEqual(env_cityworld.build_options(None), {
+            "building_physics_level": 3, "building_collider_reduction": "convex-decompose",
+            "terrain_uncovered_policy": "error"})
+
+    def test_chosen_conditions_go_into_the_envsim_build(self):
+        config = env_cityworld.build_config(Path("/job"), (43.0, 141.3), (100.0, 100.0), Path("/cache"), {
+            "building_physics_level": 0, "building_collider_reduction": "safe", "terrain_uncovered_policy": "constant"})
+        self.assertIn("building_physics_level: 0", config)
+        self.assertIn("building_collider_reduction: safe", config)
+        self.assertIn("terrain_uncovered_policy: constant", config)
+
+    def test_a_condition_outside_envsims_values_is_refused(self):
+        with self.assertRaisesRegex(env_cityworld.BuildError, "building_physics_level"):
+            env_cityworld.build_options({"building_physics_level": 4})
+
+
+if __name__ == "__main__":
+    unittest.main()

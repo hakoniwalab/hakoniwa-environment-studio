@@ -232,6 +232,17 @@ Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘�
 
 地図から（#10）：Studio の「地図から」で Leaflet の地図を開き、範囲を指定して取り込むと、その範囲の建物と道路が部品になった Recipe ができます。範囲の指定は PLATEAU の City World ブラウザと同じです（中心マーカー、区画のドラッグ、四隅のハンドル、half extent 10〜1000 m）。
 
+地図ページの左上のトグルで、**PLATEAU** と **OpenStreetMap** を切り替えます。範囲はそのまま残るので、作業の途中で行き来できます。取れる範囲と精度が違うためです。
+
+| | PLATEAU | OpenStreetMap |
+|---|---|---|
+| 範囲 | PLATEAU が整備された都市だけ | 世界中どこでも |
+| 建物 | LOD2 の形とテクスチャ、建物ごとの当たり判定（P0〜P3） | 外形を押し出した箱（高さは推定を含む） |
+| 地形・道路 | 地形（DEM）、道路面、路面標示 | 平らな地面、道路の線から作った面 |
+
+- **PLATEAU：**「この範囲を診断」で、範囲に PLATEAU のどのデータがあるか（自治体、建物・地形・道路・路面標示・橋の有無と最大 LOD）を公式のカタログに問い合わせます（ダウンロードはしません。判定は Business Pack の City World Web UI と同じ）。データがなければ「この範囲を OpenStreetMap で作る」で切り替えられます。地形（DEM）だけが無いときは、「地形（DEM）が無い所」を「平らな地面にする」にすれば作れます。建物の当たり判定（P0〜P3）と簡略化の方式を選んで、City World を作ります。
+- **OpenStreetMap：** 範囲の建物と道路を取り込んで部品にします。「この範囲が PLATEAU にあるか確かめる」で、PLATEAU に切り替えて同じ範囲を診断します。
+
 - **経路**：地図データは、街データの標準の中間表現である CityGML を経由します。
   1. hakoniwa-envsim の `osm2citygml.py` が、OpenStreetMap（Overpass API）か GeoJSON を CityGML LOD1 にします（変換規則は envsim の `docs/osm-to-citygml.md`）。
   2. このリポジトリの部品変換ツール `tools/env_citygml.py` が、それを部品にします。

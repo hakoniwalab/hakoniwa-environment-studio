@@ -33,20 +33,77 @@
       </section>
 
       <section class="panel">
-        <h2>作る環境</h2>
-        <label class="field">ID<input id="recipe-id" placeholder="tokyo-station" autocomplete="off"></label>
-        <label class="field">名前<input id="recipe-name" placeholder="東京駅周辺" autocomplete="off"></label>
-        <label class="field">地面<select id="terrain"></select></label>
-        <label class="field">地図データ
-          <select id="source">
-            <option value="overpass">OpenStreetMap（Overpass API で取得）</option>
-            <option value="geojson">GeoJSON ファイル</option>
-          </select>
-        </label>
-        <label class="field" id="geojson-field" hidden>GeoJSON<input id="geojson" type="file" accept=".geojson,.json,application/geo+json"></label>
-        <button id="import">この範囲を取り込む</button>
-        <p class="hint">建物は外形と高さ（無ければ階数、それも無ければ種類ごとの既定値）、道路は中心線・幅・車線数（無ければ道路の種類ごとの既定値）で作ります。取り込み後は Studio で普通の部品として編集できます。</p>
+        <div class="segmented" id="source-mode" role="group" aria-label="データの種類">
+          <button data-mode="plateau" aria-pressed="true" title="国土交通省の 3D 都市モデル。整備された都市だけですが、LOD2 の建物・地形（DEM）・道路面まであります">PLATEAU</button>
+          <button data-mode="osm" aria-pressed="false" title="OpenStreetMap。世界中どこでも使えますが、建物は外形を押し出した箱（高さは推定を含む）です">OpenStreetMap</button>
+        </div>
+        <p class="hint" id="mode-hint"></p>
       </section>
+
+      <div id="mode-plateau">
+        <section class="panel">
+          <h2>PLATEAU で診断する</h2>
+          <p class="hint">青い範囲に PLATEAU のどのデータがあるかを、公式のカタログに問い合わせます（ダウンロードはしません）。</p>
+          <button id="plateau-inspect">この範囲を診断</button>
+          <div id="plateau-report" class="meta"></div>
+          <button id="to-osm" class="secondary" hidden>この範囲を OpenStreetMap で作る</button>
+        </section>
+
+        <section class="panel">
+          <h2>PLATEAU から City World を作る</h2>
+          <p class="hint">青い範囲の PLATEAU データを hakoniwa-envsim でダウンロードして変換します（LOD2 の見た目・建物の当たり判定・地形・道路・路面標示）。範囲と建物の数によって数分〜数十分かかります。ダウンロードしたデータは共有のキャッシュに残り、次から使い回します。</p>
+          <label class="field">ID<input id="build-id" placeholder="sapporo-station" autocomplete="off"></label>
+          <label class="field" title="建物の当たり判定をどこまで細かくするか。P3 は屋根・壁の面ごと、P0 は建物ごとの箱（hakoniwa-envsim の building_physics_level）">建物の当たり判定
+            <select id="build-physics">
+              <option value="3" selected>P3：屋根・壁の面まで（細かい）</option>
+              <option value="2">P2</option>
+              <option value="1">P1</option>
+              <option value="0">P0：建物ごとの箱（軽い）</option>
+            </select>
+          </label>
+          <label class="field" title="当たり判定の面をまとめて数を減らす方式（hakoniwa-envsim の building_collider_reduction）">当たり判定の簡略化
+            <select id="build-reduction">
+              <option value="convex-decompose" selected>convex-decompose（既定）</option>
+              <option value="coplanar-union">coplanar-union</option>
+              <option value="safe">safe（まとめない）</option>
+              <option value="tolerant-planar">tolerant-planar（壁を最大 5 cm 近似）</option>
+            </select>
+          </label>
+          <label class="field" title="地形（DEM）が無い所の扱い。平らにすると、DEM の無い範囲でも作れます（hakoniwa-envsim の terrain_uncovered_policy）">地形（DEM）が無い所
+            <select id="build-terrain">
+              <option value="error" selected>止める</option>
+              <option value="constant">平らな地面にする（0 m）</option>
+            </select>
+          </label>
+          <label class="field inline" title="同じ ID・同じ範囲で前に作った City World を、そのとき取得したカタログと CityGML だけで作り直します（ネットワークを使いません）。"><input type="checkbox" id="build-offline"> 前に作った同じ ID・同じ範囲を、取得済みのデータで作り直す（オフライン）</label>
+          <label class="field inline" id="build-register-field" hidden title="作った City World を、変換せずにそのまま書き出し先に書き出します（書き出し先を見ているツール、例えば hakoniwa-urban-mobility が World として取り込みます。ID がその World の ID になります）。"><input type="checkbox" id="build-register" checked> できあがったら書き出し先にそのまま書き出す</label>
+          <label class="field inline" title="作った City World を、この Studio で編集できる部品にします。編集したものは Studio の画面の「書き出す」で書き出します。"><input type="checkbox" id="build-import" checked> できあがったら部品として取り込む（編集用）</label>
+          <div class="row">
+            <button id="build-start">この範囲の City World を作る</button>
+            <button id="build-cancel" class="secondary" hidden>中止</button>
+          </div>
+          <div id="build-status" class="meta"></div>
+        </section>
+      </div>
+
+      <div id="mode-osm" hidden>
+        <section class="panel">
+          <h2>OpenStreetMap から作る</h2>
+          <label class="field">ID<input id="recipe-id" placeholder="tokyo-station" autocomplete="off"></label>
+          <label class="field">名前<input id="recipe-name" placeholder="東京駅周辺" autocomplete="off"></label>
+          <label class="field">地面<select id="terrain"></select></label>
+          <label class="field">地図データ
+            <select id="source">
+              <option value="overpass">OpenStreetMap（Overpass API で取得）</option>
+              <option value="geojson">GeoJSON ファイル</option>
+            </select>
+          </label>
+          <label class="field" id="geojson-field" hidden>GeoJSON<input id="geojson" type="file" accept=".geojson,.json,application/geo+json"></label>
+          <button id="import">この範囲を取り込む</button>
+          <p class="hint">建物は外形と高さ（無ければ階数、それも無ければ種類ごとの既定値）、道路は中心線・幅・車線数（無ければ道路の種類ごとの既定値）で作ります。取り込み後は Studio で普通の部品として編集し、「書き出す」で書き出します。</p>
+          <button id="to-plateau" class="secondary">この範囲が PLATEAU にあるか確かめる</button>
+        </section>
+      </div>
 
       <section class="panel">
         <h2>ワークスペースの街（City World）</h2>
@@ -56,21 +113,6 @@
             <button id="world-search" class="secondary">探す</button></span>
         </label>
         <ul id="world-list" class="list"></ul>
-      </section>
-
-      <section class="panel">
-        <h2>PLATEAU から City World を作る</h2>
-        <p class="hint">青い範囲の PLATEAU データを hakoniwa-envsim でダウンロードして変換し（LOD2 の見た目・建物の当たり判定・地形・道路・路面標示）、終わったら下で選んだとおり書き出し先に書き出し、部品として取り込みます。範囲と建物の数によって数分〜数十分かかります。ダウンロードしたデータは共有のキャッシュに残り、次から使い回します。</p>
-        <label class="field">ID<input id="build-id" placeholder="sapporo-station" autocomplete="off"></label>
-        <label class="field inline" title="同じ ID・同じ範囲で前に作った City World を、そのとき取得したカタログと CityGML だけで作り直します（ネットワークを使いません）。"><input type="checkbox" id="build-offline"> 前に作った同じ ID・同じ範囲を、取得済みのデータで作り直す（オフライン）</label>
-        <p class="hint">チェックしなくても、ダウンロード済みの CityGML は共有のキャッシュから使い回します（ネットワークはカタログの問い合わせと、まだ無いデータの取得だけに使います）。</p>
-        <label class="field inline" id="build-register-field" hidden title="作った City World を、変換せずにそのまま書き出し先に書き出します（書き出し先を見ているツール、例えば hakoniwa-urban-mobility が World として取り込みます。ID がその World の ID になります）。"><input type="checkbox" id="build-register" checked> できあがったら書き出し先にそのまま書き出す</label>
-        <label class="field inline" title="作った City World を、この Studio で編集できる部品にします。編集したものは Studio の画面の「書き出す」で書き出します。"><input type="checkbox" id="build-import" checked> できあがったら部品として取り込む（編集用）</label>
-        <div class="row">
-          <button id="build-start">この範囲の City World を作る</button>
-          <button id="build-cancel" class="secondary" hidden>中止</button>
-        </div>
-        <div id="build-status" class="meta"></div>
       </section>
 
       <section class="panel" id="result" hidden>

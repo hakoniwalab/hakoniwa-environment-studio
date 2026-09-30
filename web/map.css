@@ -25,3 +25,11 @@
 .selection-resize-handle-nw, .selection-resize-handle-se { cursor: nwse-resize; }
 .selection-resize-handle-ne, .selection-resize-handle-sw { cursor: nesw-resize; }
 #selection-summary { margin-top: 6px; font: .78rem ui-monospace, monospace; }
+/* PLATEAU / OpenStreetMap: one selection, two ways to make it. */
+#source-mode { width: 100%; }
+#source-mode button { flex: 1; }
+#plateau-report p { margin: 6px 0; }
+#plateau-report .ok { color: var(--ok); }
+#plateau-report .error { color: var(--danger); }
+#plateau-report ul { margin: 4px 0; padding-left: 18px; }
+#to-osm, #to-plateau { margin-top: 8px; }

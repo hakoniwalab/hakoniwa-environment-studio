@@ -68,6 +68,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import env_generate  # noqa: E402
 import env_citygml  # noqa: E402
 import env_cityworld  # noqa: E402
+import env_plateau  # noqa: E402
 import env_urban  # noqa: E402
 import env_rules  # noqa: E402
 import env_schema  # noqa: E402
@@ -498,6 +499,22 @@ def _built(action):
         raise StudioError(f"City World を作れません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
 
 
+def inspect_plateau(body: object) -> dict:
+    """What PLATEAU has in a selection (env_plateau.py; nothing is downloaded).
+    Body: {selection: {center: {latitude, longitude}, half_extent_m: {north_south, east_west}}}."""
+    if not isinstance(body, dict):
+        raise StudioError("the request body must be {selection}")
+    try:
+        center, half = env_cityworld._selection(body)
+        return env_plateau.inspect(center, half)
+    except env_cityworld.BuildError as exc:
+        raise StudioError(str(exc)) from exc
+    except env_plateau.InspectionError as exc:
+        raise StudioError(f"PLATEAU のカタログに問い合わせできません: {exc}", HTTPStatus.BAD_GATEWAY) from exc
+    except DiagnosticError as exc:  # Envsim missing
+        raise StudioError(str(exc), HTTPStatus.INTERNAL_SERVER_ERROR) from exc
+
+
 def start_city_world_build(body: object) -> dict:
     """Start an Envsim build of a selection from PLATEAU (env_cityworld.py);
     body.root (the map page's folder) is searched first for a shared cache."""
@@ -777,6 +794,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("GET", ("map", "config"), lambda self, _: self._json(map_config())),
         ("POST", ("map", "import"), lambda self, _: self._json(import_map(self._body()))),
         ("GET", ("city-worlds",), lambda self, _: self._json(list_city_worlds(self._query("root")))),
+        ("POST", ("plateau", "inspect"), lambda self, _: self._json(inspect_plateau(self._body()))),
         ("POST", ("city-worlds", "build"), lambda self, _: self._json(start_city_world_build(self._body()))),
         ("GET", ("city-worlds", "build", "*"), lambda self, parts: self._json(
             _built(lambda: env_cityworld.BUILDS.status(_check_id(parts[2]))))),

@@ -333,6 +333,68 @@ function report(result) {
   return el("ul", {}, ...items.map((item) => el("li", {}, item)));
 }
 
+// PLATEAU or OpenStreetMap: the same selection, two ways to make the area.
+// PLATEAU covers the cities it has modelled (LOD2 buildings, DEM terrain, road
+// surfaces); OpenStreetMap covers anywhere, with buildings as extruded outlines.
+const MODE_KEY = "hakoniwa-environment-map-mode";
+const MODE_HINTS = {
+  plateau: "PLATEAU：整備された都市だけですが、LOD2 の建物（テクスチャ付き）・建物ごとの当たり判定・地形（DEM）・道路面まであります。まず「この範囲を診断」でデータがあるか確かめてください。",
+  osm: "OpenStreetMap：世界中どこでも使えます。建物は外形を押し出した箱（高さは推定を含む）、地面は平らです。取り込んだ建物や道路は部品として編集できます。",
+};
+const FEATURE_LABELS = { building: "建物", terrain: "地形（DEM）", road: "道路", road_markings: "路面標示", bridge: "橋" };
+
+function setMode(mode) {
+  for (const button of document.querySelectorAll("#source-mode button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+  }
+  $("#mode-plateau").hidden = mode !== "plateau";
+  $("#mode-osm").hidden = mode !== "osm";
+  $("#mode-hint").textContent = MODE_HINTS[mode];
+  try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage unavailable */ }
+}
+
+function formatMegabytes(bytes) {
+  return bytes > 0 ? `約 ${(bytes / 1e6).toFixed(1)} MB` : "不明（カタログにサイズがありません）";
+}
+
+// POST /api/plateau/inspect: what PLATEAU has in the selection (nothing downloaded).
+async function inspectPlateau() {
+  if (!selectionIsValid()) {
+    setStatus("範囲の値を確認してください", "error");
+    return;
+  }
+  const report = $("#plateau-report");
+  $("#to-osm").hidden = true;
+  $("#plateau-inspect").disabled = true;
+  report.textContent = "PLATEAU のカタログに問い合わせています…";
+  try {
+    const result = await api("POST", "plateau/inspect", { selection: selection() });
+    const rows = Object.entries(result.capabilities).map(([name, item]) => el("li", {},
+      `${FEATURE_LABELS[name] || name}：${item.available ? `あり（最大 LOD${item.max_lod}、${item.files} ファイル）` : "なし"}`
+      + (item.available && !item.usable ? "（この変換では使いません：LOD3 が必要）" : "")));
+    const cities = result.municipalities.map((city) => `${city.city}（${city.year} 年度）`).join("、");
+    let verdict;
+    if (result.available) {
+      verdict = el("p", { class: "ok" }, "この範囲は PLATEAU で作れます。");
+    } else if (result.flat_ground_possible) {
+      verdict = el("p", {}, "地形（DEM）がありません。「地形（DEM）が無い所」を「平らな地面にする」にすれば作れます。OpenStreetMap で作ることもできます。");
+      $("#build-terrain").value = "constant";
+    } else {
+      verdict = el("p", { class: "error" }, `この範囲には PLATEAU の${result.missing.map((name) => FEATURE_LABELS[name] || name).join("・")}がありません。OpenStreetMap で作れます。`);
+    }
+    report.replaceChildren(verdict,
+      el("div", {}, `自治体：${cities || "なし"}`),
+      el("ul", {}, ...rows),
+      el("div", {}, `ダウンロード量：${formatMegabytes(result.download_bytes)}`));
+    $("#to-osm").hidden = result.available;
+  } catch (error) {
+    report.textContent = error.message;
+    $("#to-osm").hidden = false;
+  } finally {
+    $("#plateau-inspect").disabled = false;
+  }
+}
+
 async function init() {
   const config = await api("GET", "map/config");
   // Started with an export folder: offer writing City Worlds there.
@@ -352,13 +414,24 @@ async function init() {
 
   $("#source").addEventListener("change", () => { $("#geojson-field").hidden = $("#source").value !== "geojson"; });
 
+  let mode = "plateau";
+  try { mode = localStorage.getItem(MODE_KEY) === "osm" ? "osm" : "plateau"; } catch { /* storage unavailable */ }
+  setMode(mode);
+  for (const button of document.querySelectorAll("#source-mode button")) {
+    button.addEventListener("click", () => setMode(button.dataset.mode));
+  }
+  $("#plateau-inspect").addEventListener("click", inspectPlateau);
+  // The same selection in the other source: from PLATEAU without data to OSM, from OSM to a PLATEAU check.
+  $("#to-osm").addEventListener("click", () => setMode("osm"));
+  $("#to-plateau").addEventListener("click", () => { setMode("plateau"); inspectPlateau(); });
+
   const worlds = L.layerGroup().addTo(map);
   try { $("#world-root").value = localStorage.getItem(ROOT_KEY) || ""; } catch { /* storage unavailable */ }
   $("#world-search").addEventListener("click", () => searchWorlds(map, worlds));
   searchWorlds(map, worlds);
 
   const imported = async (status) => {
-    const build = { path: status.build, title: $("#recipe-name").value.trim() || status.id };
+    const build = { path: status.build, title: status.id };
     if (config.export_dir && $("#build-register").checked) await exportWorld(build);
     if ($("#build-import").checked) await importWorld(build, status.id);
     searchWorlds(map, worlds);
@@ -375,7 +448,12 @@ async function init() {
     }
     try {
       await api("POST", "city-worlds/build", {
-        id, name: $("#recipe-name").value.trim() || id, selection: selection(),
+        id, name: id, selection: selection(),
+        options: {
+          building_physics_level: Number($("#build-physics").value),
+          building_collider_reduction: $("#build-reduction").value,
+          terrain_uncovered_policy: $("#build-terrain").value,
+        },
         offline: $("#build-offline").checked, overwrite: $("#build-offline").checked, root: $("#world-root").value.trim().split(",")[0].trim() || undefined,
       });
     } catch (error) {
