@@ -48,6 +48,16 @@
         <p class="hint">建物は外形と高さ（無ければ階数、それも無ければ種類ごとの既定値）、道路は中心線・幅・車線数（無ければ道路の種類ごとの既定値）で作ります。取り込み後は Studio で普通の部品として編集できます。</p>
       </section>
 
+      <section class="panel">
+        <h2>ワークスペースの街（City World）</h2>
+        <p class="hint">hakoniwa-envsim で変換済みの街（PLATEAU など）を探して、建物・道路を部品として取り込みます。地図上のオレンジの枠がその範囲です。</p>
+        <label class="field">フォルダ
+          <span class="row"><input id="world-root" autocomplete="off" placeholder="…/hakoniwa-business-pack/work">
+            <button id="world-search" class="secondary">探す</button></span>
+        </label>
+        <ul id="world-list" class="list"></ul>
+      </section>
+
       <section class="panel" id="result" hidden>
         <h2>取り込み結果</h2>
         <div id="report"></div>

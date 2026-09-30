@@ -100,10 +100,10 @@ class SurfaceLayerTest(unittest.TestCase):
         self.objects = {obj.id: obj for obj in self.recipe.objects}
 
     def test_objects_stand_on_the_roads_under_them(self):
-        self.assertEqual(self.objects["cone"].pose.z_m, 0.02)  # on the road slab
+        self.assertEqual(self.objects["cone"].pose.z_m, 0.02 + env_schema.SURFACE_GAP_M)  # on the road slab
         self.assertEqual(self.objects["main"].pose.z_m, 0.0)
         # The L-shaped building's corner reaches over the crossing road.
-        self.assertEqual(self.objects["l-house"].pose.z_m, 0.02)
+        self.assertEqual(self.objects["l-house"].pose.z_m, 0.02 + env_schema.SURFACE_GAP_M)
 
     @unittest.skipUnless(mujoco, "MuJoCo is not installed")
     def test_roads_cross_without_problems_and_the_world_matches_the_footprint(self):
@@ -129,7 +129,8 @@ class SurfaceLayerTest(unittest.TestCase):
 
         # Inside the L: the roof, 12 m above its base; in the notch: the ground.
         height, name = top(*world(-4, 4))
-        self.assertEqual((height, name.split("/")[0]), (12.02, "geom:l-house"))
+        self.assertAlmostEqual(height, 12.02, delta=0.002)
+        self.assertEqual(name.split("/")[0], "geom:l-house")
         height, name = top(*world(3, 3))
         self.assertEqual(name, "terrain")
         # On the bend of the main road: the joint's cylinder.

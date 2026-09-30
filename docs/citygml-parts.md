@@ -81,7 +81,24 @@ LOD2 の見た目や当たり判定（今後の B）は、同じ部品（`source
   - `query`（変換器の版と、元ファイルのパス・SHA-256）
   - 地図ページから取り込んだ場合は、さらに `data_timestamp` と Overpass のクエリ
 
-## 7. 地図ページからの取り込み
+## 7. ワークスペースの街（変換済みの City World）
+
+hakoniwa-envsim でビルド済みの街（ビジネスパックの City World ジョブなど）を、そのまま部品にできます。
+
+- **探し方**：`download-manifest.json` のあるディレクトリを、envsim のビルドとして扱います。
+  - 探す場所は、地図ページの「フォルダ」、無ければ `HAKONIWA_CITY_WORLD_ROOTS`（PATH と同じ区切り）、どちらも無ければ `../hakoniwa-business-pack/work` です。
+  - `foundation`・`downloads`・`cache`・`source`・`components` などには潜りません。
+- **一覧**（`GET /api/city-worlds?root=…`）：ジョブ名（`job.json` の `job_id`）、選択範囲（中心・半分の大きさ）、地物の種類、建物数、City World の有無。地図ページでは範囲をオレンジの枠で示します。
+- **取り込み**（`POST /api/city-worlds/import`、コマンドは `env_citygml.py --envsim-build DIR`）：
+  - ビルドの選択範囲をそのまま使います。
+  - 建物は envsim がそのビルドで抽出した外形（`<name>-lod1.json`）を使うので、City World と同じ建物が同じ座標で部品になります。
+  - 建物の属性（`gml:name`、`measuredHeight`、`usage` など）は、元の CityGML をストリームで読んで、対象の建物分だけ拾います。数百 MB のメッシュファイルでも数秒です。
+  - 道路は、元の CityGML の LOD1 面から作ります。
+- 取り込むだけで、元のビルドは変更しません。
+
+PLATEAU のデータには、外形がもともと重なっている建物もあります（例：札幌で 6.6 m² 食い込む 2 棟）。Studio の検証はそれを重なりとして示します。
+
+## 8. 地図ページからの取り込み
 
 `POST /api/map/import` の処理は次のとおりです。
 

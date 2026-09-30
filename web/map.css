@@ -17,3 +17,4 @@
 }
 #report ul { margin: 4px 0; padding-left: 18px; }
 .leaflet-container { font: inherit; }
+#world-list li { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }

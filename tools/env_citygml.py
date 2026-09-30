@@ -133,13 +133,27 @@ def _placed(points) -> tuple[dict, list[list[float]]]:
     return {"x_m": cx, "y_m": cy, "yaw_deg": 0}, [[_mm(x - cx), _mm(y - cy)] for x, y in points]
 
 
-def _attributes(path: Path) -> dict[str, dict]:
-    """gml:id -> {name, generic attributes} of every bldg:Building in a file."""
+# Building attributes kept as tags (PLATEAU and CityGML in general).
+BUILDING_FIELDS = ("measuredHeight", "storeysAboveGround", "usage", "class", "yearOfConstruction")
+
+
+def _attributes(path: Path, ids: set[str] | None = None) -> dict[str, dict]:
+    """gml:id -> {name, generic attributes, building fields} of the
+    bldg:Building elements in a file (all, or those in `ids`). Streamed: a
+    PLATEAU mesh file can be hundreds of megabytes."""
     found = {}
-    for building in ET.parse(path).getroot().iter(f"{{{NS['bldg']}}}Building"):
-        attributes = {item.get("name"): item.findtext("gen:value", namespaces=NS)
-                      for item in building.findall("gen:stringAttribute", NS)}
-        found[building.get(GML_ID)] = {"name": building.findtext("gml:name", namespaces=NS), "gen": attributes}
+    building_tag = f"{{{NS['bldg']}}}Building"
+    for _event, element in ET.iterparse(path, events=("end",)):
+        if element.tag != building_tag:
+            continue
+        gml_id = element.get(GML_ID)
+        if ids is None or gml_id in ids:
+            generic = {item.get("name"): item.findtext("gen:value", namespaces=NS)
+                       for item in element.findall("gen:stringAttribute", NS)}
+            fields = {name: element.findtext(f"bldg:{name}", namespaces=NS) for name in BUILDING_FIELDS}
+            found[gml_id] = {"name": element.findtext("gml:name", namespaces=NS), "gen": generic,
+                             "fields": {key: value.strip() for key, value in fields.items() if value and value.strip()}}
+        element.clear()
     return found
 
 
@@ -153,9 +167,13 @@ def _clean_ring(points) -> list[tuple[float, float]] | None:
 
 def convert(source: Path, center: tuple[float, float], half_extent: tuple[float, float], *,
             catalog: str = "", name: str | None = None, terrain_item: str = "city-ground",
-            items: dict | None = None) -> tuple[dict, dict]:
+            items: dict | None = None, prepared: dict[Path, list[dict]] | None = None) -> tuple[dict, dict]:
     """(Recipe mapping, report) of the CityGML under `source` for a selection
-    centred on (lat, lon) with (north_south, east_west) half extents."""
+    centred on (lat, lon) with (north_south, east_west) half extents.
+
+    `prepared` gives buildings Envsim already extracted for this selection
+    (its <name>-lod1.json records, by source file), so large mesh files are
+    only streamed for their attributes."""
     items = {**ITEMS, **(items or {})}
     geodesy, extract, roads_probe = envsim_modules()
     lat0, lon0 = center
@@ -166,15 +184,18 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     reach_e, reach_n = ew_m, ns_m
     seen_ids: set[str] = set()
 
-    for path in _files(source, "*bldg*_op.gml"):
+    for path in (list(prepared) if prepared is not None else _files(source, "*bldg*_op.gml")):
         sources.append({"path": str(path.resolve()), "sha256": _sha256(path)})
         issues: list = []
-        records = extract.extract_buildings_lod1(path, local_origin=center,
-                                                 bounds={"ns_m": ns_m, "ew_m": ew_m}, issues=issues)
+        if prepared is not None:
+            records = prepared[path]
+        else:
+            records = extract.extract_buildings_lod1(path, local_origin=center,
+                                                     bounds={"ns_m": ns_m, "ew_m": ew_m}, issues=issues)
         for issue in issues:
             report["skipped"].append({"source": issue.get("building_id"), "kind": "building",
                                       "reason": issue.get("reason_code") or issue.get("message")})
-        attributes = _attributes(path)
+        attributes = _attributes(path, {record["id"].split("__part_")[0] for record in records})
         for record in records:
             if record["id"] in seen_ids:  # the same building in two files (overlapping meshes)
                 continue
@@ -203,6 +224,7 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
                                                               else "citygml")
             providers.add(provider)
             tags = {key: value for key, value in info["gen"].items() if value is not None}
+            tags.update(info.get("fields", {}))
             if info["name"]:
                 tags["name"] = info["name"]
             source_record = {"provider": provider, "kind": "citygml", "id": record["id"], "note": path.name}
@@ -280,6 +302,82 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
     return recipe, report
 
 
+# --- Envsim builds already in a workspace ----------------------------------------
+
+def read_envsim_build(build: Path) -> dict:
+    """The selection, sources and extracted buildings of an Envsim build
+    directory (the one holding download-manifest.json)."""
+    manifest = json.loads((build / "download-manifest.json").read_text(encoding="utf-8"))
+    query = manifest["query"]
+    lod1_files = sorted(build.glob("*-lod1.json"))
+    prepared = None
+    if lod1_files:
+        prepared = {}
+        for record in json.loads(lod1_files[0].read_text(encoding="utf-8"))["polygons"]:
+            prepared.setdefault(Path(record["source_gml"]), []).append(record)
+        prepared = {path: records for path, records in prepared.items() if path.is_file()} or None
+    receipt_path = build / "build-receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.is_file() else {}
+    return {
+        "center": (float(query["center_lat"]), float(query["center_lon"])),
+        "half_extent": (float(query["ns_m"]), float(query["ew_m"])),
+        "source": build / "source",
+        "prepared": prepared,
+        "feature_types": sorted({item.get("feature_type") for item in manifest.get("files", []) if item.get("feature_type")}),
+        "buildings": sum(len(records) for records in (prepared or {}).values()),
+        "world": (build / "world" / "city-world.xml").is_file(),
+        "built": receipt.get("outputs", {}),
+    }
+
+
+# Directories a workspace search does not enter (installs, downloads, CityGML sources).
+SKIP_DIRS = {"foundation", "downloads", "cache", "source", "components", "node_modules", ".git", ".venv"}
+
+
+def _manifests(root: Path, max_depth: int):
+    for directory, subdirectories, files in os.walk(root):
+        depth = len(Path(directory).relative_to(root).parts)
+        subdirectories[:] = sorted(name for name in subdirectories
+                                   if name not in SKIP_DIRS and depth < max_depth)
+        if "download-manifest.json" in files:
+            yield Path(directory) / "download-manifest.json"
+
+
+def discover(roots: list[Path], max_depth: int = 8) -> list[dict]:
+    """Envsim builds under the roots (a business-pack workspace keeps them as
+    work/recipes/city-world-web-ui/runtime/jobs/<job>/build and the like)."""
+    found = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for manifest in _manifests(root, max_depth):
+            build = manifest.parent
+            try:
+                info = read_envsim_build(build)
+            except (OSError, KeyError, ValueError):
+                continue
+            job = build.parent / "job.json"
+            title = build.parent.name if build.name == "build" else build.name
+            if job.is_file():
+                title = json.loads(job.read_text(encoding="utf-8")).get("job_id", title)
+            found.append({
+                "id": re.sub(r"[^a-z0-9_-]", "-", title.lower())[:64].strip("-") or "city",
+                "title": title, "path": str(build), "root": str(root),
+                "center": {"latitude": info["center"][0], "longitude": info["center"][1]},
+                "half_extent_m": {"north_south": info["half_extent"][0], "east_west": info["half_extent"][1]},
+                "feature_types": info["feature_types"], "buildings": info["buildings"], "world": info["world"],
+            })
+    return found
+
+
+def convert_build(build: Path, **options) -> tuple[dict, dict]:
+    """Parts of an Envsim build: its selection, its extracted buildings, its roads."""
+    info = read_envsim_build(build)
+    recipe, report = convert(info["source"], info["center"], info["half_extent"], prepared=info["prepared"], **options)
+    report["build"] = str(build)
+    return recipe, report
+
+
 def write_recipe(recipe: dict, out: Path) -> None:
     env_schema.parse_recipe(recipe, out)  # valid before it is written
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -288,22 +386,39 @@ def write_recipe(recipe: dict, out: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--citygml", type=Path, required=True, help="a CityGML file or a directory of *_op.gml")
-    parser.add_argument("--center", required=True, help="LAT,LON of the selection centre")
-    parser.add_argument("--half-extent", required=True, help="NS,EW half extents in metres")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--citygml", type=Path, help="a CityGML file or a directory of *_op.gml")
+    source.add_argument("--envsim-build", type=Path, help="an Envsim build directory (its selection and buildings)")
+    source.add_argument("--list", type=Path, nargs="+", metavar="ROOT", help="list the Envsim builds under ROOTs")
+    parser.add_argument("--center", help="LAT,LON of the selection centre (with --citygml)")
+    parser.add_argument("--half-extent", help="NS,EW half extents in metres (with --citygml)")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
     parser.add_argument("--terrain", default="city-ground")
     parser.add_argument("--name")
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    if args.list:
+        builds = discover([root.resolve() for root in args.list])
+        print(json.dumps(builds, ensure_ascii=False, indent=2) if args.json else "\n".join(
+            f"{item['title']:44} {item['buildings']:5} buildings  {','.join(item['feature_types']):20} {item['path']}"
+            for item in builds))
+        return 0
+    if args.out is None:
+        parser.error("--out is required")
     try:
-        lat, lon = (float(value) for value in args.center.split(","))
-        ns_m, ew_m = (float(value) for value in args.half_extent.split(","))
         out = args.out.resolve()
         catalog = Path(os.path.relpath(args.catalog.resolve(), out.parent)).as_posix()
-        recipe, report = convert(args.citygml, (lat, lon), (ns_m, ew_m), catalog=catalog, name=args.name,
-                                 terrain_item=args.terrain)
+        if args.envsim_build:
+            recipe, report = convert_build(args.envsim_build.resolve(), catalog=catalog, name=args.name,
+                                           terrain_item=args.terrain)
+        else:
+            if not args.center or not args.half_extent:
+                parser.error("--citygml needs --center and --half-extent")
+            lat, lon = (float(value) for value in args.center.split(","))
+            ns_m, ew_m = (float(value) for value in args.half_extent.split(","))
+            recipe, report = convert(args.citygml, (lat, lon), (ns_m, ew_m), catalog=catalog, name=args.name,
+                                     terrain_item=args.terrain)
         write_recipe(recipe, out)
     except ValueError as exc:
         parser.error(str(exc))

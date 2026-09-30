@@ -382,6 +382,12 @@ def _solid_outlines(obj: EnvObject) -> list[tuple[list[tuple[float, float]], flo
             for solid in obj.solids if solid.collide]
 
 
+# Objects on a surface object float this far above its top: exactly touching
+# meshes make MuJoCo's convex collision pick a sideways normal and report a
+# deep overlap. Well within the checks' 1 mm tolerance.
+SURFACE_GAP_M = 0.0005
+
+
 def _on_surfaces(objects: list[EnvObject]) -> list[EnvObject]:
     """Objects standing on the ground stand on top of the surface objects
     (roads) under them, as they do on the terrain: a cone on a road stands on
@@ -399,7 +405,7 @@ def _on_surfaces(objects: list[EnvObject]) -> list[EnvObject]:
         for surface, outlines in surfaces:
             for polygon, top in outlines:
                 if any(env_polygon.convex_overlap(outline, polygon) for outline in mine):
-                    z = max(z, surface.pose.z_m + top)
+                    z = max(z, surface.pose.z_m + top + SURFACE_GAP_M)
         placed_objects.append(obj if z == obj.pose.z_m else replace(obj, pose=replace(obj.pose, z_m=round(z, 6))))
     return placed_objects
 

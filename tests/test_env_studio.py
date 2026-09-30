@@ -166,6 +166,21 @@ class StudioServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("地図から作れません", error["error"])
 
+    @unittest.skipUnless(test_env_citygml.ENVSIM, "hakoniwa-envsim is not available")
+    def test_city_worlds_in_a_workspace_are_listed_and_imported_as_parts(self):
+        workspace = test_env_citygml.WorkspaceTest
+        workspace.setUpClass()
+        self.addCleanup(workspace.tearDownClass)
+        from urllib.parse import quote
+        status, found = self.call("GET", f"/api/city-worlds?root={quote(str(workspace.root))}")
+        self.assertEqual((status, [item["title"] for item in found["builds"]]), (200, ["tokyo-test"]))
+        status, result = self.call("POST", "/api/city-worlds/import",
+                                   {"id": "tokyo-parts", "path": found["builds"][0]["path"], "name": "東京"})
+        self.assertEqual((status, result["buildings"]), (200, 4), result)
+        _, loaded = self.call("GET", "/api/recipes/tokyo-parts")
+        self.assertEqual(loaded["recipe"]["objects"][0]["source"]["kind"], "citygml")
+        self.assertEqual(self.call("POST", "/api/city-worlds/import", {"id": "x", "path": "/nowhere"})[0], 404)
+
     def test_an_invalid_recipe_is_rejected_and_not_saved(self):
         status, body = self.call("PUT", "/api/recipes/bad", {
             "size_m": SIZE, "terrain": GROUND, "objects": [{"id": "x", "item": "no-such", "pose": {"x_m": 0, "y_m": 0}}]})

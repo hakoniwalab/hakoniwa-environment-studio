@@ -46,7 +46,7 @@ import sys
 import threading
 import time
 from urllib.error import URLError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 import webbrowser
 
@@ -333,6 +333,56 @@ def import_map(body: object) -> dict:
     }
 
 
+def city_world_roots() -> list[Path]:
+    """Where to look for Envsim builds: HAKONIWA_CITY_WORLD_ROOTS (separated
+    like PATH), else the business-pack workspace next to this repository."""
+    configured = os.environ.get("HAKONIWA_CITY_WORLD_ROOTS")
+    if configured:
+        return [Path(item).expanduser().resolve() for item in configured.split(os.pathsep) if item]
+    return [(ROOT.parent / "hakoniwa-business-pack" / "work").resolve()]
+
+
+def list_city_worlds(root: str | None) -> dict:
+    """The Envsim builds (City Worlds and their CityGML) in a workspace."""
+    roots = [Path(root).expanduser().resolve()] if root else city_world_roots()
+    try:
+        builds = env_citygml.discover(roots)
+    except DiagnosticError as exc:
+        raise StudioError(str(exc)) from exc
+    return {"roots": [str(item) for item in roots], "builds": builds}
+
+
+def import_city_world(body: object) -> dict:
+    """Make a Recipe of parts from an Envsim build (its selection, the
+    buildings it extracted, its roads) and save it under work/recipes/.
+
+    Body: {id, path, name?, terrain?, catalog_id?, overwrite?}.
+    """
+    if not isinstance(body, dict) or not body.get("path"):
+        raise StudioError("the request body must be {id, path}")
+    recipe_id = _check_id(str(body.get("id") or ""))
+    directory = USER_RECIPES.resolve()
+    target = directory / f"{recipe_id}.yaml"
+    if (target.exists() or recipe_id in _recipe_files()) and not body.get("overwrite"):
+        raise StudioError(f"Recipe {recipe_id} はもうあります（別の ID にしてください）", HTTPStatus.CONFLICT)
+    build = Path(str(body["path"])).expanduser().resolve()
+    if not (build / "download-manifest.json").is_file():
+        raise StudioError(f"Envsim のビルドではありません（download-manifest.json がない）: {build}", HTTPStatus.NOT_FOUND)
+    try:
+        catalog = _catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID)
+        recipe, report = env_citygml.convert_build(
+            build, catalog=_catalog_reference(catalog, directory), name=body.get("name") or None,
+            terrain_item=body.get("terrain") or "city-ground")
+        env_schema.parse_recipe(recipe, target)
+    except DiagnosticError as exc:
+        raise StudioError(f"City World から作れません: {exc}") from exc
+    directory.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
+    return {"id": recipe_id, "path": str(target), "build": str(build), "size_m": recipe["size_m"],
+            "buildings": report["buildings"], "roads": report["roads"], "skipped": report["skipped"],
+            "courtyards_filled": report["courtyards_filled"], "notes": report["notes"], "provider": report["provider"]}
+
+
 def save_recipe(recipe_id: str, body: object) -> dict:
     """Check a Recipe and write it under work/recipes/.
 
@@ -411,6 +461,11 @@ class StudioHandler(SimpleHTTPRequestHandler):
                 return self._json(map_config())
             if method == "POST" and parts == ["map", "import"]:
                 return self._json(import_map(self._body()))
+            if method == "GET" and parts == ["city-worlds"]:
+                query = parse_qs(urlparse(self.path).query)
+                return self._json(list_city_worlds((query.get("root") or [None])[0]))
+            if method == "POST" and parts == ["city-worlds", "import"]:
+                return self._json(import_city_world(self._body()))
             if method == "GET" and parts == ["recipes"]:
                 return self._json(list_recipes())
             if method == "POST" and parts == ["resolve"]:

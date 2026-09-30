@@ -55,6 +55,66 @@ function bbox(map) {
   };
 }
 
+const ROOT_KEY = "hakoniwa-environment-world-root";
+
+// The City Worlds (Envsim builds) in a workspace: listed, outlined on the map,
+// and imported as parts (POST /api/city-worlds/import).
+function worldBounds(build) {
+  const scale = metresPerDegree(build.center.latitude);
+  const halfLat = build.half_extent_m.north_south / scale.north;
+  const halfLon = build.half_extent_m.east_west / scale.east;
+  return [[build.center.latitude - halfLat, build.center.longitude - halfLon],
+    [build.center.latitude + halfLat, build.center.longitude + halfLon]];
+}
+
+async function searchWorlds(map, layer) {
+  const root = $("#world-root").value.trim();
+  try { localStorage.setItem(ROOT_KEY, root); } catch { /* storage unavailable */ }
+  setStatus("探しています…");
+  let found;
+  try {
+    found = await api("GET", `city-worlds${root ? `?root=${encodeURIComponent(root)}` : ""}`);
+  } catch (error) {
+    setStatus(error.message, "error");
+    return;
+  }
+  if (!root) $("#world-root").value = found.roots.join(", ");
+  layer.clearLayers();
+  $("#world-list").replaceChildren(...found.builds.map((build) => {
+    const bounds = worldBounds(build);
+    L.rectangle(bounds, { color: "#e07b00", weight: 2, fillOpacity: 0.05 }).bindTooltip(build.title).addTo(layer);
+    const importButton = el("button", { class: "secondary", onclick: () => importWorld(build) }, "取り込む");
+    return el("li", {},
+      el("button", { onclick: () => map.fitBounds(bounds, { padding: [30, 30] }) },
+        el("span", {}, build.title),
+        el("span", { class: "meta" }, `建物 ${build.buildings}・${build.feature_types.join(" / ")}${build.world ? "・City World あり" : ""}`)),
+      importButton);
+  }));
+  if (!found.builds.length) $("#world-list").replaceChildren(el("li", { class: "hint" }, "Envsim のビルドは見つかりませんでした"));
+  setStatus(`${found.builds.length} 件見つかりました`, found.builds.length ? "ok" : "");
+}
+
+async function importWorld(build) {
+  const id = window.prompt("作る環境の ID（小文字・数字・- _）", build.id);
+  if (!id) return;
+  setStatus(`${build.title} を部品にしています…`);
+  try {
+    const result = await api("POST", "city-worlds/import", { id, path: build.path, name: build.title });
+    const items = [
+      `大きさ ${result.size_m.east} m × ${result.size_m.north} m（${result.provider}）`,
+      `建物 ${result.buildings}、道路 ${result.roads}`,
+      ...(result.courtyards_filled ? [`中庭を埋めた建物 ${result.courtyards_filled}`] : []),
+      ...result.notes,
+    ];
+    $("#report").replaceChildren(el("ul", {}, ...items.map((item) => el("li", {}, item))));
+    $("#open").href = `./?recipe=${encodeURIComponent(result.id)}`;
+    $("#result").hidden = false;
+    setStatus(`${result.id} を作りました（${result.path}）`, "ok");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
 function report(result) {
   const assumed = result.assumed;
   const items = [
@@ -97,6 +157,11 @@ async function init() {
     else setStatus("中心は「緯度, 経度」で入力してください", "error");
   });
   $("#source").addEventListener("change", () => { $("#geojson-field").hidden = $("#source").value !== "geojson"; });
+
+  const worlds = L.layerGroup().addTo(map);
+  try { $("#world-root").value = localStorage.getItem(ROOT_KEY) || ""; } catch { /* storage unavailable */ }
+  $("#world-search").addEventListener("click", () => searchWorlds(map, worlds));
+  searchWorlds(map, worlds);
 
   const catalog = await api("GET", "catalogs/starter");
   $("#terrain").replaceChildren(...catalog.items.filter((item) => item.kind === "terrain")

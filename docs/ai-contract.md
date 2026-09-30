@@ -24,7 +24,7 @@ AI エージェントが Environment Studio を外から扱うための約束事
 | `resolve <recipe>` | 解決済みの環境（地形、各物体の z と形状） |
 | `inspect <recipe>` | 各物体の範囲（`bounds_m`）、足元の地面、最も近い物体とのすき間（`nearest.gap_m`、0 は接触か重なり）、各端までの余裕（`room_m`、負ははみ出し） |
 | `generate <recipe> --out-dir DIR` | `environment.glb` / `.xml` / `.json`（指紋付き） |
-| `tools/env_citygml.py --citygml DIR --center LAT,LON --half-extent NS,EW --out R.yaml --json` | CityGML（PLATEAU、または envsim の `osm2citygml.py` が地図データから作ったもの）から、建物・道路を部品にした Recipe を作る（#10）。結果は `{buildings, roads, skipped, notes, size_m}` |
+| `tools/env_citygml.py (--citygml DIR --center LAT,LON --half-extent NS,EW \| --envsim-build DIR) --out R.yaml --json`、`--list ROOT` | CityGML（PLATEAU、または envsim の `osm2citygml.py` が地図データから作ったもの）から、建物・道路を部品にした Recipe を作る（#10）。結果は `{buildings, roads, skipped, notes, size_m}` |
 
 Studio を起動していれば、同じことを HTTP でもできます（`/api/catalogs/<id>`、`/api/resolve`、`/api/terrain`、`/api/validate`、`/api/glb`、`PUT /api/recipes/<id>`）。
 `/api/validate` は問題があっても HTTP 200 で `{ok, stage: "schema" | "physics", diagnostics}` を返します。

@@ -170,6 +170,56 @@ class PlateauPartsTest(unittest.TestCase):
         env_schema.parse_recipe(recipe, ROOT / "work/plateau.yaml")
 
 
+@unittest.skipUnless(ENVSIM, "hakoniwa-envsim is not available")
+class WorkspaceTest(unittest.TestCase):
+    """Envsim builds already in a workspace: found, and made into parts from
+    the buildings Envsim extracted (its <name>-lod1.json)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import gml_lod1_extract
+
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.directory.name) / "work"
+        cls.build = cls.root / "recipes/city-world-web-ui/runtime/jobs/tokyo-test/build"
+        source = cls.build / "source/13101-2024"
+        receipt = osm2citygml.run(box(), source, "map", osm_json=sample())
+        selection = receipt["selection"]
+        center = (selection["center"]["latitude"], selection["center"]["longitude"])
+        half = (selection["half_extent_m"]["north_south"], selection["half_extent_m"]["east_west"])
+        records = gml_lod1_extract.extract_buildings_lod1(source / "map_bldg_op.gml", local_origin=center,
+                                                          bounds={"ns_m": half[0], "ew_m": half[1]})
+        for record in records:
+            record["source_gml"] = str(source / "map_bldg_op.gml")
+        (cls.build / "city-world-lod1.json").write_text(json.dumps({"polygons": records}), encoding="utf-8")
+        (cls.build / "download-manifest.json").write_text(json.dumps({"query": {
+            "center_lat": center[0], "center_lon": center[1], "ns_m": half[0], "ew_m": half[1]},
+            "files": [{"feature_type": "bldg"}, {"feature_type": "tran"}]}), encoding="utf-8")
+        (cls.build.parent / "job.json").write_text(json.dumps({"job_id": "tokyo-test"}), encoding="utf-8")
+        # Installs and downloads in the workspace are not searched.
+        (cls.root / "foundation/deep").mkdir(parents=True)
+        (cls.root / "foundation/deep/download-manifest.json").write_text("{}", encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    def test_builds_are_found_with_their_selection(self):
+        builds = env_citygml.discover([self.root])
+        self.assertEqual([item["title"] for item in builds], ["tokyo-test"])
+        build = builds[0]
+        self.assertEqual((build["buildings"], build["feature_types"], build["world"]), (4, ["bldg", "tran"], False))
+        self.assertAlmostEqual(build["center"]["latitude"], box().center[0], places=7)
+
+    def test_a_build_becomes_parts_from_its_extracted_buildings(self):
+        recipe, report = env_citygml.convert_build(self.build, catalog=CATALOG)
+        self.assertEqual(report["buildings"], 4)
+        self.assertEqual(sorted(obj["id"] for obj in recipe["objects"] if obj["item"] == "building-footprint"),
+                         ["osm_r300", "osm_w101", "osm_w103", "osm_w105"])
+        self.assertGreater(report["roads"], 0)
+        env_schema.parse_recipe(recipe, ROOT / "work/build.yaml")
+
+
 class IdTest(unittest.TestCase):
     def test_gml_ids_become_part_ids(self):
         used = set()
