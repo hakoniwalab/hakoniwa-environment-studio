@@ -866,7 +866,7 @@ def start(port: int, open_browser: bool, state_dir: Path) -> int:
             webbrowser.open(running["url"])
         return 0
     if not _port_free(port):
-        print(f"ERROR: port {port} is in use; stop what uses it or pass --port", file=sys.stderr)
+        print(f"ERROR: {_port_in_use(port)}", file=sys.stderr)
         return 1
     state_dir.mkdir(parents=True, exist_ok=True)
     log = state_dir / "studio.log"
@@ -954,7 +954,20 @@ def stop(state_dir: Path) -> int:
     return 0
 
 
+def _port_in_use(port: int) -> str:
+    """Why port cannot be used, and what to do."""
+    health = _health(port)
+    if health:
+        return (f"Environment Studio is already running: http://127.0.0.1:{port}/ (pid {health['pid']}). "
+                f"Open it, or stop it first: {command_hint('stop')}"
+                + ("" if health.get("instance") else " (or Ctrl+C in the terminal that runs it)"))
+    return f"port {port} is in use by another program; stop it, or pass --port"
+
+
 def serve(port: int, open_browser: bool) -> int:
+    if not _port_free(port):
+        print(f"ERROR: {_port_in_use(port)}", file=sys.stderr)
+        return 1
     server = make_server(port)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"Environment Studio: {url}", flush=True)

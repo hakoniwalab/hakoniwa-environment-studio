@@ -362,10 +362,27 @@ class LifecycleTest(unittest.TestCase):
             self.assertEqual(json.loads(response.read())["pid"], state["pid"])
         again = self.run_tool("start", "--port", str(self.port))
         self.assertIn("already running", again.stdout)
+        # Run in this terminal on the same port: refused with how to stop the background one.
+        served = self.run_tool("serve", "--port", str(self.port))
+        self.assertEqual(served.returncode, 1)
+        self.assertIn("already running", served.stderr)
+        self.assertIn("env_studio.py stop", served.stderr)
+        self.assertNotIn("Traceback", served.stderr)
         self.assertEqual(self.run_tool("status").returncode, 0)
         self.assertEqual(self.run_tool("stop").returncode, 0)
         self.assertFalse((self.state / "studio.json").exists())
         self.assertEqual(self.run_tool("status").returncode, 1)
+
+    def test_a_port_taken_by_another_program_is_explained(self):
+        with socket.socket() as other:
+            other.bind(("127.0.0.1", 0))
+            other.listen()
+            port = str(other.getsockname()[1])
+            for command in ("serve", "start"):
+                result = self.run_tool(command, "--port", port)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(f"port {port} is in use by another program", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":
