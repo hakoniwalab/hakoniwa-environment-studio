@@ -87,7 +87,7 @@ async function searchWorlds(map, layer) {
     return el("li", {},
       el("button", { onclick: () => map.fitBounds(bounds, { padding: [30, 30] }) },
         el("span", {}, build.title),
-        el("span", { class: "meta" }, `建物 ${build.buildings}・${build.feature_types.join(" / ")}${build.world ? "・City World あり" : ""}`)),
+        el("span", { class: "meta" }, `建物 ${build.buildings}・${build.feature_types.join(" / ")}${build.world ? "・City World あり" : ""}${build.dem ? "・地形（DEM）あり" : ""}`)),
       importButton);
   }));
   if (!found.builds.length) $("#world-list").replaceChildren(el("li", { class: "hint" }, "Envsim のビルドは見つかりませんでした"));
@@ -101,7 +101,7 @@ async function importWorld(build) {
   try {
     const result = await api("POST", "city-worlds/import", { id, path: build.path, name: build.title });
     const items = [
-      `大きさ ${result.size_m.east} m × ${result.size_m.north} m（${result.provider}）`,
+      `大きさ ${result.size_m.east} m × ${result.size_m.north} m（${result.provider}、地面：${result.terrain === "dem" ? "City World の地形（DEM）" : "平ら"}）`,
       `建物 ${result.buildings}、道路 ${result.roads}`,
       ...(result.courtyards_filled ? [`中庭を埋めた建物 ${result.courtyards_filled}`] : []),
       ...result.notes,

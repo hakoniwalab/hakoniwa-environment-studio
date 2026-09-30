@@ -95,9 +95,16 @@ types:
 
 `hills` 生成器は `max_height_m`・`hills`（丘の数）・`radius_m`・`seed`・`resolution_m`（格子の間隔）を読み、乱数の種で決まる場所にガウス型の丘を置きます。**同じパラメータからは必ず同じ地形**ができるので、Recipe に格子データを持たずに済み、AI も再現できます。
 
+`envsim` 生成器は、hakoniwa-envsim がビルドした City World の地形（PLATEAU の DEM から作った hfield）を読みます（地面の品目 `city-dem`、型 `dem_terrain`）。
+
+- `dem`：その `components/terrain/terrain-receipt.json`（絶対パスか Recipe からの相対パス）
+- `resolution_m`：格子の間隔（既定 1 m。格子が 1001 点を超えるときは粗くする）
+
+高さは envsim 自身の読み取り関数で標本化し、いちばん低い点を 0 にします。DEM の範囲の外（環境を広げた分）は、端の高さを延ばします。receipt の SHA-256 と地形ファイルが食い違うときは `invalid_shape` です。
+
 格子の並びは MuJoCo と同じです：行 0 が北の端（+y）、最後の行が南の端、列 0 が西の端（-x）、最後の列が東の端（`tests/test_env_generate.py` で MuJoCo と照合）。
 
-物体は、外形の下（角・辺・内側の格子点）で**いちばん高い地面**に底面を置きます。坂の上でも地面にめり込みません。`elevated` の物体はそこから `z_m` 上です。
+物体は、外形の下（角・辺・内側の格子点）で**いちばん高い地面**に底面を置きます。坂の上でも地面にめり込みません。hfield では、さらに 5 mm 上に置きます（`HFIELD_CLEARANCE_M`）。標本化した高さ（双一次補間、辺は格子の間隔ごと）は、MuJoCo の三角形の面より数 mm 低くなることがあるためです。`elevated` の物体はそこから `z_m` 上です。
 
 ## 5. Catalog
 

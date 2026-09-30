@@ -51,6 +51,10 @@ MIN_STEP_M = 0.05
 # A road surface keeps at most this many corners (simplified further when it has more).
 MAX_ROAD_POINTS = 400
 MIN_ROAD_AREA_M2 = 1.0
+# On DEM terrain a road surface is cut into tiles this big: a part stands on the
+# highest ground under it, so a long road on a slope would float otherwise.
+ROAD_TILE_M = 10.0
+MIN_TILE_AREA_M2 = 0.05
 GML_ID = "{http://www.opengis.net/gml}id"
 NS = {"gml": "http://www.opengis.net/gml", "bldg": "http://www.opengis.net/citygml/building/2.0",
       "gen": "http://www.opengis.net/citygml/generics/2.0"}
@@ -165,15 +169,37 @@ def _clean_ring(points) -> list[tuple[float, float]] | None:
     return ring if env_polygon.is_simple(ring) else None
 
 
+def _road_pieces(polygon, tiled: bool):
+    """(id suffix, polygon) of a road surface: itself, or its ROAD_TILE_M tiles
+    (aligned to the origin) when it lies on DEM terrain."""
+    if not tiled:
+        return [("", polygon)]
+    from shapely.geometry import box
+
+    min_x, min_y, max_x, max_y = polygon.bounds
+    pieces = []
+    for ix in range(math.floor(min_x / ROAD_TILE_M), math.ceil(max_x / ROAD_TILE_M)):
+        for iy in range(math.floor(min_y / ROAD_TILE_M), math.ceil(max_y / ROAD_TILE_M)):
+            cut = polygon.intersection(box(ix * ROAD_TILE_M, iy * ROAD_TILE_M, (ix + 1) * ROAD_TILE_M,
+                                           (iy + 1) * ROAD_TILE_M))
+            parts = [cut] if cut.geom_type == "Polygon" else [g for g in getattr(cut, "geoms", []) if g.geom_type == "Polygon"]
+            for number, part in enumerate(parts):
+                if part.area >= MIN_TILE_AREA_M2:
+                    pieces.append((f"-t{ix}_{iy}" + (f"_{number}" if len(parts) > 1 else ""), part))
+    return pieces
+
+
 def convert(source: Path, center: tuple[float, float], half_extent: tuple[float, float], *,
             catalog: str = "", name: str | None = None, terrain_item: str = "city-ground",
-            items: dict | None = None, prepared: dict[Path, list[dict]] | None = None) -> tuple[dict, dict]:
+            items: dict | None = None, prepared: dict[Path, list[dict]] | None = None,
+            dem: Path | None = None) -> tuple[dict, dict]:
     """(Recipe mapping, report) of the CityGML under `source` for a selection
     centred on (lat, lon) with (north_south, east_west) half extents.
 
     `prepared` gives buildings Envsim already extracted for this selection
     (its <name>-lod1.json records, by source file), so large mesh files are
-    only streamed for their attributes."""
+    only streamed for their attributes. `dem` (an Envsim terrain-receipt.json)
+    makes the ground that City World's terrain (item city-dem)."""
     items = {**ITEMS, **(items or {})}
     geodesy, extract, roads_probe = envsim_modules()
     lat0, lon0 = center
@@ -246,23 +272,24 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
             raise
         crs_seen.add(geodesy.epsg_label(geodesy.file_crs(path, default=6697)))
         for road_id, polygon in surfaces:
-            # Envsim gives MuJoCo axes (x north, y west); back to east / north.
-            shape = polygon.simplify(MIN_STEP_M / 2)
-            tolerance = MIN_STEP_M
-            while len(shape.exterior.coords) - 1 > MAX_ROAD_POINTS:
-                shape, tolerance = polygon.simplify(tolerance), tolerance * 2
-            if shape.area < MIN_ROAD_AREA_M2:
+            if polygon.area < MIN_ROAD_AREA_M2:
                 continue
-            ring = _clean_ring([(-y, x) for x, y in list(shape.exterior.coords)[:-1]])
-            if ring is None:
-                report["skipped"].append({"source": road_id, "kind": "road", "reason": "not a simple polygon"})
-                continue
-            pose, outline = _placed(ring)
             gml_id = road_id.rsplit("-", 2)[0]
-            objects.append({"id": _part_id(road_id, used),
-                            "item": items["road"], "pose": pose, "params": {"outline": outline},
-                            "source": {"provider": "citygml", "kind": "citygml", "id": gml_id, "note": path.name}})
-            report["roads"] += 1
+            for suffix, piece in _road_pieces(polygon, tiled=dem is not None):
+                # Envsim gives MuJoCo axes (x north, y west); back to east / north.
+                shape = piece.simplify(MIN_STEP_M / 2)
+                tolerance = MIN_STEP_M
+                while len(shape.exterior.coords) - 1 > MAX_ROAD_POINTS:
+                    shape, tolerance = piece.simplify(tolerance), tolerance * 2
+                ring = _clean_ring([(-y, x) for x, y in list(shape.exterior.coords)[:-1]])
+                if ring is None:
+                    report["skipped"].append({"source": road_id + suffix, "kind": "road", "reason": "not a simple polygon"})
+                    continue
+                pose, outline = _placed(ring)
+                objects.append({"id": _part_id(road_id + suffix, used),
+                                "item": items["road"], "pose": pose, "params": {"outline": outline},
+                                "source": {"provider": "citygml", "kind": "citygml", "id": gml_id, "note": path.name}})
+                report["roads"] += 1
 
     if not report["buildings"]:
         raise fail("citygml", "missing_field", "no LOD1 building in the selection", actual=str(source))
@@ -294,10 +321,11 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
         "catalog": catalog,
         "geo": geo,
         "size_m": {"east": size_east, "north": size_north},
-        "terrain": {"item": terrain_item},
+        "terrain": {"item": "city-dem", "params": {"dem": str(dem)}} if dem is not None else {"item": terrain_item},
         "objects": objects,
     }
     report["size_m"] = recipe["size_m"]
+    report["terrain"] = "dem" if dem is not None else "flat"
     report["provider"] = provider
     return recipe, report
 
@@ -318,6 +346,10 @@ def read_envsim_build(build: Path) -> dict:
         prepared = {path: records for path, records in prepared.items() if path.is_file()} or None
     receipt_path = build / "build-receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.is_file() else {}
+    terrain = build / "components" / "terrain" / "terrain-receipt.json"
+    dem = None
+    if terrain.is_file() and json.loads(terrain.read_text(encoding="utf-8")).get("dem", "available") == "available":
+        dem = terrain
     return {
         "center": (float(query["center_lat"]), float(query["center_lon"])),
         "half_extent": (float(query["ns_m"]), float(query["ew_m"])),
@@ -327,6 +359,7 @@ def read_envsim_build(build: Path) -> dict:
         "buildings": sum(len(records) for records in (prepared or {}).values()),
         "world": (build / "world" / "city-world.xml").is_file(),
         "built": receipt.get("outputs", {}),
+        "dem": dem,
     }
 
 
@@ -366,14 +399,17 @@ def discover(roots: list[Path], max_depth: int = 8) -> list[dict]:
                 "center": {"latitude": info["center"][0], "longitude": info["center"][1]},
                 "half_extent_m": {"north_south": info["half_extent"][0], "east_west": info["half_extent"][1]},
                 "feature_types": info["feature_types"], "buildings": info["buildings"], "world": info["world"],
+                "dem": info["dem"] is not None,
             })
     return found
 
 
-def convert_build(build: Path, **options) -> tuple[dict, dict]:
-    """Parts of an Envsim build: its selection, its extracted buildings, its roads."""
+def convert_build(build: Path, use_dem: bool = True, **options) -> tuple[dict, dict]:
+    """Parts of an Envsim build: its selection, its extracted buildings, its
+    roads, and (when it has one and `use_dem`) its DEM terrain as the ground."""
     info = read_envsim_build(build)
-    recipe, report = convert(info["source"], info["center"], info["half_extent"], prepared=info["prepared"], **options)
+    recipe, report = convert(info["source"], info["center"], info["half_extent"], prepared=info["prepared"],
+                             dem=info["dem"] if use_dem else None, **options)
     report["build"] = str(build)
     return recipe, report
 
@@ -394,6 +430,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--half-extent", help="NS,EW half extents in metres (with --citygml)")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
     parser.add_argument("--terrain", default="city-ground")
+    parser.add_argument("--flat", action="store_true", help="with --envsim-build: flat ground even when it has a DEM")
     parser.add_argument("--name")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--json", action="store_true")
@@ -410,8 +447,8 @@ def main(argv: list[str] | None = None) -> int:
         out = args.out.resolve()
         catalog = Path(os.path.relpath(args.catalog.resolve(), out.parent)).as_posix()
         if args.envsim_build:
-            recipe, report = convert_build(args.envsim_build.resolve(), catalog=catalog, name=args.name,
-                                           terrain_item=args.terrain)
+            recipe, report = convert_build(args.envsim_build.resolve(), use_dem=not args.flat, catalog=catalog,
+                                           name=args.name, terrain_item=args.terrain)
         else:
             if not args.center or not args.half_extent:
                 parser.error("--citygml needs --center and --half-extent")

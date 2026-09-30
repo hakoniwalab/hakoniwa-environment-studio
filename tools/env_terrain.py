@@ -13,7 +13,10 @@ west edge (-x), the last column the east edge.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import math
+from pathlib import Path
 import random
 
 from env_diagnostics import fail
@@ -136,15 +139,63 @@ def _hills(params: dict, size_east: float, size_north: float, path: str) -> tupl
     return nrow, ncol, heights
 
 
-def make_terrain(settings: dict, params: dict, size_east: float, size_north: float, path: str) -> Terrain:
-    """The terrain of a terrain type's settings (env_types.terrain_settings)."""
+def _envsim_dem(params: dict, size_east: float, size_north: float, path: str,
+                base_dir: Path | None) -> tuple[int, int, list[list[float]]]:
+    """The ground of a City World that hakoniwa-envsim built (its terrain
+    hfield, from PLATEAU DEM): `dem` names its terrain-receipt.json (absolute,
+    or relative to the Recipe). Sampled with Envsim's own reader every
+    `resolution_m` (coarser when the grid would exceed MAX_GRID), relative to
+    its lowest point; outside the DEM the edge heights continue."""
+    text = str(params.get("dem") or "").strip()
+    if not text:
+        raise fail(f"{path}.dem", "missing_field", "the terrain-receipt.json of an Envsim City World",
+                   expected="path to components/terrain/terrain-receipt.json")
+    receipt_path = Path(text).expanduser()
+    if not receipt_path.is_absolute() and base_dir is not None:
+        receipt_path = base_dir / receipt_path
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        hfield = Path(receipt["hfield"]["path"])
+        if not hfield.is_absolute():
+            hfield = receipt_path.parent / hfield
+        data = hfield.read_bytes()
+    except (OSError, ValueError, KeyError) as exc:
+        raise fail(f"{path}.dem", "unknown_reference", f"cannot read the Envsim terrain: {exc}", actual=text) from exc
+    if receipt["hfield"].get("sha256") and hashlib.sha256(data).hexdigest() != receipt["hfield"]["sha256"]:
+        raise fail(f"{path}.dem", "invalid_shape", "the hfield file differs from its receipt (sha256)", actual=str(hfield))
+    import env_citygml  # Envsim's reader (imported only for this generator)
+
+    _geodesy, _extract, probe = env_citygml.envsim_modules()
+    rows, cols, samples = probe.read_hfield(hfield)
+    ns_m, ew_m = float(receipt["half_extent_m"]["north_south"]), float(receipt["half_extent_m"]["east_west"])
+    offset = min(samples)
+    resolution = max(float(params.get("resolution_m", 1.0)), max(size_east, size_north) / (MAX_GRID - 1))
+    nrow, ncol = _grid(size_east, size_north, resolution, path)
+    heights = []
+    for row in range(nrow):
+        north = size_north / 2 - row / (nrow - 1) * size_north
+        line = []
+        for col in range(ncol):
+            east = -size_east / 2 + col / (ncol - 1) * size_east
+            # Envsim's hfield axes are MuJoCo's city frame: x = north, y = -east.
+            line.append(round(probe.terrain_height(north, -east, samples, rows, cols, ns_m, ew_m) - offset, 4))
+        heights.append(line)
+    return nrow, ncol, heights
+
+
+def make_terrain(settings: dict, params: dict, size_east: float, size_north: float, path: str,
+                 base_dir: Path | None = None) -> Terrain:
+    """The terrain of a terrain type's settings (env_types.terrain_settings);
+    `base_dir` is where relative data paths (the envsim generator's) start."""
     base = dict(color=settings["color"], friction=settings["friction"], size_east_m=size_east, size_north_m=size_north)
     if settings["kind"] == "flat":
         return Terrain("flat", **base)
     if settings["generator"] == "hills":
         nrow, ncol, heights = _hills(params, size_east, size_north, path)
+    elif settings["generator"] == "envsim":
+        nrow, ncol, heights = _envsim_dem(params, size_east, size_north, path, base_dir)
     else:
-        raise fail(f"{path}.generator", "not_one_of", "no generator for an hfield", expected=["hills"],
+        raise fail(f"{path}.generator", "not_one_of", "no generator for an hfield", expected=["envsim", "hills"],
                    actual=settings["generator"])
     return Terrain("hfield", **base, nrow=nrow, ncol=ncol, heights=tuple(tuple(row) for row in heights),
                    max_height_m=max(max(row) for row in heights))

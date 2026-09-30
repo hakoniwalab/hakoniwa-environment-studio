@@ -91,7 +91,7 @@ class RecipeTest(unittest.TestCase):
         for obj in recipe.objects:
             with self.subTest(object=obj.id):
                 ground = recipe.terrain.highest_under(env_schema.footprint(obj))
-                self.assertAlmostEqual(obj.pose.z_m, ground, places=5)
+                self.assertAlmostEqual(obj.pose.z_m, ground + env_schema.HFIELD_CLEARANCE_M, places=5)
                 self.assertGreaterEqual(obj.pose.z_m, recipe.terrain.height_at(obj.pose.x_m, obj.pose.y_m) - 1e-9)
 
     def test_a_placement_changes_only_what_its_item_allows(self):

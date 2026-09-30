@@ -220,6 +220,83 @@ class WorkspaceTest(unittest.TestCase):
         env_schema.parse_recipe(recipe, ROOT / "work/build.yaml")
 
 
+def write_dem(directory: Path, ns_m: float, ew_m: float, slope: float = 0.1, base: float = 10.0) -> Path:
+    """An Envsim terrain (receipt + .hf) of a plane rising `slope` m per m northwards."""
+    import hashlib
+    import struct
+
+    spacing = 2.0
+    ncol = int(round(2 * ns_m / spacing)) + 1  # x = north
+    nrow = int(round(2 * ew_m / spacing)) + 1  # y = -east
+    samples = [base + slope * (-ns_m + col * 2 * ns_m / (ncol - 1)) for row in range(nrow) for col in range(ncol)]
+    hfield = directory / "terrain.hf"
+    hfield.write_bytes(struct.pack("<ii", nrow, ncol) + struct.pack(f"<{nrow * ncol}f", *samples))
+    receipt = directory / "terrain-receipt.json"
+    receipt.write_text(json.dumps({"nrow": nrow, "ncol": ncol, "half_extent_m": {"north_south": ns_m, "east_west": ew_m},
+                                   "coordinate_system": "X=North,Y=-East,Z=Up", "altitude_offset_m": min(samples),
+                                   "hfield": {"path": str(hfield), "sha256": hashlib.sha256(hfield.read_bytes()).hexdigest()}}),
+                       encoding="utf-8")
+    return receipt
+
+
+@unittest.skipUnless(ENVSIM, "hakoniwa-envsim is not available")
+class DemTerrainTest(unittest.TestCase):
+    """The ground of an Envsim City World (its DEM hfield) as a Studio terrain."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+        self.receipt = write_dem(self.dir, 30.0, 40.0)
+
+    def recipe(self, objects=(), size=(80, 60), dem=None):
+        return {"schema": env_schema.RECIPE_SCHEMA, "name": "dem", "catalog": CATALOG,
+                "size_m": {"east": size[0], "north": size[1]},
+                "terrain": {"item": "city-dem", "params": {"dem": str(dem or self.receipt)}}, "objects": list(objects)}
+
+    def test_the_ground_rises_north_like_the_dem(self):
+        terrain = env_schema.parse_recipe(self.recipe(), self.dir / "r.yaml").terrain
+        self.assertEqual(terrain.kind, "hfield")
+        self.assertAlmostEqual(terrain.height_at(0, -30), 0.0, places=3)  # the lowest point is 0
+        self.assertAlmostEqual(terrain.height_at(10, 0), 3.0, places=3)
+        self.assertAlmostEqual(terrain.height_at(-35, 30), 6.0, places=3)
+        # Outside the DEM (the environment is wider) the edge continues.
+        big = env_schema.parse_recipe(self.recipe(size=(80, 100)), self.dir / "r.yaml").terrain
+        self.assertAlmostEqual(big.height_at(0, 50), 6.0, places=3)
+
+    def test_objects_stand_on_it_and_the_world_is_valid(self):
+        cone = {"id": "cone", "item": "traffic-cone", "pose": {"x_m": 0, "y_m": 20, "yaw_deg": 0}}
+        parsed = env_schema.parse_recipe(self.recipe([cone]), self.dir / "r.yaml")
+        self.assertAlmostEqual(parsed.objects[0].pose.z_m, 5.0 + 0.19 * 0.1 + env_schema.HFIELD_CLEARANCE_M, delta=0.002)
+        if env_validate.available():
+            self.assertEqual([item.as_json() for item in env_validate.check(parsed)], [])
+
+    def test_a_changed_hfield_is_refused(self):
+        hfield = self.dir / "terrain.hf"
+        hfield.write_bytes(hfield.read_bytes()[:-4] + b"\0\0\0\0")
+        with self.assertRaises(env_schema.DiagnosticError) as caught:
+            env_schema.parse_recipe(self.recipe(), self.dir / "r.yaml")
+        self.assertEqual(caught.exception.diagnostics[0].path, "terrain.params.dem")
+        with self.assertRaises(env_schema.DiagnosticError):
+            env_schema.parse_recipe(self.recipe(dem=self.dir / "missing.json"), self.dir / "r.yaml")
+
+    def test_an_import_with_a_dem_tiles_the_roads(self):
+        citygml = self.dir / "citygml"
+        osm2citygml.run(box(), citygml, "map", osm_json=sample())
+        ns, ew = box().half_extent_m()
+        receipt = write_dem(self.dir, ns, ew)
+        recipe, report = env_citygml.convert(citygml, box().center, (ns, ew), catalog=CATALOG, dem=receipt)
+        self.assertEqual((report["terrain"], recipe["terrain"]["item"]), ("dem", "city-dem"))
+        roads = [obj for obj in recipe["objects"] if obj["item"] == "road-area"]
+        self.assertTrue(all("-t" in obj["id"] for obj in roads))
+        for obj in roads:  # every tile fits in one 10 m cell
+            xs = [obj["pose"]["x_m"] + x for x, _ in obj["params"]["outline"]]
+            self.assertLessEqual(max(xs) - min(xs), env_citygml.ROAD_TILE_M + 0.01)
+        parsed = env_schema.parse_recipe(recipe, self.dir / "r.yaml")
+        if env_validate.available():
+            self.assertEqual([item.as_json() for item in env_validate.check(parsed)], [])
+
+
 class IdTest(unittest.TestCase):
     def test_gml_ids_become_part_ids(self):
         used = set()

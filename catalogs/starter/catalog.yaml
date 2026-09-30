@@ -25,6 +25,12 @@ items:
     description: Light pavement for a town made from a map, so roads and buildings stand out.
     params: {color: "#a9aba6"}
 
+  - id: city-dem
+    type: dem_terrain
+    name: 地形データ（City World の DEM）
+    description: The terrain of an Envsim City World; set its terrain-receipt.json.
+    params: {color: "#a9aba6"}
+
   - id: rolling-hills
     type: hills_terrain
     name: なだらかな丘

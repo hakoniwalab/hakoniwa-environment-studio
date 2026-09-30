@@ -380,7 +380,8 @@ def import_city_world(body: object) -> dict:
     target.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
     return {"id": recipe_id, "path": str(target), "build": str(build), "size_m": recipe["size_m"],
             "buildings": report["buildings"], "roads": report["roads"], "skipped": report["skipped"],
-            "courtyards_filled": report["courtyards_filled"], "notes": report["notes"], "provider": report["provider"]}
+            "courtyards_filled": report["courtyards_filled"], "notes": report["notes"], "provider": report["provider"],
+            "terrain": report["terrain"]}
 
 
 def save_recipe(recipe_id: str, body: object) -> dict:

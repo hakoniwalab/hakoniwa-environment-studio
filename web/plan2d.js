@@ -203,7 +203,8 @@ export class PlanView {
       const selected = this.selection.has(part.id);
       const mounted = part.surface === "elevated";
       const group = svg("g", {
-        class: `part${mounted ? " mounted" : ""}${selected ? " selected" : ""}${bad ? " problem" : ""}`, "data-id": part.id,
+        class: `part${mounted ? " mounted" : ""}${part.layer === "surface" ? " surface" : ""}${selected ? " selected" : ""}${bad ? " problem" : ""}`,
+        "data-id": part.id,
       });
       for (const shape of shapes) {
         group.append(svg("polygon", {

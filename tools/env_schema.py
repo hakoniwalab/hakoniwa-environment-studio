@@ -332,7 +332,8 @@ def resolve_placement(item: Item, given, path: str) -> tuple[dict, Shape]:
     return params, shape
 
 
-def _terrain(value, path: str, catalog: Catalog, size_east: float, size_north: float) -> tuple[str, Terrain]:
+def _terrain(value, path: str, catalog: Catalog, size_east: float, size_north: float,
+             base_dir: Path | None = None) -> tuple[str, Terrain]:
     value = mapping(value, path)
     only(value, {"item", "params"}, path)
     item = catalog.items.get(value.get("item"))
@@ -342,7 +343,7 @@ def _terrain(value, path: str, catalog: Catalog, size_east: float, size_north: f
                    actual=value.get("item"))
     params = placement_values(item, value.get("params", {}), f"{path}.params")
     settings = env_types.terrain_settings(item.type, params, path)
-    return item.id, make_terrain(settings, params, size_east, size_north, f"{path}.params")
+    return item.id, make_terrain(settings, params, size_east, size_north, f"{path}.params", base_dir)
 
 
 def _object(value, path: str, catalog: Catalog, terrain: Terrain) -> EnvObject:
@@ -370,8 +371,12 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain) -> EnvObject:
     obj = EnvObject(id=object_id, item=item.id, type=item.type.id, pose=Pose(x, y, 0.0, float(yaw) % 360.0),
                     params=params, shape=shape, source=source)
     # Set on the terrain: its base at the highest ground under its outline
-    # (plus its own height above the terrain when elevated).
+    # (plus its own height above the terrain when elevated). On a height field
+    # it keeps HFIELD_CLEARANCE_M above that: the sampled height (bilinear,
+    # edges sampled every grid step) can be a few mm under MuJoCo's triangles.
     ground = terrain.highest_under(footprint(obj))
+    if terrain.kind == "hfield":
+        ground += HFIELD_CLEARANCE_M
     z = ground + (params["z_m"] if shape.surface == "elevated" else 0.0)
     return replace(obj, pose=replace(obj.pose, z_m=round(z, 6)))
 
@@ -381,6 +386,8 @@ def _solid_outlines(obj: EnvObject) -> list[tuple[list[tuple[float, float]], flo
     return [(placed(obj, solid.outline()), solid.z_m + solid.height_m / 2)
             for solid in obj.solids if solid.collide]
 
+
+HFIELD_CLEARANCE_M = 0.005
 
 # Objects on a surface object float this far above its top: exactly touching
 # meshes make MuJoCo's convex collision pick a sideways normal and report a
@@ -429,7 +436,8 @@ def parse_recipe(data: dict, path: Path, catalog: Catalog | None = None) -> Reci
     size_east = problems.check(_metres, size.get("east"), "size_m.east", positive=True)
     size_north = problems.check(_metres, size.get("north"), "size_m.north", positive=True)
     problems.raise_if_errors()
-    terrain_result = problems.check(_terrain, data.get("terrain"), "terrain", catalog, size_east, size_north)
+    terrain_result = problems.check(_terrain, data.get("terrain"), "terrain", catalog, size_east, size_north,
+                                    path.parent)
     problems.raise_if_errors()
     terrain_item, terrain = terrain_result
     entries = data.get("objects", [])

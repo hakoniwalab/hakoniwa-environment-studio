@@ -206,7 +206,7 @@ Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘�
   1. hakoniwa-envsim の `osm2citygml.py` が、OpenStreetMap（Overpass API）か GeoJSON を CityGML LOD1 にします（変換規則は envsim の `docs/osm-to-citygml.md`）。
   2. このリポジトリの部品変換ツール `tools/env_citygml.py` が、それを部品にします。
 - **部品の単位**：建物 1 棟（CityGML の `bldg:Building`）＝ `building-footprint` の部品 1 つ。道路の面は `road-area` です。建物は切らずに丸ごと使い、はみ出す建物があれば環境のほうを広げます。
-- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。
+- **ワークスペースの街**：hakoniwa-envsim で変換済みの街（ビジネスパックの City World ジョブ：静岡・札幌など）を地図ページの「ワークスペースの街」で探して、そのまま部品にできます。envsim が抽出した建物を使うので、City World と同じ建物が同じ位置に並びます。1 棟ずつ動かす・消す・複製することもできます。City World に地形（PLATEAU の DEM）があれば、それが地面になり、建物は移動先の地面の高さに合わせて立ちます。
 - **出典の記録**：部品は gml:id・元のファイル・OSM のタグを `source` に、Recipe は原点・範囲・出典（© OpenStreetMap contributors / ODbL、PLATEAU）を `geo` に持ちます。取得した地図データと CityGML は `work/map-data/<id>/` に残ります。
 - **準備**：hakoniwa-envsim が必要です（`../hakoniwa-envsim` か `HAKONIWA_ENVSIM_ROOT`）。Workspace Recipe `hakoniwa/recipes/citygml-parts.yaml` で用意できます。依存は `python -m venv .venv && .venv/bin/pip install -r requirements.txt` で入ります。
 

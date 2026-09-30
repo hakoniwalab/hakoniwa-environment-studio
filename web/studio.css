@@ -144,3 +144,5 @@ a.button-link {
   color: var(--accent); text-decoration: none; font-size: 13px;
 }
 textarea.points { width: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+/* Roads and markings (surface layer): no outline, so tiles of one road read as one surface. */
+.plan .part.surface:not(.selected):not(.problem) polygon { stroke: none; }

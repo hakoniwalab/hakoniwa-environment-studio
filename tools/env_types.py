@@ -50,7 +50,8 @@ LAYERS = {"object", "surface"}
 TERRAIN_KINDS = {"flat", "hfield"}
 # Terrain generators the engine provides (env_terrain.py), with the parameter
 # names each one reads.
-TERRAIN_GENERATORS = {"flat": set(), "hills": {"max_height_m", "hills", "radius_m", "seed", "resolution_m"}}
+TERRAIN_GENERATORS = {"flat": set(), "hills": {"max_height_m", "hills", "radius_m", "seed", "resolution_m"},
+                      "envsim": {"dem", "resolution_m"}}
 TYPE_KEYS = {"id", "label", "description", "abstract", "extends", "id_prefix", "params", "behavior", "shapes",
              "envelope", "terrain"}
 PARAM_KEYS = {"kind", "level", "label", "description", "unit", "default", "min", "max", "values"}

@@ -65,6 +65,21 @@ types:
                      description: Spacing of the height samples.}
     terrain: {kind: hfield, generator: hills, color: $color, friction: $friction}
 
+  # The ground of a City World hakoniwa-envsim built (PLATEAU DEM as an hfield).
+  - id: dem_terrain
+    extends: terrain
+    label: 地形データ（DEM）
+    description: >-
+      The terrain of a City World built by hakoniwa-envsim (its hfield from
+      PLATEAU DEM), relative to its lowest point; the environment's size
+      decides how much of it is used (the edge heights continue outside it).
+    params:
+      dem: {kind: text, label: 地形データ（terrain-receipt.json）, default: "", level: placement,
+            description: "Path to components/terrain/terrain-receipt.json of an Envsim build (absolute, or relative to the Recipe)."}
+      resolution_m: {kind: length, label: 格子の間隔, default: 1.0, min: 0.25, max: 10, level: item,
+                     description: Spacing of the height samples (coarser when the environment is large).}
+    terrain: {kind: hfield, generator: envsim, color: $color, friction: $friction}
+
   # --- Structures and obstacles ---------------------------------------------------
   - id: wall
     extends: block
