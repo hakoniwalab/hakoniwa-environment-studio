@@ -61,9 +61,12 @@ class StudioServerTest(unittest.TestCase):
         exported = {str((job / "build").resolve()): {"id": "sapporo", "title": "sapporo"}}
         with mock.patch.object(env_studio, "EXPORT_DIR", self.user.parent / "exports"), \
                 mock.patch.object(env_studio.env_urban, "exported", lambda _: exported):
-            status, answer = self.call("POST", "/api/city-worlds/jobs/sapporo/delete", {})
-        self.assertEqual(status, 409)
-        self.assertIn("書き出しを消す", answer["error"])
+            deleted = self.call("POST", "/api/city-worlds/jobs/sapporo/delete", {})
+            # Nor replaced by generating it again.
+            generated = self.call("POST", "/api/city-worlds/build", {"id": "sapporo", "overwrite": True})
+        for status, answer in (deleted, generated):
+            self.assertEqual(status, 409)
+            self.assertIn("書き出しを消す", answer["error"])
         self.assertTrue(job.is_dir())
         # Not exported: it goes.
         self.assertEqual(self.call("POST", "/api/city-worlds/jobs/sapporo/delete", {})[0], 200)

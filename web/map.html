@@ -82,16 +82,6 @@
           <div id="municipality" class="municipality"></div>
           <div id="capabilities" class="capabilities"></div>
           <button id="to-osm" class="secondary wide" type="button" hidden>この範囲を OpenStreetMap で作る</button>
-          <div class="grid">
-            <label class="full" title="生成する City World の ID。書き出し先では World の ID になります（小文字・数字・- _）。診断すると、自治体と中心から付けます。">ID
-              <input id="build-id" autocomplete="off" placeholder="診断すると自動で付きます"></label>
-            <label class="checkbox-option" id="build-register-field" hidden title="作った City World を、変換せずにそのまま書き出し先に書き出します（書き出し先を見ているツール、例えば hakoniwa-urban-mobility が World として取り込みます）。">
-              <input type="checkbox" id="build-register" checked><span>できあがったら書き出し先にそのまま書き出す</span></label>
-            <label class="checkbox-option" title="作った City World を、この Studio で編集できる部品にします。編集したものは Studio の画面の「書き出す」で書き出します。">
-              <input type="checkbox" id="build-import"><span>できあがったら部品として取り込む（編集用）</span></label>
-            <label class="checkbox-option" title="同じ ID・同じ範囲で前に作った City World を、そのとき取得したカタログと CityGML だけで作り直します（ネットワークを使いません）。">
-              <input type="checkbox" id="build-offline"><span>前に作った同じ ID・同じ範囲を、取得済みのデータで作り直す（オフライン）</span></label>
-          </div>
           <button id="generate" class="wide" type="button" disabled>3. City Worldを生成</button>
           <button id="cancel" class="wide" type="button" disabled>生成をキャンセル</button>
           <div id="generation" class="generation"></div>

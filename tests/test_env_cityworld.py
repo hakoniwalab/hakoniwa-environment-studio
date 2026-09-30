@@ -109,6 +109,11 @@ class CityWorldBuildTest(unittest.TestCase):
         with self.assertRaises(env_cityworld.BuildError) as caught:
             self.builds.start({"id": "sapporo", "selection": SELECTION}, roots)
         self.assertEqual(caught.exception.status, 409)
+        # Generated again with overwrite: the old one goes first.
+        (self.dir / "work/city-worlds/sapporo/build/stale.txt").write_text("old", encoding="utf-8")
+        self.assertEqual(self.wait(self.builds.start({"id": "sapporo", "selection": SELECTION, "overwrite": True},
+                                                     roots)["id"])["state"], "done")
+        self.assertFalse((self.dir / "work/city-worlds/sapporo/build/stale.txt").exists())
 
     def test_one_build_at_a_time_and_it_can_be_cancelled(self):
         slow = {**SELECTION, "half_extent_m": {"north_south": 900, "east_west": 20}}  # 9 s a step

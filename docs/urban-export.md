@@ -34,7 +34,7 @@ Studio の Recipe workspace の `urban/<Recipe ID>/`（`$HAKONIWA_WORK_DIR/recip
 
 - **書き出し先：** Studio は urban を呼びません。`env_studio.py start --export-dir <フォルダ>` で渡されたフォルダに、City World ジョブを `<ID>/` として書き出すだけです。ジョブは隣で書き終えてから一度に移すので、書き出し先を見ているツールが書きかけを拾うことはありません。各ジョブには `job.json`（名前 `title`、元になった Recipe か City World `source`）が付きます。urban-mobility は、Urban Studio の「Environment Studio で作る」でこの書き出し先を自分の受け取りフォルダにして Studio を起動し、現れたジョブを自分で検査して City として登録し、消えたジョブの登録を外します。
 - **Studio の画面：** 環境を保存してから、上の「書き出す」を押します（書き出し先を渡して起動したときだけ出ます）。
-- **PLATEAU の City World をそのまま書き出す：** 地図ページのワークスペースの街の「書き出す」、または「PLATEAU から City World を作る」の「できあがったら書き出し先にそのまま書き出す」。envsim の City World はもともとこの形式なので、変換しません。書き出すのは小さなジョブ（receipt、建物の外形 `build/city-world-lod1.json`、`viewer/`）で、receipt は City World の MJCF や GLB を絶対パスのまま指します。City World を消すと、書き出したジョブも使えなくなります。「書き出しを消す」で書き出し先から消せます（City World 自体は残ります）。
+- **PLATEAU の City World をそのまま書き出す：** 地図ページのワークスペースの街の「書き出す」、または地図ページの PLATEAU で生成した City World（書き出し先を渡して起動したときは、できあがると自動で書き出します。生成結果の「書き出す」「書き出しを消す」でも切り替えられます）。envsim の City World はもともとこの形式なので、変換しません。書き出すのは小さなジョブ（receipt、建物の外形 `build/city-world-lod1.json`、`viewer/`）で、receipt は City World の MJCF や GLB を絶対パスのまま指します。City World を消すと、書き出したジョブも使えなくなります。「書き出しを消す」で書き出し先から消せます（City World 自体は残ります）。
 - **コマンド：** `tools/env_urban.py export <Recipe> [--out DIR]`（Recipe をジョブとして書き出す。登録はしません）
 
 ## 4. 確かめたこと

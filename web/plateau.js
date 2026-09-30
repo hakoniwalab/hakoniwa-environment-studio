@@ -60,7 +60,6 @@ const prefectureSlugs = {
   "46": "kagoshima", "47": "okinawa",
 };
 const BUILD_KEY = "hakoniwa-environment-city-world-build";
-const ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 // The Web UI's job id, in the Studio's id characters (a "." becomes "_").
 function generatedJobId(selection, inspected) {
@@ -111,12 +110,11 @@ export function plateauMode(page) {
   const elements = Object.fromEntries([
     "physics-level", "terrain-uncovered-policy", "coplanar-union", "convex-decompose", "tolerant-planar",
     "inspect", "generate", "cancel", "mesh-summary", "overall", "municipality", "capabilities", "generation",
-    "build-id", "build-offline", "build-register", "build-register-field", "build-import", "to-osm",
+    "to-osm",
     "artifact-select", "artifact-path", "artifact-detail", "cache-info", "download", "view3d", "delete-artifact",
     "export-artifact", "import-artifact", "viewer-visual", "viewer-collider", "viewer-panel", "viewer-status",
     "viewer-canvas", "log",
   ].map((id) => [id, document.getElementById(id)]));
-  elements["build-register-field"].hidden = !page.exportDir;
   elements["export-artifact"].hidden = !page.exportDir;
 
   let inspecting = false;
@@ -124,7 +122,6 @@ export function plateauMode(page) {
   let canceling = false;
   let lastAvailable = null;
   let generatedJobs = [];
-  let idEdited = false;
   let viewerRuntime = null;
   let viewerModels = { visual: null, collider: null };
   let viewerJobId = null;
@@ -208,7 +205,6 @@ export function plateauMode(page) {
     invalidateInspection();
     refresh();
   });
-  elements["build-id"].addEventListener("input", () => { idEdited = elements["build-id"].value.trim() !== ""; });
 
   // --- Diagnosis ------------------------------------------------------------
 
@@ -251,8 +247,7 @@ export function plateauMode(page) {
             ? `max LOD ${capability.max_lod} / ${capability.source_file_count} files${capability.reason ? ` / ${capability.reason}` : ""}`
             : capability.reason))));
     }
-    lastAvailable = available ? { request } : null;
-    if (available && !idEdited) elements["build-id"].value = generatedJobId(request.selection, inspected);
+    lastAvailable = available ? { request, jobId: generatedJobId(request.selection, inspected) } : null;
     elements["to-osm"].hidden = available;
   }
 
@@ -281,10 +276,9 @@ export function plateauMode(page) {
 
   // --- Generation -----------------------------------------------------------
 
+  // Started with an export folder (from hakoniwa-urban-mobility): a new City World goes there.
   async function afterGenerated(id, build) {
-    const target = { path: build, title: id };
-    if (page.exportDir && elements["build-register"].checked) await exportWorld(target);
-    if (elements["build-import"].checked) await page.importWorld(target, id);
+    if (page.exportDir) await exportWorld({ path: build, title: id });
   }
 
   async function follow(id) {
@@ -335,17 +329,13 @@ export function plateauMode(page) {
 
   async function generateWorld() {
     if (generating || lastAvailable === null) return;
-    const id = elements["build-id"].value.trim();
-    if (!ID_PATTERN.test(id)) {
-      page.setStatus("ID は小文字・数字・- _ で付けてください（64 文字まで）", "error");
-      return;
-    }
-    const offline = elements["build-offline"].checked;
+    // The Web UI's id (the municipality and the centre): the same place generated again replaces it.
+    const id = lastAvailable.jobId;
     elements.generation.className = "generation running";
     elements.generation.textContent = "Generateを送信しています";
     try {
       await call("POST", "city-worlds/build", {
-        id, name: id, ...lastAvailable.request, offline, overwrite: offline,
+        id, name: id, ...lastAvailable.request, overwrite: true,
       });
     } catch (error) {
       elements.generation.className = "generation failed";

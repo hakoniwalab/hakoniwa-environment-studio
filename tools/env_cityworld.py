@@ -315,6 +315,9 @@ class Builds:
             elif built and not body.get("overwrite"):  # a build that failed half way may simply run again
                 raise BuildError(f"City World {job_id} はもうあります（別の ID にしてください）", 409)
             envsim = env_envsim.root()
+            if built and body.get("overwrite") and not body.get("offline"):
+                # Generated again (the map page's id is the place): the old one goes, as in the Web UI.
+                shutil.rmtree(job)
             job.mkdir(parents=True, exist_ok=True)
             cache = plateau_cache(roots)
             config = job / "hakoniwa-envsim-build.yaml"

@@ -519,6 +519,12 @@ def start_city_world_build(body: object) -> dict:
     """Start an Envsim build of a selection from PLATEAU (env_cityworld.py);
     body.root (the map page's folder) is searched first for a shared cache."""
     extra = [Path(str(body["root"])).expanduser().resolve()] if isinstance(body, dict) and body.get("root") else []
+    if isinstance(body, dict) and body.get("overwrite") and EXPORT_DIR:
+        # Replacing a City World in the export folder would change the files its export names.
+        found = env_urban.exported(EXPORT_DIR).get(str((env_cityworld.WORK / str(body.get("id")) / "build").resolve()))
+        if found:
+            raise StudioError(f"{body.get('id')} は書き出し先に {found['id']} として書き出してあります。作り直すには、"
+                              "生成結果で「書き出しを消す」を押してから生成してください。", HTTPStatus.CONFLICT)
     return _built(lambda: env_cityworld.BUILDS.start(body, extra + city_world_roots()))
 
 

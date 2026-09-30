@@ -225,7 +225,7 @@ python ../hakoniwa-environment-studio/tools/env_studio.py start --export-dir <�
 ```
 
 - **hakoniwa-urban-mobility と使うとき：** Urban Studio の City タブの「Environment Studio で作る」が、urban の受け取りフォルダを書き出し先にして Env Studio を起動し、書き出されたものを World として登録します。作ってから車やドローンで走らせるまでの手順は、[hakoniwa-urban-mobility の Quick start](https://github.com/hakoniwalab/hakoniwa-urban-mobility) にあります。
-- **書き出すもの：** Studio の画面の「書き出す」（保存した Recipe）、地図ページのワークスペースの街の「書き出す」、PLATEAU で作った City World の「できあがったら書き出し先にそのまま書き出す」。「書き出しを消す」で書き出し先から消せます（元の環境や City World は残ります）。詳しくは [docs/urban-export.md](docs/urban-export.md)。
+- **書き出すもの：** Studio の画面の「書き出す」（保存した Recipe）、地図ページのワークスペースの街の「書き出す」、PLATEAU で生成した City World（できあがると自動で書き出し。生成結果の「書き出す」でも）。「書き出しを消す」で書き出し先から消せます（元の環境や City World は残ります）。詳しくは [docs/urban-export.md](docs/urban-export.md)。
 - **書き出し先なしで起動したとき：** 環境を作る・編集する・検証する・GLB / MJCF を生成する単体のツールとして使えます（書き出しのボタンは出ません）。
 
 Studio（#4 / #5）：左で環境の大きさ・地面（平らな地面／丘の hfield とそのパラメータ）を決め、Catalog の部品をクリックで追加して上面図でドラッグ・回転・複製します（グリッド、近くの部品や端への吸い付き、複数選択、Undo / Redo、コピー＆ペースト）。右の欄は品目のパラメータ定義から自動で作られ、範囲外の値は入りません。3D は生成器の GLB そのもので、全体・車目線（南の端から 1.2 m）・ドローン目線に切り替えられます。編集が止まると MuJoCo で検証し、重なり・はみ出し・地面へのめり込みを上面図に赤く出します（#6）。保存先は `<ws>/recipes/`（例の環境は保存するとコピーになります）。一覧の × で環境を削除できます。すぐには消さず、見た目の GLB（`<ID>.assets/`）と地図から取り込んだ元データ（`<ws>/map-data/<ID>/`）と一緒に `<ws>/trash/<日時>-<ID>/` へ移します（戻すときはそこから `<ws>/` へ戻し、要らなければ手で消します）。例の環境は消せません。別の ID で保存すると、見た目の GLB もその ID の `<ID>.assets/` にコピーするので、元の環境を消してもコピーは壊れません（手で書いた Recipe がほかの環境の `.assets/` を指している場合は、削除を止めてその環境を示します）。部品を動かしたときは、3D の部品をその場で動かし、高さ（地形・道路の上）だけをサーバに聞きます（`POST /api/poses`）。GLB を作り直すのは、形・品目・地面・大きさが変わったときだけです。
