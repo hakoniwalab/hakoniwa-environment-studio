@@ -46,6 +46,8 @@ const state = {
   saved: null, // snapshot of the last saved or opened Recipe
   plan: null,
   view3d: null, // web/view3d.js, created when the 3D view is first shown
+  view3dFailed: false,
+  openedId: null, // the saved Recipe being edited, if any
   previewTimer: null,
   previewVersion: 0,
   validation: null, // {layout, result}: the server's check and the layout it covered
@@ -194,6 +196,12 @@ function onPaste(event) {
   try { data = JSON.parse(text); } catch { return; }
   if (data?.format !== CLIPBOARD_FORMAT) return;
   event.preventDefault();
+  const valid = Array.isArray(data.objects) && data.objects.every((obj) => obj && typeof obj.item === "string"
+    && obj.pose && Number.isFinite(obj.pose.x_m) && Number.isFinite(obj.pose.y_m));
+  if (!valid) {
+    setStatus("貼り付けたデータの形が正しくありません", "error");
+    return;
+  }
   if (data.catalog_id !== state.catalogId) {
     setStatus("コピーした部品は別の Catalog の品目です。同じ Catalog の環境に貼り付けてください。", "error");
     return;
@@ -224,6 +232,7 @@ function setViewMode(mode) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   }
   $("#views").className = `views mode-${mode}`;
+  state.view3d?.setActive(mode !== "plan");
   if (mode !== "plan") ensure3d();
   schedulePreview();
 }
@@ -259,7 +268,8 @@ async function refreshPreview() {
     if (!response.ok) throw new Error((await response.json()).error);
     const buffer = await response.arrayBuffer();
     if (version !== state.previewVersion) return;
-    await state.view3d.setGlb(buffer, recipe().size_m);
+    // Parsing is asynchronous too: a newer preview may finish first.
+    await state.view3d.setGlb(buffer, recipe().size_m, () => version === state.previewVersion);
     state.view3d.setSelected(state.selection);
   } catch (error) {
     setStatus(error.message, "error");
@@ -501,7 +511,7 @@ function changeObject(id, change) {
   if ("x" in change) obj.pose.x_m = change.x;
   if ("y" in change) obj.pose.y_m = change.y;
   if ("yaw" in change) obj.pose.yaw_deg = normalizeYaw(change.yaw);
-  render();
+  render({ live: true }); // during a drag: the panels and the undo step follow at its end
 }
 
 // Poses [{id, x, y, yaw}] for several objects at once (a group drag or turn).
@@ -624,6 +634,7 @@ async function openRecipe(id) {
   loaded.recipe.objects = loaded.recipe.objects || [];
   await loadCatalog(loaded.catalog_id || state.catalogId);
   state.current = { id, editable: loaded.editable, recipe: loaded.recipe };
+  state.openedId = loaded.editable ? id : null; // the saved Recipe this edits (saving it again is no overwrite)
   state.selection = [];
   state.saved = snapshot();
   resetHistory();
@@ -651,11 +662,15 @@ function newRecipe() {
 async function saveRecipe() {
   const id = $("#recipe-id").value.trim();
   if (!id) { setStatus("ID を入力してください", "error"); return; }
+  // Saving under another saved Recipe's ID replaces it: ask first.
+  const other = state.recipes.find((item) => item.id === id && item.editable);
+  if (other && id !== state.openedId && !window.confirm(`環境 ${id} はもうあります。上書きしますか？`)) return;
   recipe().name = $("#recipe-name").value.trim() || id;
   try {
     const saved = await api("PUT", `recipes/${id}`, recipeBody());
     state.current.id = id;
     state.current.editable = true;
+    state.openedId = id;
     state.saved = snapshot();
     await loadRecipes();
     render();
@@ -693,6 +708,7 @@ async function init() {
     onSelect: select,
     onChange: changeObject,
     onChangeMany: applyPoses,
+    onDragEnd: () => render(), // panels, and the finished move as one undo step
   });
   state.plan.setGrid(Number($("#grid").value));
   state.catalogs = await api("GET", "catalogs");
@@ -720,6 +736,8 @@ async function init() {
   $("#size-east").addEventListener("change", (event) => setSize(Number(event.target.value), recipe().size_m.north));
   $("#size-north").addEventListener("change", (event) => setSize(recipe().size_m.east, Number(event.target.value)));
   $("#recipe-name").addEventListener("change", (event) => { recipe().name = event.target.value.trim(); });
+  // The ID being typed is the Recipe's ID (render writes it back into the field).
+  $("#recipe-id").addEventListener("input", (event) => { state.current.id = event.target.value.trim(); });
   document.addEventListener("keydown", onKey);
   document.addEventListener("copy", (event) => onCopy(event, false));
   document.addEventListener("cut", (event) => onCopy(event, true));

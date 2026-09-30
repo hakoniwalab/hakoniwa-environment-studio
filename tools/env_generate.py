@@ -325,9 +325,10 @@ def _terrain_geom(root: ET.Element, world: ET.Element, terrain: env_terrain.Terr
     })
 
 
-def _add_boundaries(world: ET.Element, half_east: float, half_north: float) -> None:
-    """Fixed boxes just outside each edge: an object touching one sticks out."""
-    t, h = BOUNDARY_THICKNESS_M, BOUNDARY_HEIGHT_M
+def _add_boundaries(world: ET.Element, half_east: float, half_north: float, top_m: float = 0.0) -> None:
+    """Fixed boxes just outside each edge, from 50 m under the ground to above
+    the highest object (`top_m`): an object touching one sticks out."""
+    t, h = BOUNDARY_THICKNESS_M, max(BOUNDARY_HEIGHT_M, top_m + 60.0)
     for name, centre, half in (
         ("south", (0.0, -half_north - t / 2), (half_east + t, t / 2)),
         ("north", (0.0, half_north + t / 2), (half_east + t, t / 2)),
@@ -350,7 +351,8 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False) -> 
     ET.SubElement(world, "light", {"name": "sun", "directional": "true", "pos": "0 0 50", "dir": "-0.3 0.2 -1"})
     _terrain_geom(root, world, recipe.terrain)
     if validation:
-        _add_boundaries(world, recipe.terrain.half_east, recipe.terrain.half_north)
+        top = max([recipe.terrain.max_height_m] + [obj.pose.z_m + obj.shape.height_m for obj in recipe.objects])
+        _add_boundaries(world, recipe.terrain.half_east, recipe.terrain.half_north, top)
     for obj in recipe.objects:
         body = ET.SubElement(world, "body", {
             "name": BODY_PREFIX + obj.id, "pos": _numbers((obj.pose.x_m, obj.pose.y_m, obj.pose.z_m)),

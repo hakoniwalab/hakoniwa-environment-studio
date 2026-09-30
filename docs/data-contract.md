@@ -176,6 +176,7 @@ objects:
 | `invalid_shape` | 大きさ 0 の形状、底面より下に出る形状など |
 | `wrong_schema` | スキーマのタグがない・版が違う |
 | `overlap` / `outside` / `below_terrain` / `compile_error` | 物理検証（MuJoCo、#6） |
+| `physics_skipped` | 警告：MuJoCo が入っていないので物理検証を省いた（`ok` は schema の結果） |
 
 ### 7.1 物理の検証（MuJoCo、#6）
 

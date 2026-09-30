@@ -592,6 +592,10 @@ def _compiled(env_type: EnvType, where: str) -> EnvType:
         if generator not in TERRAIN_GENERATORS:
             raise fail(f"{where}.terrain.generator", "not_one_of", "unknown terrain generator",
                        expected=sorted(TERRAIN_GENERATORS), actual=generator)
+        if (kind == "flat") != (generator == "flat"):
+            raise fail(f"{where}.terrain.generator", "not_allowed",
+                       "flat ground has no generator; a height field needs one",
+                       expected="flat" if kind == "flat" else sorted(set(TERRAIN_GENERATORS) - {"flat"}), actual=generator)
         if not env_type.abstract:
             missing = sorted(TERRAIN_GENERATORS[generator] - declared)
             if missing:

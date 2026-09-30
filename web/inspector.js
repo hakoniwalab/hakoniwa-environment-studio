@@ -39,7 +39,7 @@ export function createInspector(host, app) {
     range.addEventListener("pointerup", () => { if (sliding) { sliding = false; app.render(); } });
     number.addEventListener("change", () => {
       const value = Number(number.value);
-      if (!Number.isFinite(value)) return;
+      if (number.value.trim() === "" || !Number.isFinite(value)) { number.value = range.value; return; }
       range.value = String(clamp(value));
       onchange(clamp(value));
       app.render();
@@ -51,8 +51,9 @@ export function createInspector(host, app) {
     return el("label", { class: "field" }, label, el("input", {
       type: "number", value: String(value), step: "any", ...attributes,
       onchange: (event) => {
-        const number = Number(event.target.value);
-        if (Number.isFinite(number)) onchange(number);
+        const text = event.target.value.trim();
+        const number = Number(text);
+        if (text !== "" && Number.isFinite(number)) onchange(number); // an emptied field keeps the value
         app.render();
       },
     }));

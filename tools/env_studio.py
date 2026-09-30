@@ -328,20 +328,28 @@ def import_map(body: object) -> dict:
     if terrain not in {item["id"] for item in _ready_terrains(body.get("catalog_id") or DEFAULT_CATALOG_ID)}:
         raise StudioError(f"地面 {terrain} は地図からの取り込みでは使えません（City World の地形データなどが必要な地面です）")
     data_dir = directory.parent / "map-data" / recipe_id
+    osm = env_citygml.osm2citygml()
+    # The area first, so a malformed one is told apart from a failing conversion.
+    chosen, box = body.get("selection"), body.get("bbox")
     try:
-        osm = env_citygml.osm2citygml()
-        chosen = body.get("selection")
         if isinstance(chosen, dict):
             center = (float(chosen["center"]["latitude"]), float(chosen["center"]["longitude"]))
             half = (float(chosen["half_extent_m"]["north_south"]), float(chosen["half_extent_m"]["east_west"]))
             if not all(10 <= value <= 1000 for value in half):
                 raise StudioError("half_extent_m must be 10 to 1000 m (as in the PLATEAU City World browser)")
             bbox = osm.Box.of(*env_citygml.bounding_box(center, half))
+        elif isinstance(box, dict):
+            bbox = osm.Box.of(box["south"], box["west"], box["north"], box["east"])
         else:
-            box = body.get("bbox")
-            bbox = osm.Box.of(box["south"], box["west"], box["north"], box["east"]) if isinstance(box, dict) else None
-        geojson = body.get("geojson") if source == "geojson" else None
-        osm_json = None if geojson is not None else osm.fetch_overpass(bbox) if bbox else None
+            bbox = None
+    except (KeyError, TypeError, ValueError, osm.OsmConversionError) as exc:
+        raise StudioError("selection must be {center: {latitude, longitude}, half_extent_m: {north_south, east_west}}"
+                          f" (or bbox {{south, west, north, east}}): {exc}") from exc
+    if bbox is None and source != "geojson":
+        raise StudioError("the area to import: selection (or bbox)")
+    geojson = body.get("geojson") if source == "geojson" else None
+    try:
+        osm_json = None if geojson is not None else osm.fetch_overpass(bbox)
         receipt = osm.run(bbox, data_dir, "map", overpass=source == "overpass", osm_json=osm_json, geojson=geojson)
         if not isinstance(chosen, dict):  # a bbox: its own centre and half extents
             selection = receipt["selection"]
@@ -358,16 +366,7 @@ def import_map(body: object) -> dict:
             query = json.loads(recipe["geo"]["query"])
             recipe["geo"]["query"] = json.dumps({**query, "overpass": receipt["query"]}, ensure_ascii=False, sort_keys=True)
         env_schema.parse_recipe(recipe, target)
-    except (KeyError, TypeError, ValueError) as exc:
-        if isinstance(exc, DiagnosticError):
-            raise StudioError(f"地図から作れません: {exc}") from exc
-        raise StudioError("selection must be {center: {latitude, longitude}, half_extent_m: {north_south, east_west}}"
-                          " (or bbox {south, west, north, east})") from exc
-    except DiagnosticError as exc:
-        raise StudioError(f"地図から作れません: {exc}") from exc
-    except Exception as exc:  # noqa: BLE001 - Envsim's converter reports its own errors
-        if type(exc).__name__ != "OsmConversionError":
-            raise
+    except (DiagnosticError, osm.OsmConversionError) as exc:
         raise StudioError(f"地図から作れません: {exc}") from exc
     directory.mkdir(parents=True, exist_ok=True)
     target.write_text(yaml.safe_dump(recipe, sort_keys=False, allow_unicode=True, width=120), encoding="utf-8")
@@ -539,6 +538,12 @@ class StudioHandler(SimpleHTTPRequestHandler):
             return self._json({"error": str(exc)}, exc.status)
         except DiagnosticError as exc:
             return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except Exception as exc:  # noqa: BLE001 - always answer in JSON; the log keeps the traceback
+            self.log_error("unexpected error on %s %s: %r", method, self.path, exc)
+            import traceback
+            traceback.print_exc()
+            return self._json({"error": f"Studio の内部エラー: {type(exc).__name__}: {exc}"},
+                              HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def do_GET(self) -> None:  # noqa: N802 - http.server naming
         if self.path.startswith("/api/"):

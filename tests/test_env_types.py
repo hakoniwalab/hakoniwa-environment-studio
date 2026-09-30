@@ -131,6 +131,11 @@ class DefinitionTest(unittest.TestCase):
                              "not_one_of"),
             "typo in a shape": ("- id: a\n  shapes:\n    - {primitive: box, w: 1, d: 1, h: 1, hight: 2}", "unknown_field"),
             "generator params": ("- id: t\n  terrain: {kind: hfield, generator: hills}", "missing_field"),
+            "hfield without a generator": ("- id: t\n  terrain: {kind: hfield, generator: flat}", "not_allowed"),
+            "flat with a generator": ("- id: t\n  params: {max_height_m: {kind: length, default: 1}, hills: {kind: integer, default: 1},"
+                                      " radius_m: {kind: length, default: 1}, seed: {kind: integer, default: 1},"
+                                      " resolution_m: {kind: length, default: 1}}\n  terrain: {kind: flat, generator: hills}",
+                                      "not_allowed"),
         }
         for name, (text, code) in cases.items():
             with self.subTest(case=name), self.assertRaises(DiagnosticError) as caught:

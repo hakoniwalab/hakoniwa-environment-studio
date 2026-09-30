@@ -65,11 +65,12 @@ export function turned(parts, degrees, [px, py]) {
 }
 
 export class PlanView {
-  constructor(container, { onSelect, onChange, onChangeMany }) {
+  constructor(container, { onSelect, onChange, onChangeMany, onDragEnd = () => {} }) {
     this.container = container;
     this.onSelect = onSelect; // (ids) => the new selection
     this.onChange = onChange; // (id, {x, y, yaw}) => one part moved or turned
     this.onChangeMany = onChangeMany; // ([{id, x, y, yaw}]) => several at once
+    this.onDragEnd = onDragEnd; // () => a move or turn finished (one undo step)
     this.area = { minX: -10, maxX: 10, minY: -10, maxY: 10 }; // the environment's extent
     this.terrain = null; // {href, area}: an image of the ground's heights, drawn under everything
     this.parts = [];
@@ -402,13 +403,15 @@ export class PlanView {
   }
 
   pointerUp(event) {
-    if (this.drag) this.svg.releasePointerCapture?.(event.pointerId);
-    if (this.drag?.mode === "move" && !this.drag.moved) {
+    const drag = this.drag;
+    if (drag) this.svg.releasePointerCapture?.(event.pointerId);
+    if (drag?.mode === "move" && !drag.moved) {
       // A click on one of several selected parts picks that part alone.
-      if (this.drag.base) this.onSelect([this.drag.id]);
-      else if (this.drag.next) this.onSelect([this.drag.next]);
+      if (drag.base) this.onSelect([drag.id]);
+      else if (drag.next) this.onSelect([drag.next]);
     }
     this.drag = null;
+    const edited = drag && (drag.mode.startsWith("rotate") || (drag.mode === "move" && drag.moved));
     this.moving = null;
     if (this.marquee) {
       this.marquee = null;
@@ -418,6 +421,7 @@ export class PlanView {
       this.guides = null;
       this.render();
     }
+    if (edited) this.onDragEnd();
   }
 
   // Where a dragged part lands (hold Alt to skip all of this):

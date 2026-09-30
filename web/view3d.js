@@ -9,6 +9,18 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const CAR_EYE_M = 1.2; // a driver's eye height
 const HIGHLIGHT = new THREE.Color(0x3a6fd8);
+
+// Free what a model holds on the GPU (geometries, materials, their textures).
+function dispose(root) {
+  root.traverse((node) => {
+    if (!node.isMesh) return;
+    node.geometry?.dispose();
+    for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+      for (const value of Object.values(material || {})) if (value?.isTexture) value.dispose();
+      material?.dispose();
+    }
+  });
+}
 const BLACK = new THREE.Color(0x000000);
 
 export class View3D {
@@ -49,18 +61,34 @@ export class View3D {
     this.camera.updateProjectionMatrix();
   }
 
-  // Replace the environment with a new GLB; the camera stays unless the size changed.
-  async setGlb(buffer, size) {
+  // Replace the environment with a new GLB; the camera stays unless the size
+  // changed. current() says whether this GLB is still the newest one asked for.
+  async setGlb(buffer, size, current = () => true) {
     const gltf = await this.loader.parseAsync(buffer, "");
+    if (!current()) {
+      dispose(gltf.scene);
+      return;
+    }
     // Objects of one colour share a material in the GLB; give each its own so
     // highlighting one does not light up the others.
-    gltf.scene.traverse((node) => { if (node.isMesh) node.material = node.material.clone(); });
+    gltf.scene.traverse((node) => {
+      if (node.isMesh) node.material = Array.isArray(node.material) ? node.material.map((m) => m.clone()) : node.material.clone();
+    });
+    dispose(this.model); // the previous environment's GPU buffers, materials and textures
     this.model.clear();
     this.model.add(gltf.scene);
     const resized = !this.size || this.size.east !== size.east || this.size.north !== size.north;
     this.size = { ...size };
     this.applyHighlight();
     if (resized) this.overview();
+  }
+
+  // Render only while the 3D view is shown.
+  setActive(active) {
+    this.renderer.setAnimationLoop(active ? () => {
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+    } : null);
   }
 
   // ids: the selected objects (one or several).

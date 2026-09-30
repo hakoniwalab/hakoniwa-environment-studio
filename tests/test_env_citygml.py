@@ -297,6 +297,27 @@ class DemTerrainTest(unittest.TestCase):
             self.assertEqual([item.as_json() for item in env_validate.check(parsed)], [])
 
 
+@unittest.skipUnless(ENVSIM, "hakoniwa-envsim is not available")
+class CommandErrorTest(unittest.TestCase):
+    def test_a_failing_conversion_prints_json_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            empty = Path(directory) / "empty"
+            empty.mkdir()
+            completed = subprocess.run([
+                sys.executable, str(ROOT / "tools/env_citygml.py"), "--citygml", str(empty), "--center", "35,135",
+                "--half-extent", "50,50", "--out", str(Path(directory) / "city.yaml")],
+                capture_output=True, text=True, check=False, timeout=120)
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertEqual(json.loads(completed.stdout)["diagnostics"][0]["code"], "missing_field")
+
+    def test_an_output_name_that_is_no_recipe_id_is_refused(self):
+        completed = subprocess.run([
+            sys.executable, str(ROOT / "tools/env_citygml.py"), "--citygml", ".", "--center", "35,135",
+            "--half-extent", "50,50", "--out", "work/recipes/a.b.yaml"], capture_output=True, text=True, check=False)
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("not a Recipe id", completed.stderr)
+
+
 class IdTest(unittest.TestCase):
     def test_gml_ids_become_part_ids(self):
         used = set()

@@ -60,6 +60,14 @@ class ValidateTest(unittest.TestCase):
         turned = self.check(box("a", -9.5, -14.5, yaw=45))
         self.assertEqual({item["actual"]["edge"] for item in turned}, {"west", "south"})
 
+    def test_a_tall_building_sticking_out_is_seen_above_the_old_boundary_height(self):
+        # A 300 m tower whose top part only reaches past the east edge (a leaning footprint is
+        # not possible, so the whole outline sticks out 0.5 m; the boundary must reach its height).
+        tower = {"id": "tower", "item": "building-footprint", "pose": {"x_m": 9.0, "y_m": 0, "yaw_deg": 0},
+                 "params": {"footprint": [[-1.5, -1], [1.5, -1], [1.5, 1], [-1.5, 1]], "height_m": 300, "min_height_m": 200}}
+        codes = [(item["code"], item["actual"]["edge"]) for item in self.check(tower)]
+        self.assertEqual(codes, [("outside", "east")])
+
     def test_an_object_reaching_into_the_hills(self):
         # A long bar whose declared outline is only its middle: set on the
         # ground under that middle, its ends reach into the slope.

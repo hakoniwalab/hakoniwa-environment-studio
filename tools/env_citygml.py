@@ -46,8 +46,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "catalogs/starter/catalog.yaml"
 CONVERTER_VERSION = "1"
 ITEMS = {"building": "building-footprint", "road": "road-area"}
-# Points closer than this are merged (the same step as osm2citygml).
-MIN_STEP_M = 0.05
+# Footprint points closer than this are merged (as osm2citygml): no other point
+# moves, so walls neighbours share stay shared.
+MIN_STEP_M = 0.001
+# Road surfaces (the surface layer, where overlaps do not matter) are simplified to this.
+ROAD_SIMPLIFY_M = 0.025
 # A road surface keeps at most this many corners (simplified further when it has more).
 MAX_ROAD_POINTS = 400
 MIN_ROAD_AREA_M2 = 1.0
@@ -174,7 +177,10 @@ def _attributes(path: Path, ids: set[str] | None = None) -> dict[str, dict]:
 
 
 def _clean_ring(points) -> list[tuple[float, float]] | None:
-    ring = env_polygon.cleaned([tuple(point) for point in points], True, MIN_STEP_M)
+    """A simple counter-clockwise ring of the points at mm precision, or None.
+    Rounded before the checks: rounding afterwards could make a thin sliver
+    cross itself, and the Recipe would then refuse the whole city."""
+    ring = env_polygon.cleaned([(_mm(x), _mm(y)) for x, y in points], True, MIN_STEP_M)
     if len(ring) < 3 or abs(env_polygon.signed_area(ring)) < 1e-6:
         return None
     ring = env_polygon.counter_clockwise(ring)
@@ -289,8 +295,8 @@ def convert(source: Path, center: tuple[float, float], half_extent: tuple[float,
             gml_id = road_id.rsplit("-", 2)[0]
             for suffix, piece in _road_pieces(polygon, tiled=dem is not None):
                 # Envsim gives MuJoCo axes (x north, y west); back to east / north.
-                shape = piece.simplify(MIN_STEP_M / 2)
-                tolerance = MIN_STEP_M
+                shape = piece.simplify(ROAD_SIMPLIFY_M)
+                tolerance = 2 * ROAD_SIMPLIFY_M
                 while len(shape.exterior.coords) - 1 > MAX_ROAD_POINTS:
                     shape, tolerance = piece.simplify(tolerance), tolerance * 2
                 ring = _clean_ring([(-y, x) for x, y in list(shape.exterior.coords)[:-1]])
@@ -472,12 +478,12 @@ def main(argv: list[str] | None = None) -> int:
             recipe, report = convert(args.citygml, (lat, lon), (ns_m, ew_m), catalog=catalog, name=args.name,
                                      terrain_item=args.terrain)
         write_recipe(recipe, out)
-    except ValueError as exc:
-        parser.error(str(exc))
-    except DiagnosticError as error:
+    except DiagnosticError as error:  # before ValueError: DiagnosticError is one
         print(json.dumps({"ok": False, "diagnostics": [item.as_json() for item in error.diagnostics]},
                          ensure_ascii=False, indent=2))
         return 1
+    except ValueError as exc:
+        parser.error(str(exc))
     result = {"ok": True, "recipe": str(out), **report}
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else
           f"OK  {out}: {report['buildings']} buildings, {report['roads']} roads, "
