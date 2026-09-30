@@ -12,6 +12,7 @@ Its data is in the Recipe workspace, $HAKONIWA_WORK_DIR/recipes/environment-stud
 Lifecycle (as the Business Pack tools; the paths are this repository's):
   python tools/env_studio.py start [--port N] [--open-browser]   run in the background
   python tools/env_studio.py status                              is it running, and where
+  python tools/env_studio.py open                                open the running Studio in the browser
   python tools/env_studio.py stop                                stop the background Studio
   python tools/env_studio.py [serve] [--port N] [--open-browser] run in this terminal (Ctrl+C)
 The background Studio records <ws>/studio/studio.json (pid, port, url) and
@@ -901,6 +902,7 @@ def start(port: int, open_browser: bool, state_dir: Path) -> int:
              "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
     _state_path(state_dir).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     print(f"Environment Studio started: {url} (pid {health['pid']})")
+    print(f"  open it with: {command_hint('open')}")
     print(f"  stop it with: {command_hint('stop')}")
     if open_browser:
         webbrowser.open(url)
@@ -926,6 +928,19 @@ def status(state_dir: Path) -> int:
         return 0
     print(f"Environment Studio is not running (start it with: {command_hint('start')})")
     return 1
+
+
+def open_studio(state_dir: Path, port: int) -> int:
+    """Open the running Studio in the browser: the background one, else the one on port."""
+    running = _running(state_dir)
+    url = running["url"] if running else f"http://127.0.0.1:{port}/" if _health(port) else None
+    if not url:
+        print(f"Environment Studio is not running (start it with: {command_hint('start --open-browser')})",
+              file=sys.stderr)
+        return 1
+    print(f"Opening Environment Studio: {url}")
+    webbrowser.open(url)
+    return 0
 
 
 def stop(state_dir: Path) -> int:
@@ -959,7 +974,7 @@ def _port_in_use(port: int) -> str:
     health = _health(port)
     if health:
         return (f"Environment Studio is already running: http://127.0.0.1:{port}/ (pid {health['pid']}). "
-                f"Open it ({command_hint('start --open-browser')}), or stop it first: {command_hint('stop')}"
+                f"Open it: {command_hint('open')}, or stop it first: {command_hint('stop')}"
                 + ("" if health.get("instance") else " (or Ctrl+C in the terminal that runs it)"))
     return f"port {port} is in use by another program; stop it, or pass --port"
 
@@ -991,7 +1006,7 @@ def serve(port: int, open_browser: bool) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", nargs="?", default="serve", choices=("serve", "start", "status", "stop"))
+    parser.add_argument("command", nargs="?", default="serve", choices=("serve", "start", "status", "open", "stop"))
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--open-browser", action="store_true")
     parser.add_argument("--state-dir", type=Path, default=STATE_DIR, help=argparse.SUPPRESS)
@@ -1000,6 +1015,8 @@ def main(argv: list[str] | None = None) -> int:
         return start(args.port, args.open_browser, args.state_dir)
     if args.command == "status":
         return status(args.state_dir)
+    if args.command == "open":
+        return open_studio(args.state_dir, args.port)
     if args.command == "stop":
         return stop(args.state_dir)
     return serve(args.port, args.open_browser)

@@ -294,6 +294,9 @@ demo:
     - id: studio_status
       command: python ../hakoniwa-environment-studio/tools/env_studio.py status
       expected: Report the running Studio's pid, port, and URL.
+    - id: open_studio
+      command: python ../hakoniwa-environment-studio/tools/env_studio.py open
+      expected: Open the running Studio in the default browser.
   cleanup:
     expected_behavior:
       - Run python ../hakoniwa-environment-studio/tools/env_studio.py stop before leaving the Workspace.

@@ -202,6 +202,7 @@ python tools/recipe.py configure --recipe ../hakoniwa-environment-studio/recipes
 python tools/recipe.py doctor    --recipe ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml
 python ../hakoniwa-environment-studio/tools/env_studio.py start     # ブラウザの Studio（http://127.0.0.1:8097/）
 python ../hakoniwa-environment-studio/tools/env_studio.py status
+python ../hakoniwa-environment-studio/tools/env_studio.py open      # 動いている Studio をブラウザで開く
 python ../hakoniwa-environment-studio/tools/env_studio.py stop      # Workspace を抜ける（exit）前に止める
 ```
 

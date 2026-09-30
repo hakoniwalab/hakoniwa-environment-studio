@@ -373,9 +373,15 @@ class LifecycleTest(unittest.TestCase):
             self.assertEqual(env_studio.serve(self.port, True), 0)
         browser.assert_called_once_with(f"http://127.0.0.1:{self.port}/")
         self.assertEqual(self.run_tool("status").returncode, 0)
+        with mock.patch.object(env_studio.webbrowser, "open") as browser:
+            self.assertEqual(env_studio.open_studio(self.state, self.port), 0)
+        browser.assert_called_once_with(f"http://127.0.0.1:{self.port}/")
         self.assertEqual(self.run_tool("stop").returncode, 0)
         self.assertFalse((self.state / "studio.json").exists())
         self.assertEqual(self.run_tool("status").returncode, 1)
+        closed = self.run_tool("open", "--port", str(self.port))
+        self.assertEqual(closed.returncode, 1)
+        self.assertIn("start --open-browser", closed.stderr)
 
     def test_a_port_taken_by_another_program_is_explained(self):
         with socket.socket() as other:
