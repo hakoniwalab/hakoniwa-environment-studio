@@ -190,7 +190,7 @@ Environment Studio を使わなくても、同じ schema に従った Recipe を
 ```bash
 python -m pip install -r requirements.txt
 python tools/envstudio.py types                                            # 使える部品の型
-python tools/envstudio.py validate recipes/examples/drone-practice-field.yaml
+python tools/envstudio.py validate recipes/examples/drone-practice-field.yaml   # スキーマ＋MuJoCo の物理検証
 python tools/envstudio.py --json resolve recipes/examples/hills-field.yaml # 解決済みの環境（JSON）
 python tools/envstudio.py generate recipes/examples/car-test-course.yaml --out-dir build/car-test-course
 python -m pytest tests

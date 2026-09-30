@@ -7,7 +7,8 @@ agents use to discover types and items, and to check and resolve Recipes
     envstudio.py describe-type <type>         a type's parameters, behaviour, terrain
     envstudio.py catalog <catalog.yaml>       a Catalog's items
     envstudio.py describe-item <catalog.yaml> <item>
-    envstudio.py validate <file | ->          a Recipe (or a Catalog): {ok, diagnostics}
+    envstudio.py validate <file | ->          a Recipe (or a Catalog): {ok, diagnostics}; a Recipe is
+                                              also checked with MuJoCo (--no-physics to skip)
     envstudio.py resolve <recipe | ->         a Recipe resolved: terrain, objects, solids
     envstudio.py generate <recipe | -> --out-dir DIR   environment.glb / .xml / .json
 
@@ -99,13 +100,26 @@ def _parse(args):
 
 
 def cmd_validate(args) -> dict:
+    """Schema problems stop here (exit 1); a valid Recipe is then checked with
+    MuJoCo, whose problems come back the same way."""
+    import env_validate
+
     kind, parsed = _parse(args)
     summary = {"kind": kind}
-    if kind == "recipe":
-        summary.update(objects=len(parsed.objects), terrain=parsed.terrain.kind)
-    else:
-        summary.update(items=len(parsed.items))
-    return {"ok": True, "diagnostics": [], **summary}
+    if kind != "recipe":
+        return {"ok": True, "diagnostics": [], **summary, "items": len(parsed.items)}
+    summary.update(objects=len(parsed.objects), terrain=parsed.terrain.kind)
+    if args.no_physics:
+        return {"ok": True, "diagnostics": [], **summary, "physics": "skipped"}
+    if not env_validate.available():
+        return {"ok": True, "diagnostics": [{"severity": "warning", "path": "", "code": "physics_skipped",
+                                             "reason": "MuJoCo is not installed: the physical checks were skipped"}],
+                **summary, "physics": "skipped"}
+    diagnostics = env_validate.check(parsed)
+    if any(item.severity == "error" for item in diagnostics):
+        raise DiagnosticError(diagnostics)
+    return {"ok": True, "diagnostics": [item.as_json() for item in diagnostics], **summary, "physics": "mujoco",
+            "tolerance_m": env_validate.TOLERANCE_M}
 
 
 def resolved_json(recipe) -> dict:
@@ -148,7 +162,8 @@ def _text(command: str, result: dict) -> str:
     if command == "generate":
         return "\n".join(f"{kind:8} {path}" for kind, path in result["files"].items())
     if command == "validate":
-        return f"OK  {result['kind']}" + (f" ({result['objects']} objects, {result['terrain']} terrain)"
+        return f"OK  {result['kind']}" + (f" ({result['objects']} objects, {result['terrain']} terrain, "
+                                            f"physics: {result['physics']})"
                                             if result["kind"] == "recipe" else f" ({result['items']} items)")
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -170,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_argument("--base", type=Path, help="with -, the folder the catalog path is relative to")
         if name == "generate":
             sub.add_argument("--out-dir", type=Path, required=True)
+        if name == "validate":
+            sub.add_argument("--no-physics", action="store_true", help="skip the MuJoCo checks")
     args = parser.parse_args(argv)
     handlers = {"types": cmd_types, "describe-type": cmd_describe_type, "catalog": cmd_catalog,
                 "describe-item": cmd_describe_item, "validate": cmd_validate, "resolve": cmd_resolve,

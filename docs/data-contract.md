@@ -157,6 +157,22 @@ objects:
 | `wrong_schema` | スキーマのタグがない・版が違う |
 | `overlap` / `outside` / `below_terrain` / `compile_error` | 物理検証（MuJoCo、#6） |
 
+### 7.1 物理の検証（MuJoCo、#6）
+
+スキーマの検証を通った Recipe は、MuJoCo で物理の世界として検証します（`tools/env_validate.py`）。検証用の世界では物体を自由な body にし、環境の四辺のすぐ外に固定の壁を置いて、`mj_forward` を 1 回計算して接触を読みます。1 mm までの接触は「接している」だけで問題にしません。
+
+| code | 接触 | `actual` |
+|---|---|---|
+| `overlap` | 物体と物体 | めり込みの深さ（m）。相手の物体は `related` に `objects[j]` |
+| `outside` | 物体と四辺の壁 | `{edge: north / south / east / west, depth_m}` |
+| `below_terrain` | 物体と地面 | めり込みの深さ（m） |
+| `compile_error` | MuJoCo が読めない | MuJoCo のメッセージ |
+
+```json
+{"severity": "error", "path": "objects[0]", "code": "overlap", "reason": "a and b penetrate each other by 100 mm",
+ "expected": "<= 0.001 m", "actual": 0.1, "related": ["objects[1]"]}
+```
+
 ## 8. コマンド
 
 `tools/envstudio.py`（`--json` で JSON 入出力、`-` で標準入力）：
@@ -166,8 +182,9 @@ python tools/envstudio.py types
 python tools/envstudio.py describe-type gate
 python tools/envstudio.py catalog catalogs/starter/catalog.yaml
 python tools/envstudio.py describe-item catalogs/starter/catalog.yaml race-gate
-python tools/envstudio.py validate recipes/examples/drone-practice-field.yaml
+python tools/envstudio.py validate recipes/examples/drone-practice-field.yaml   # スキーマ＋MuJoCo（--no-physics で物理を省く）
 python tools/envstudio.py --json resolve recipes/examples/hills-field.yaml
+python tools/envstudio.py generate recipes/examples/car-test-course.yaml --out-dir build/car-test-course
 ```
 
 終了コードは 0 = OK、1 = 入力に問題あり（診断を出力）、2 = 使い方の誤り。AI 向けの使い方は `docs/ai-contract.md`（#9）にまとめます。

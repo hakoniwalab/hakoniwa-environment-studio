@@ -39,9 +39,16 @@ class Diagnostic:
     expected: object = None
     actual: object = None
     severity: str = "error"
+    # Paths of the other things involved (the second object of an overlap).
+    related: tuple[str, ...] = ()
 
     def as_json(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        if not self.related:
+            data.pop("related")
+        else:
+            data["related"] = list(self.related)
+        return data
 
     def __str__(self) -> str:
         return f"{self.path}: {self.reason}"
@@ -66,8 +73,9 @@ class Collector:
     def __init__(self):
         self.items: list[Diagnostic] = []
 
-    def add(self, path: str, code: str, reason: str, expected=None, actual=None, severity: str = "error") -> None:
-        self.items.append(Diagnostic(path, code, reason, expected, actual, severity))
+    def add(self, path: str, code: str, reason: str, expected=None, actual=None, severity: str = "error",
+            related: tuple[str, ...] = ()) -> None:
+        self.items.append(Diagnostic(path, code, reason, expected, actual, severity, tuple(related)))
 
     def check(self, step, *args, **kwargs):
         """step(...) or None when it raised DiagnosticError (whose problems are kept)."""
