@@ -23,6 +23,7 @@ urban-mobility は World を **City World ジョブ**（フォルダ）で受け
   - それ以外の部品は、z 軸まわりに −90° 回した 1 つの body の中に置きます。
   - 最上位は `asset` と `worldbody` だけです。回転はすべて四元数にしているので、合成される相手のコンパイラの角度設定に左右されません。
   - 当たり判定のない見た目だけの形（白線など）は入れません。見た目は GLB が受け持ちます。
+  - 照明も入れません。urban は車のモデルの照明（`sun`・`fill_light`）を残したまま World を合成するので、同じ名前があると合成が止まります。
 - **地形の格子**：envsim のファイルと同じ並び（行は西向き、列は北向き）です。Studio の MJCF の丘の格子も同じ並びにしているので、格子のマスを分ける対角線まで同じになり、Studio で検証した地面と urban の地面は一致します。
 - **種類**：地図の原点がある Recipe（地図や City World から取り込んだもの）は `kind: city`、ないものは `kind: plain`（原点 0, 0。urban は Map Viewer の代わりに Three.js を開きます）です。
 - **指紋**：レシートの `producer.fingerprint` は生成物の指紋（`env_generate.fingerprint`）です。環境を変えて書き出し直すと変わり、登録し直すと urban 側の版も変わります。
@@ -40,4 +41,4 @@ urban-mobility は World を **City World ジョブ**（フォルダ）で受け
 - **形**：書き出した MJCF の当たり判定の形は、すべて Studio の世界と位置・向きが一致します（10⁻¹⁴ m の桁）。原本を使う街は、envsim の `city-world.xml` とそのまま一致します（地形の格子データも完全一致）。
 - **初期高さ**：urban の初期高さの計算（`tools/world_height.py`）が返す地面・屋根・障害物の上の高さは、Studio の世界と一致します（400 点ずつ、差は最大 7×10⁻⁸ m）。
 - **登録と計画**：`register-city` で登録でき、urban のゴルフカート 1 台の Composition の `plan` が通ります。
-- **まだ試していないこと**：車と World を合成する `configure` 以降（hakoniwa-mbody-registry が必要）。
+- **configure**：`car-test-course` とゴルフカート 1 台の Composition で、urban の `configure` が通りました。依存の clone（mbody-registry など 5 つ）、車の物理プラントのビルド、World と車の合成、MuJoCo 3.13 での MJB のコンパイルと読み直し、初期位置の高さ（z = 0.47 m）まで確認しています。

@@ -17,7 +17,7 @@ into Urban's: the ground is an hfield at the top level (Envsim's own file for
 an Envsim terrain, the Studio's grid for hills, a flat 2 x 2 field
 otherwise), everything else stands in one body turned -90 degrees about z.
 Visual-only geoms are left out (the GLB shows them; Urban's World MJCF is what
-collides, as an Envsim one is).
+collides, as an Envsim one is), and so are lights (the vehicles bring theirs).
 Only size, asset and worldbody are written: every rotation is a quaternion, so
 no compiler setting of the models it is composed into can change it.
 
@@ -126,10 +126,13 @@ def world_mjcf(recipe: env_schema.Recipe, hfield_file: str, ground: dict) -> str
         if element.tag == "geom" and element.get("name") == env_generate.TERRAIN_GEOM:
             continue
         frame.append(element)
-    # Visual-only geoms (paint, lamps) are the GLB's: the World MJCF holds what collides.
+    # Visual-only geoms (paint, lamps) are the GLB's: the World MJCF holds what
+    # collides. Lights are the vehicles' (Urban keeps each vehicle model's
+    # lighting, named sun / fill_light, when it composes the World in).
     for parent in list(frame.iter()):
         for child in list(parent):
-            if child.tag == "geom" and child.get("contype") == "0" and child.get("conaffinity") == "0":
+            if child.tag == "light" or (child.tag == "geom" and child.get("contype") == "0"
+                                        and child.get("conaffinity") == "0"):
                 parent.remove(child)
     ET.indent(root, space="  ")
     return ET.tostring(root, encoding="unicode") + "\n"

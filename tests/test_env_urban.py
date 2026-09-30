@@ -98,6 +98,7 @@ class UrbanExportTest(unittest.TestCase):
         root = ET.parse(job / "build/world/city-world.xml").getroot()
         self.assertEqual({element.tag for element in root}, {"asset", "worldbody"})
         self.assertFalse([element for element in root.iter() if "euler" in element.attrib or "axisangle" in element.attrib])
+        self.assertFalse(list(root.iter("light")))  # the vehicles bring the lighting
         _recipe, _studio, urban_model, checked = self.assert_same_world(path, job / "build/world/city-world.xml")
         self.assertGreater(checked, 10)
         self.assertEqual(urban_model.hfield_nrow[0], 2)  # the flat ground as an hfield
