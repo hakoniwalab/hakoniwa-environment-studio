@@ -649,13 +649,18 @@ async function saveRecipe() {
   recipe().name = $("#recipe-name").value.trim() || id;
   try {
     const saved = await api("PUT", `recipes/${id}`, recipeBody());
+    // Saved under a new ID, the Recipe got its own copies of the visual GLBs.
+    for (const [objectId, path] of Object.entries(saved.visuals || {})) {
+      const obj = objectById(objectId);
+      if (obj) obj.params = { ...obj.params, visual: path };
+    }
     state.current.id = id;
     state.current.editable = true;
     state.openedId = id;
     state.saved = snapshot();
     await loadRecipes();
     render();
-    setStatus(`保存しました（${saved.path}）`, "ok");
+    setStatus(`保存しました（${saved.path}${saved.copied_visuals ? `・見た目 ${saved.copied_visuals} 件をコピー` : ""}）`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }

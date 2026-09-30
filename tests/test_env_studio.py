@@ -265,6 +265,44 @@ class StudioServerTest(unittest.TestCase):
         self.assertEqual(self.call("DELETE", "/api/recipes/drone-practice-field", {})[0], 403)  # an example
         self.assertTrue((env_studio.EXAMPLE_RECIPES / "drone-practice-field.yaml").is_file())
 
+    def test_saving_under_a_new_id_copies_the_visuals_so_deleting_one_keeps_the_other(self):
+        _, loaded = self.call("GET", "/api/recipes/drone-practice-field")
+        body = {**{key: loaded["recipe"][key] for key in ("name", "size_m", "terrain")}, "catalog_id": "starter"}
+        footprint = {"id": "house", "item": "building-footprint", "pose": {"x_m": 0, "y_m": 0, "yaw_deg": 0},
+                     "params": {"footprint": [[-2, -2], [2, -2], [2, 2], [-2, 2]], "height_m": 3}}
+        self.assertEqual(self.call("PUT", "/api/recipes/town", {**body, "objects": [footprint]})[0], 200)
+        (self.user / "town.assets").mkdir()
+        shutil.copyfile(self._tiny_glb(), self.user / "town.assets/house.glb")
+        footprint["params"]["visual"] = "town.assets/house.glb"
+        status, saved = self.call("PUT", "/api/recipes/town", {**body, "objects": [footprint]})
+        self.assertEqual((status, saved["copied_visuals"]), (200, 0), saved)  # its own assets: nothing to copy
+
+        status, copy = self.call("PUT", "/api/recipes/town-2", {**body, "objects": [footprint]})
+        self.assertEqual((status, copy["copied_visuals"], copy["visuals"]), (200, 1, {"house": "town-2.assets/house.glb"}))
+        written = yaml.safe_load((self.user / "town-2.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(written["objects"][0]["params"]["visual"], "town-2.assets/house.glb")
+        self.assertEqual(self.call("DELETE", "/api/recipes/town", {})[0], 200)
+        self.assertEqual(self.call("GET", "/api/recipes/town-2")[0], 200)
+        status, answer = self.call("POST", "/api/poses", {**body, "objects": written["objects"]})
+        self.assertEqual(status, 200, answer)
+
+        # A Recipe written by hand that points into another's assets blocks deleting that one.
+        (self.user / "town-3.yaml").write_text(
+            (self.user / "town-2.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+        status, error = self.call("DELETE", "/api/recipes/town-2", {})
+        self.assertEqual(status, 409)
+        self.assertIn("town-3", error["error"])
+
+    def _tiny_glb(self):
+        """A small GLB to stand in for a building's LOD2 look: the Studio's own preview of one cone."""
+        body = json.dumps({"size_m": SIZE, "terrain": GROUND, "objects": [cone("a", 0, 0)]}).encode()
+        request = Request(f"http://127.0.0.1:{self.port}/api/glb", data=body, method="POST",
+                          headers={"Content-Type": "application/json"})
+        path = self.user.parent / "tiny.glb"
+        with urlopen(request, timeout=10) as response:
+            path.write_bytes(response.read())
+        return path
+
     def test_an_invalid_recipe_is_rejected_and_not_saved(self):
         status, body = self.call("PUT", "/api/recipes/bad", {
             "size_m": SIZE, "terrain": GROUND, "objects": [{"id": "x", "item": "no-such", "pose": {"x_m": 0, "y_m": 0}}]})

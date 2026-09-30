@@ -473,6 +473,51 @@ def import_city_world(body: object) -> dict:
             "clipped": report.get("clipped", 0), "overlaps_left": report.get("overlaps_left", [])}
 
 
+def _asset_users(path: Path) -> list[str]:
+    """Other saved Recipes whose visuals point into this Recipe's <id>.assets
+    (a Recipe saved before copies were made, or written by hand)."""
+    marker = f"{path.stem}.assets/"
+    users = []
+    for other_id, (other, editable) in sorted(_recipe_files().items()):
+        if other != path and editable:
+            try:
+                if marker in other.read_text(encoding="utf-8"):
+                    users.append(other_id)
+            except OSError:
+                continue
+    return users
+
+
+def _own_visuals(objects: object, directory: Path, recipe_id: str) -> tuple[list[Path], dict[str, str]]:
+    """Give a Recipe saved under a new id its own copies of the visual assets
+    it shares with another saved Recipe (their <id>.assets), so deleting one
+    never breaks the other: each GLB inside `directory` but outside
+    <recipe_id>.assets is copied there and the param rewritten. Paths
+    elsewhere (absolute, outside work/recipes) stay. Returns the new files and
+    the rewritten params ({object id: path})."""
+    own = directory / f"{recipe_id}.assets"
+    copied, rewritten = [], {}
+    for obj in objects if isinstance(objects, list) else []:
+        params = obj.get("params") if isinstance(obj, dict) else None
+        text = str((params or {}).get("visual") or "").strip()
+        if not text:
+            continue
+        source = Path(text).expanduser()
+        source = (source if source.is_absolute() else directory / source).resolve()
+        if not source.is_file() or not source.is_relative_to(directory) or source.is_relative_to(own):
+            continue
+        own.mkdir(parents=True, exist_ok=True)
+        target, n = own / source.name, 1
+        while target.exists() and target.read_bytes() != source.read_bytes():
+            n += 1
+            target = own / f"{source.stem}-{n}{source.suffix}"
+        if not target.exists():
+            shutil.copyfile(source, target)
+            copied.append(target)
+        params["visual"] = rewritten[str(obj.get("id"))] = f"{own.name}/{target.name}"
+    return copied, rewritten
+
+
 def delete_recipe(recipe_id: str) -> dict:
     """Move a saved Recipe to work/trash/<time>-<id>/, with what belongs only
     to it: its visual assets (<id>.assets) and the map data it was imported
@@ -484,6 +529,10 @@ def delete_recipe(recipe_id: str) -> dict:
     path, editable = found
     if not editable:
         raise StudioError(f"{recipe_id} は例の環境なので削除できません", HTTPStatus.FORBIDDEN)
+    users = _asset_users(path)
+    if users:
+        raise StudioError(f"{recipe_id} の見た目（{path.stem}.assets）を {', '.join(users)} も使っているので削除できません",
+                          HTTPStatus.CONFLICT)
     trash = USER_RECIPES.resolve().parent / "trash" / f"{time.strftime('%Y%m%d-%H%M%S')}-{recipe_id}"
     trash.mkdir(parents=True, exist_ok=False)
     moved = []
@@ -511,13 +560,17 @@ def save_recipe(recipe_id: str, body: object) -> dict:
             **({"description": data.pop("description")} if "description" in data else {}),
             "catalog": _catalog_reference(_catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID), directory),
             **data}
+    copied, rewritten = _own_visuals(data.get("objects"), directory, recipe_id)
     try:
         recipe = env_schema.parse_recipe(data, target)
     except DiagnosticError as exc:
+        for extra in copied:
+            extra.unlink(missing_ok=True)
         raise StudioError(f"Recipe を保存できません: {exc}") from exc
     directory.mkdir(parents=True, exist_ok=True)
     env_schema.save_yaml(data, target)
-    return {"id": recipe_id, "editable": True, "path": str(target), "objects": len(recipe.objects)}
+    return {"id": recipe_id, "editable": True, "path": str(target), "objects": len(recipe.objects),
+            "copied_visuals": len(copied), "visuals": rewritten}
 
 
 class StudioHandler(SimpleHTTPRequestHandler):
