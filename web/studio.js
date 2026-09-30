@@ -6,7 +6,7 @@
 // parameters change the shape is resolved by the server too (POST
 // /api/resolve, cached). Metres, ENU, origin at the environment's centre.
 
-import { $, api, el } from "./dom.js";
+import { $, api, el, warnIfServerIsOld } from "./dom.js";
 import { History } from "./history.js";
 import { createInspector } from "./inspector.js";
 import { Parts } from "./parts.js";
@@ -773,6 +773,7 @@ async function init() {
   $("#urban").addEventListener("click", exportUrban);
   // Export only when started with an export folder (a tool that takes the Worlds).
   try { $("#urban").hidden = !(await api("GET", "health")).export_dir; } catch { /* keep it hidden */ }
+  warnIfServerIsOld();
   $("#fit").addEventListener("click", () => state.plan.fit());
   for (const button of document.querySelectorAll("#view-mode button")) {
     button.addEventListener("click", () => setViewMode(button.dataset.mode));

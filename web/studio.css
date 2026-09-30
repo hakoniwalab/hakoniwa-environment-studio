@@ -151,3 +151,4 @@ textarea.points { width: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, Menl
 .list li.recipe-row > button:first-child { min-width: 0; overflow-wrap: anywhere; flex-direction: column; align-items: flex-start; gap: 2px; }
 .list li.recipe-row button.delete { width: 28px; padding: 0; justify-content: center; color: var(--danger); border-color: var(--border); }
 .list li.recipe-row button.delete:hover { border-color: var(--danger); }
+.stale-banner { padding: 8px 20px; background: #fff0ee; color: #9b2c24; border-bottom: 1px solid #e8b4ae; font-weight: 600; }

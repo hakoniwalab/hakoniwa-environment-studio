@@ -3,7 +3,7 @@
 // generate, look at it in 3D, write it to the export folder). Taking a City
 // World in as parts goes on in Studio.
 
-import { $, api, el } from "./dom.js";
+import { $, api, el, warnIfServerIsOld } from "./dom.js";
 import { cityWorlds } from "./cityworlds.js";
 
 const DEFAULT_CENTER = [35.6809, 139.7667]; // Tokyo Station
@@ -284,6 +284,7 @@ function setMode(mode) {
 
 async function init() {
   const config = await api("GET", "map/config");
+  warnIfServerIsOld();
   const saved = loadSelection();
   $("#latitude").value = saved.latitude.toFixed(6);
   $("#longitude").value = saved.longitude.toFixed(6);

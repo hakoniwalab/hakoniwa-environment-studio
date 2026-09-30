@@ -777,6 +777,21 @@ def save_recipe(recipe_id: str, body: object) -> dict:
             "copied_assets": len(copied), "assets": rewritten}
 
 
+# The code this server runs: the checkout's commit when it started. The page
+# files are read afresh on every request, so after a pull the pages are newer
+# than the server; health says so (code_updated) and the pages ask for a restart.
+STARTED_BUILD = env_version.build_info(ROOT)
+
+
+def code_updated() -> bool:
+    """Whether the checkout has moved to another commit since this server started."""
+    started = STARTED_BUILD.get("commit")
+    if STARTED_BUILD.get("platform") != "source" or not started:
+        return False
+    now = env_version.git_commit(ROOT)
+    return bool(now) and now != started
+
+
 class StudioHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
@@ -827,7 +842,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
     ROUTES = (
         ("GET", ("health",), lambda self, _: self._json({
             "app": APP_NAME, "pid": os.getpid(), "port": self.server.server_address[1],
-            "instance": os.environ.get(INSTANCE_ENV), "version": env_version.build_info(ROOT),
+            "instance": os.environ.get(INSTANCE_ENV), "version": STARTED_BUILD,
+            "code_updated": code_updated(),
             "export_dir": str(EXPORT_DIR) if EXPORT_DIR else None})),
         ("POST", ("shutdown",), lambda self, _: self._shutdown()),
         ("GET", ("catalogs",), lambda self, _: self._json(list_catalogs())),

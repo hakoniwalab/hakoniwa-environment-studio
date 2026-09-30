@@ -73,6 +73,15 @@ class StudioServerTest(unittest.TestCase):
         self.assertFalse(job.exists())
         self.assertEqual(self.call("GET", "/api/city-worlds/jobs/sapporo/city-world.glb")[0], 404)
 
+    def test_health_says_when_the_checkout_moved_after_the_start(self):
+        started = {"version": "0.1.0", "commit": "a" * 40, "build_date": None, "platform": "source"}
+        with mock.patch.object(env_studio, "STARTED_BUILD", started):
+            with mock.patch.object(env_studio.env_version, "git_commit", lambda root: "a" * 40):
+                self.assertFalse(self.call("GET", "/api/health")[1]["code_updated"])
+            with mock.patch.object(env_studio.env_version, "git_commit", lambda root: "b" * 40):
+                status, health = self.call("GET", "/api/health")
+        self.assertEqual((health["code_updated"], health["version"]["commit"]), (True, "a" * 40))
+
     def test_only_this_studios_pages_may_change_things(self):
         def post(headers):
             request = Request(f"http://127.0.0.1:{self.port}/api/validate", data=b"{}", method="POST", headers=headers)
