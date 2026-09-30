@@ -1,6 +1,6 @@
 # Hakoniwa Environment Studio
 
-Hakoniwa Environment Studio は、Car / Drone / Robot などを動かすための **シミュレーション環境をブラウザで設計する商用オーサリングツール**です。
+Hakoniwa Environment Studio は、Car / Drone / Robot などを動かすための **シミュレーション環境をブラウザで設計するオーサリングツール**です。
 
 専門的な 3D CAD や MuJoCo XML を直接編集しなくても、
 
@@ -183,7 +183,7 @@ Hakoniwa Environment Studio
 ```
 
 Environment Studio を使わなくても、同じ schema に従った Recipe を手書き・AI 生成して利用できる構造を維持します。
-商用価値は独自フォーマットへのロックインではなく、**環境を速く・簡単に・拡張可能な形で作る UX** に置きます。
+価値は独自フォーマットへのロックインではなく、**環境を速く・簡単に・拡張可能な形で作る UX** に置きます。
 
 ## Quick start
 
