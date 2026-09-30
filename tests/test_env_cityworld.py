@@ -31,7 +31,17 @@ if "fail" in str(build):
 (build / "world").mkdir(parents=True, exist_ok=True)
 (build / "download-manifest.json").write_text("{}")
 (build / "world" / "city-world-receipt.json").write_text("{}")
+(build / "world" / "city-world.xml").write_text("<mujoco/>")
+(build / "world" / "city-world.glb").write_bytes(b"glTF")
 print("OK: built")
+'''
+
+FAKE_COLLIDERS = '''
+import sys
+from pathlib import Path
+args = sys.argv
+Path(args[args.index("--out") + 1]).write_bytes(b"glTF-colliders")
+Path(args[args.index("--receipt") + 1]).write_text('{"source_mjcf": "%s"}' % args[args.index("--in") + 1])
 '''
 
 SELECTION = {"center": {"latitude": 43.06738, "longitude": 141.350709}, "half_extent_m": {"north_south": 10, "east_west": 20}}
@@ -45,6 +55,8 @@ class CityWorldBuildTest(unittest.TestCase):
         envsim = self.dir / "hakoniwa-envsim"
         (envsim / "tools").mkdir(parents=True)
         (envsim / "tools/hako.py").write_text(FAKE_HAKO, encoding="utf-8")
+        (envsim / "src/city_pipeline").mkdir(parents=True)
+        (envsim / "src/city_pipeline/mjcf_colliders2glb.py").write_text(FAKE_COLLIDERS, encoding="utf-8")
         for patch in (mock.patch.object(env_cityworld, "WORK", self.dir / "work/city-worlds"),
                       mock.patch.object(env_cityworld.env_envsim, "root", lambda: envsim),
                       mock.patch.dict("os.environ", {"HAKONIWA_PLATEAU_CACHE": ""})):
@@ -78,8 +90,12 @@ class CityWorldBuildTest(unittest.TestCase):
         self.assertEqual(job["job_id"], "sapporo")
         status = self.wait("sapporo")
         self.assertEqual((status["state"], status["returncode"]), ("done", 0))
-        self.assertEqual(status["progress"], {"phase": "source_download", "feature": "bldg", "current": 3, "total": 3})
+        self.assertEqual(status["progress"], {"phase": "collider_visualization", "current": 1, "total": 1})
         self.assertEqual(status["build"], str(self.dir / "work/city-worlds/sapporo/build"))
+        # The viewer files the City World job contract asks for.
+        viewer = self.dir / "work/city-worlds/sapporo/viewer"
+        self.assertEqual((viewer / "city-world-colliders.glb").read_bytes(), b"glTF-colliders")
+        self.assertEqual((viewer / "city-world.glb").read_bytes(), b"glTF")
         # Done, it is there to import; building it again needs overwrite.
         with self.assertRaises(env_cityworld.BuildError) as caught:
             self.builds.start({"id": "sapporo", "selection": SELECTION}, roots)
@@ -99,7 +115,8 @@ class CityWorldBuildTest(unittest.TestCase):
         status = self.wait("fail")
         self.assertEqual((status["state"], status["returncode"]), ("failed", 2))
         self.assertEqual(status["errors"], ["ERROR: no cached catalog response"])
-        self.assertIn("hako.py", status["log_tail"][0])
+        self.assertIn("build-job", status["log_tail"][0])
+        self.assertIn("hako.py", status["log_tail"][1])
 
     def test_offline_only_rebuilds_the_same_area_and_a_failed_build_runs_again(self):
         # Nothing fetched yet: refused before anything is written.

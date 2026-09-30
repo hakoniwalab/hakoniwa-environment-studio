@@ -496,19 +496,25 @@ def _terrain_geom(root: ET.Element, world: ET.Element, terrain: env_terrain.Terr
                                       "quat": _numbers(ENVSIM_FRAME_QUAT), "rgba": rgba, "friction": friction})
         return
     if terrain.kind == "hfield":
-        flat = [h for row in terrain.heights for h in row]
-        low, high = min(flat), max(flat)
+        rows, cols, samples = env_terrain.envsim_order(terrain)
+        low, high = min(samples), max(samples)
         if high - low > 1e-6:
-            # MuJoCo rescales the data to [0, 1] (the lowest point to 0), so the
-            # field spans high - low and is raised by low: heights stay absolute.
+            # Laid out as an Envsim hfield (and an Urban export, env_urban.py):
+            # the same cells split along the same diagonals whichever frame the
+            # world is written in. MuJoCo rescales the data to [0, 1] (the lowest
+            # point to 0), so the field spans high - low and is raised by low;
+            # it reads inline elevation rows from the +y edge (a file's from -y),
+            # hence the rows reversed.
             asset = root.find("asset")
             ET.SubElement(asset, "hfield", {
-                "name": "terrain", "nrow": str(terrain.nrow), "ncol": str(terrain.ncol),
-                "size": _numbers((terrain.half_east, terrain.half_north, high - low, env_terrain.BASE_M)),
-                "elevation": " ".join(f"{(h - low) / (high - low):.6g}" for h in flat),
+                "name": "terrain", "nrow": str(rows), "ncol": str(cols),
+                "size": _numbers((terrain.grid_half_north, terrain.grid_half_east, high - low, env_terrain.BASE_M)),
+                "elevation": " ".join(repr((samples[r * cols + c] - low) / (high - low))
+                                      for r in reversed(range(rows)) for c in range(cols)),
             })
             ET.SubElement(world, "geom", {"name": TERRAIN_GEOM, "type": "hfield", "hfield": "terrain",
-                                          "pos": _numbers((0, 0, low)), "rgba": rgba, "friction": friction})
+                                          "pos": _numbers((0, 0, low)), "quat": _numbers(ENVSIM_FRAME_QUAT),
+                                          "rgba": rgba, "friction": friction})
             return
     top = 0.0 if terrain.kind != "hfield" else max(h for row in terrain.heights for h in row)
     ET.SubElement(world, "geom", {
@@ -575,7 +581,8 @@ _NAMED = ("name", "mesh", "material", "texture", "hfield", "class", "childclass"
 def _copied(element: ET.Element, prefix: str) -> ET.Element:
     """A fragment element for this world: names prefixed with the object's id
     (a building copied twice stays two), euler degrees as a quaternion (this
-    world compiles angles in radians); every number else as Envsim wrote it."""
+    world compiles angles in radians, an exported one has no compiler at all);
+    every number else as Envsim wrote it."""
     copy = ET.Element(element.tag, dict(element.attrib))
     for key in _NAMED:
         if key in copy.attrib:
@@ -583,9 +590,12 @@ def _copied(element: ET.Element, prefix: str) -> ET.Element:
     if "euler" in copy.attrib:
         copy.set("quat", " ".join(repr(value) for value in euler_quaternion(
             [float(value) for value in copy.attrib.pop("euler").split()])))
-    if "axisangle" in copy.attrib:
-        x, y, z, angle = (float(value) for value in copy.get("axisangle").split())
-        copy.set("axisangle", " ".join(repr(value) for value in (x, y, z, math.radians(angle))))
+    if "axisangle" in copy.attrib:  # a quaternion too: no angle is left for a compiler setting to read
+        x, y, z, angle = (float(value) for value in copy.attrib.pop("axisangle").split())
+        size = math.sqrt(x * x + y * y + z * z) or 1.0
+        half = math.radians(angle) / 2
+        copy.set("quat", " ".join(repr(value) for value in (
+            math.cos(half), x / size * math.sin(half), y / size * math.sin(half), z / size * math.sin(half))))
     for child in element:
         copy.append(_copied(child, prefix))
     return copy

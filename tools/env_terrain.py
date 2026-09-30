@@ -145,6 +145,16 @@ class Terrain:
         return data
 
 
+def envsim_order(terrain: Terrain) -> tuple[int, int, list[float]]:
+    """(nrow, ncol, samples) of a grid in the order an Envsim hfield file keeps
+    it (MuJoCo's frame x north, y west; data row r at y = -size_y + r * step,
+    row 0 the east edge; column c at x = -size_x + c * step, column 0 the south
+    edge): the inverse of _read_envsim_hfield's mapping."""
+    rows, cols = terrain.ncol, terrain.nrow
+    heights = terrain.heights
+    return rows, cols, [heights[cols - 1 - c][rows - 1 - r] for r in range(rows) for c in range(cols)]
+
+
 # highest_under's answers, per grid.
 _UNDER: dict = {}
 

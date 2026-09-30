@@ -711,6 +711,31 @@ async function saveRecipe() {
   }
 }
 
+// The saved Recipe as a hakoniwa-urban-mobility World, registered there as a
+// City Asset (POST /api/recipes/<id>/urban; tools/env_urban.py).
+async function exportUrban() {
+  // A saved Recipe as it is on disk (an example too): unsaved edits would not be in it.
+  const id = state.current?.id;
+  if (!id || isDirty() || !state.recipes.some((item) => item.id === id && !item.error)) {
+    setStatus("urban-mobility へ書き出す前に、環境を保存してください", "error");
+    return;
+  }
+  setStatus(`${id} を urban-mobility の World にしています…`);
+  try {
+    const result = await api("POST", `recipes/${encodeURIComponent(id)}/urban`, { register: true });
+    const problems = (result.check?.problems || []).filter((item) => item.severity === "error");
+    if (problems.length) {
+      setStatus(`${id} は urban の決まりに合いません：${problems.map((item) => `${item.where}: ${item.message}`).join(" / ")}`, "error");
+    } else if (result.register && !result.register.ok) {
+      setStatus(`${id} を書き出しましたが、登録できませんでした：${result.register.output.slice(-2).join(" ")}`, "error");
+    } else {
+      setStatus(`${id} を urban-mobility に登録しました（City Asset ${id}、${result.kind === "city" ? "地図の原点あり" : "平らな World"}：${result.job}）`, "ok");
+    }
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
 function setSize(east, north) {
   if (!(east > 0 && north > 0)) return;
   recipe().size_m = { east: roundMm(east), north: roundMm(north) };
@@ -751,6 +776,7 @@ async function init() {
 
   $("#new-recipe").addEventListener("click", newRecipe);
   $("#save").addEventListener("click", saveRecipe);
+  $("#urban").addEventListener("click", exportUrban);
   $("#fit").addEventListener("click", () => state.plan.fit());
   for (const button of document.querySelectorAll("#view-mode button")) {
     button.addEventListener("click", () => setViewMode(button.dataset.mode));

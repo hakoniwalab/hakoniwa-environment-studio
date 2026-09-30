@@ -59,6 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import env_generate  # noqa: E402
 import env_citygml  # noqa: E402
 import env_cityworld  # noqa: E402
+import env_urban  # noqa: E402
 import env_rules  # noqa: E402
 import env_schema  # noqa: E402
 import env_validate  # noqa: E402
@@ -604,6 +605,27 @@ def _own_assets(data: dict, directory: Path, recipe_id: str) -> tuple[list[Path]
     return created, rewritten
 
 
+def export_urban(recipe_id: str, body: object) -> dict:
+    """Write a saved Recipe as a hakoniwa-urban-mobility World (a City World
+    job under work/urban/<id>/, env_urban.py) and, with register, register it
+    there as a City Asset. Body: {register?: bool}."""
+    found = _recipe_files().get(_check_id(recipe_id))
+    if found is None:
+        raise StudioError(f"Recipe {recipe_id} not found（保存してから書き出してください）", HTTPStatus.NOT_FOUND)
+    try:
+        result = env_urban.export(found[0])
+    except env_urban.ExportError as exc:
+        raise StudioError(f"urban-mobility に書き出せません: {exc}") from exc
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise StudioError(f"urban-mobility に書き出せません: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
+    if isinstance(body, dict) and body.get("register"):
+        if result["check"] is not None and not result["check"]["ok"]:
+            result["register"] = {"ok": False, "output": ["the job does not follow urban's contract"]}
+        else:
+            result["register"] = env_urban.register(Path(result["receipt"]))
+    return {"id": recipe_id, **result}
+
+
 def delete_recipe(recipe_id: str) -> dict:
     """Move a saved Recipe to work/trash/<time>-<id>/, with what belongs only
     to it: its visual assets (<id>.assets) and the map data it was imported
@@ -713,6 +735,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("GET", ("recipes",), lambda self, _: self._json(list_recipes())),
         ("GET", ("recipes", "*"), lambda self, parts: self._json(read_recipe(parts[1]))),
         ("PUT", ("recipes", "*"), lambda self, parts: self._json(save_recipe(parts[1], self._body()))),
+        ("POST", ("recipes", "*", "urban"), lambda self, parts: self._json(export_urban(parts[1], self._body()))),
         ("DELETE", ("recipes", "*"), lambda self, parts: self._json(delete_recipe(parts[1]))),
         ("POST", ("resolve-many",), lambda self, _: self._json(resolve_many_json(self._body()))),
         ("POST", ("resolve",), lambda self, _: self._json(resolve_json(self._body()))),

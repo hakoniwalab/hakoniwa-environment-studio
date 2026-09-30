@@ -248,7 +248,7 @@ async function importWorld(build, given = null) {
 // A City World built from PLATEAU by hakoniwa-envsim (POST /api/city-worlds/build),
 // followed until it is done, then imported under the same id.
 const BUILD_KEY = "hakoniwa-environment-city-world-build";
-const PHASES = { source_download: "ダウンロード", catalog: "カタログの問い合わせ" };
+const PHASES = { source_download: "ダウンロード", catalog: "カタログの問い合わせ", collider_visualization: "当たり判定の表示用 GLB" };
 
 function describeBuild(status) {
   const progress = status.progress || {};

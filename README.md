@@ -219,6 +219,7 @@ python tools/env_citygml.py --citygml work/map-data/tokyo --center 35.68085,139.
 
 - データの約束事（Type / Catalog / Recipe、座標、地形、診断）：[docs/data-contract.md](docs/data-contract.md)
 - CityGML から部品への変換仕様：[docs/citygml-parts.md](docs/citygml-parts.md)
+- hakoniwa-urban-mobility への書き出し（「urban-mobility へ」ボタン、`tools/env_urban.py`）：[docs/urban-export.md](docs/urban-export.md)
 - AI エージェント向けの契約（contract / inspect / validate → repair のループ）：[docs/ai-contract.md](docs/ai-contract.md)
 - 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`
 - 例の環境：`recipes/examples/`（ドローン練習場 20 m × 30 m、車のテストコース、丘のフィールド）

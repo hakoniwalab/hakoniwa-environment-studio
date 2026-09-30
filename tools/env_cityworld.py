@@ -12,6 +12,11 @@ say how far it is. The finished build is a workspace City World like any
 other: the map page imports it as parts (env_citygml.convert_build), Envsim's
 own outputs passed through.
 
+After Envsim, the job gets its viewer files as the City World Web UI makes
+them (viewer/city-world.glb, and viewer/city-world-colliders.glb from Envsim's
+mjcf_colliders2glb.py), so it follows hakoniwa-urban-mobility's City World job
+contract (schemas/city-world-job.yaml) and can be registered there.
+
 One build runs at a time (Envsim keeps its resolved manifest in one place).
 `offline` rebuilds a City World built before from what that build fetched
 (its catalog answers and CityGML): Envsim reads them from the build folder.
@@ -210,8 +215,9 @@ class Builds:
                 "created_by": "hakoniwa-environment-studio",
             }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             log = job / "generation.log"
-            command = [_python(envsim), str(envsim / "tools" / "hako.py"), "--config", str(config),
-                       *(["--offline"] if body.get("offline") else []), "build"]
+            # This module runs Envsim's build, then the viewer files (build_job below).
+            command = [sys.executable, str(Path(__file__).resolve()), "build-job", str(job), "--envsim", str(envsim),
+                       *(["--offline"] if body.get("offline") else [])]
             with log.open("w", encoding="utf-8") as stream:
                 stream.write(f"$ {' '.join(command)}\n")
                 stream.flush()
@@ -266,3 +272,57 @@ class Builds:
 
 
 BUILDS = Builds()
+
+
+def collider_view(job: Path, mjcf: Path, envsim: Path | None = None) -> None:
+    """viewer/city-world-colliders.glb (and its receipt) of a job's World MJCF,
+    by Envsim's mjcf_colliders2glb.py, as the City World Web UI makes it."""
+    envsim = envsim or env_envsim.root()
+    viewer = job / "viewer"
+    viewer.mkdir(parents=True, exist_ok=True)
+    subprocess.run([_python(envsim), str(envsim / "src" / "city_pipeline" / "mjcf_colliders2glb.py"),
+                    "--in", str(mjcf), "--out", str(viewer / "city-world-colliders.glb"),
+                    "--receipt", str(viewer / "city-world-colliders-receipt.json")],
+                   cwd=envsim, check=True, stdin=subprocess.DEVNULL)
+
+
+def build_job(job: Path, offline: bool = False, envsim: Path | None = None) -> int:
+    """Run Envsim's build of a job (its hakoniwa-envsim-build.yaml), then its viewer files."""
+    import shutil
+
+    envsim = envsim or env_envsim.root()
+    command = [_python(envsim), str(envsim / "tools" / "hako.py"), "--config",
+               str(job / "hakoniwa-envsim-build.yaml"), *(["--offline"] if offline else []), "build"]
+    print(f"$ {' '.join(command)}", flush=True)
+    code = subprocess.call(command, cwd=envsim, stdin=subprocess.DEVNULL)
+    if code != 0:
+        return code
+    world = job / "build" / "world"
+    print("[HAKO_PROGRESS] " + json.dumps({"phase": "collider_visualization", "current": 0, "total": 1}), flush=True)
+    (job / "viewer").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(world / "city-world.glb", job / "viewer" / "city-world.glb")
+    try:
+        collider_view(job, world / "city-world.xml", envsim)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f"ERROR: the collider view could not be made: {exc}", flush=True)
+        return 1
+    print("[HAKO_PROGRESS] " + json.dumps({"phase": "collider_visualization", "current": 1, "total": 1}), flush=True)
+    print(f"OK: viewer files: {job / 'viewer'}", flush=True)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    command = commands.add_parser("build-job", help="run Envsim's build of a job folder, then its viewer files")
+    command.add_argument("job", type=Path)
+    command.add_argument("--offline", action="store_true")
+    command.add_argument("--envsim", type=Path, help="the hakoniwa-envsim checkout (default: the Studio's)")
+    args = parser.parse_args(argv)
+    return build_job(args.job.resolve(), offline=args.offline, envsim=args.envsim.resolve() if args.envsim else None)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
