@@ -169,6 +169,7 @@ PLATEAU のデータには、外形がもともと重なっている建物もあ
 - **設定**：City World Web UI と同じ（visual-physics-v1：LOD2 の見た目、建物の当たり判定 P0〜P3、DEM の地形、道路、路面標示、橋）。範囲の指定も同じです。
 - **ダウンロード**：envsim が PLATEAU のカタログに問い合わせて CityGML を取ります。取った CityGML は共有のキャッシュに残し、次から使い回します。キャッシュは `HAKONIWA_PLATEAU_CACHE`、無ければ地図ページの「フォルダ」（ビジネスパックの work）の `recipes/city-world-web-ui/runtime/cache/plateau-citygml`、それも無ければ `work/city-worlds/cache` です。
 - **実行**：`hako.py --config … build` を裏で動かし、`[HAKO_PROGRESS]` の行から進み具合を表示します（`GET /api/city-worlds/build/<ID>`）。同時に動かすのは 1 つだけで、中止もできます（`POST …/cancel`）。ページを開き直しても、作っている途中のものを追い続けます。
-- **オフライン**：同じ ID で前に作った City World を、そのとき取ったカタログの応答と CityGML だけで作り直せます（`offline`）。
+- **オフライン**：同じ ID・同じ範囲で前に作った City World を、そのとき取ったカタログの応答と CityGML だけで作り直せます（`offline`）。前のビルドが無い、または範囲が違うときは、envsim を動かす前に断ります（設定は書き換えません）。範囲を変えるときは、オフラインにせず別の ID で作ります。ダウンロード済みの CityGML は、オフラインでなくても共有キャッシュから使い回します。
+- **やり直し**：完成した City World と同じ ID では断ります（上書きは `overwrite`）。途中で失敗したものは、同じ ID でそのままやり直せます。
 - **例**：札幌駅前（345 m × 183 m）は、CityGML がキャッシュにあれば十数秒でビルドが終わり、取り込んだ Recipe は `env_roundtrip.py` で envsim の出力と一致します。
 

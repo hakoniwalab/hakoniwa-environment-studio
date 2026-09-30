@@ -141,6 +141,27 @@ def _selection(body: dict) -> tuple[tuple[float, float], tuple[float, float]]:
     return (lat, lon), (ns, ew)
 
 
+def _check_offline(job: Path, job_id: str, center, half) -> None:
+    """An offline build rebuilds what a build of this id fetched before (its
+    catalog answers and CityGML, kept in its build folder) for the same area."""
+    answers = list((job / "build").glob("plateau-catalog-response-*.json"))
+    if not answers:
+        raise BuildError(f"オフラインで作り直せるのは、同じ ID で前に作った City World だけです（{job_id} には取得済みの"
+                         "データがありません）。チェックを外して作ってください。ダウンロード済みの CityGML は、"
+                         "チェックしなくても共有のキャッシュから使い回します。")
+    try:
+        before = json.loads((job / "build" / "world" / "city-world-receipt.json").read_text(encoding="utf-8"))
+        frame = before["coordinate_frame"]
+        same = (abs(frame["origin"]["latitude"] - center[0]) < 1e-9 and abs(frame["origin"]["longitude"] - center[1]) < 1e-9
+                and abs(frame["half_extent_m"]["north_south"] - half[0]) < 1e-6
+                and abs(frame["half_extent_m"]["east_west"] - half[1]) < 1e-6)
+    except (OSError, ValueError, KeyError, TypeError):
+        same = False
+    if not same:
+        raise BuildError(f"オフラインで作り直せるのは、{job_id} を前に作ったときと同じ範囲だけです。範囲を変えたときは、"
+                         "チェックを外して別の ID で作ってください（ダウンロード済みの CityGML は使い回します）。")
+
+
 def _python(envsim: Path) -> str:
     """Envsim's own interpreter when it has a virtual environment."""
     candidate = envsim / ".venv" / "bin" / "python"
@@ -172,7 +193,10 @@ class Builds:
             if other is not None:
                 raise BuildError(f"City World {other} を作っているところです（終わってから始めてください）", 409)
             job = WORK / job_id
-            if (job / "build").exists() and not body.get("overwrite"):
+            built = (job / "build" / "world" / "city-world-receipt.json").is_file()
+            if body.get("offline"):
+                _check_offline(job, job_id, center, half)
+            elif built and not body.get("overwrite"):  # a build that failed half way may simply run again
                 raise BuildError(f"City World {job_id} はもうあります（別の ID にしてください）", 409)
             envsim = env_envsim.root()
             job.mkdir(parents=True, exist_ok=True)

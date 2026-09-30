@@ -25,7 +25,7 @@ for step in range(1, 4):
     print("[HAKO_PROGRESS] " + json.dumps({"phase": "source_download", "feature": "bldg", "current": step, "total": 3}))
     sys.stdout.flush()
     time.sleep(delay)
-if "--offline" in sys.argv and "fail" in str(build):
+if "fail" in str(build):
     print("ERROR: no cached catalog response")
     sys.exit(2)
 (build / "world").mkdir(parents=True, exist_ok=True)
@@ -95,11 +95,36 @@ class CityWorldBuildTest(unittest.TestCase):
         self.assertEqual((status["state"], status["build"]), ("failed", None))
 
     def test_a_failed_build_says_why(self):
-        self.builds.start({"id": "fail", "selection": SELECTION, "offline": True}, [])
+        self.builds.start({"id": "fail", "selection": SELECTION}, [])
         status = self.wait("fail")
         self.assertEqual((status["state"], status["returncode"]), ("failed", 2))
         self.assertEqual(status["errors"], ["ERROR: no cached catalog response"])
-        self.assertIn("--offline", status["log_tail"][0])
+        self.assertIn("hako.py", status["log_tail"][0])
+
+    def test_offline_only_rebuilds_the_same_area_and_a_failed_build_runs_again(self):
+        # Nothing fetched yet: refused before anything is written.
+        with self.assertRaises(env_cityworld.BuildError) as caught:
+            self.builds.start({"id": "shibuya", "selection": SELECTION, "offline": True}, [])
+        self.assertIn("チェックを外して", str(caught.exception))
+        self.assertFalse((self.dir / "work/city-worlds/shibuya/hakoniwa-envsim-build.yaml").exists())
+        # A build (its catalog answers and receipt), then offline with a wider area: refused, config kept.
+        self.wait(self.builds.start({"id": "shibuya", "selection": SELECTION}, [])["id"])
+        build = self.dir / "work/city-worlds/shibuya/build"
+        (build / "plateau-catalog-response-bldg.json").write_text("{}", encoding="utf-8")
+        (build / "world/city-world-receipt.json").write_text(json.dumps({"coordinate_frame": {
+            "origin": SELECTION["center"], "half_extent_m": {"north_south": 10.0, "east_west": 20.0}}}), encoding="utf-8")
+        config = (self.dir / "work/city-worlds/shibuya/hakoniwa-envsim-build.yaml").read_text(encoding="utf-8")
+        wider = {**SELECTION, "half_extent_m": {"north_south": 200, "east_west": 200}}
+        with self.assertRaises(env_cityworld.BuildError) as caught:
+            self.builds.start({"id": "shibuya", "selection": wider, "offline": True}, [])
+        self.assertIn("同じ範囲", str(caught.exception))
+        self.assertEqual((self.dir / "work/city-worlds/shibuya/hakoniwa-envsim-build.yaml").read_text(encoding="utf-8"), config)
+        # The same area offline is fine.
+        self.assertEqual(self.wait(self.builds.start({"id": "shibuya", "selection": SELECTION, "offline": True}, [])["id"])["state"], "done")
+        # A build that stopped half way (no receipt) runs again under its id.
+        (self.dir / "work/city-worlds/half/build/source").mkdir(parents=True)
+        self.assertEqual(self.builds.start({"id": "half", "selection": SELECTION}, [])["state"], "running")
+        self.wait("half")
 
     def test_bad_requests_are_refused(self):
         for body, words in (({"id": "Bad Id", "selection": SELECTION}, "not an id"),
