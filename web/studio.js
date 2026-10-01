@@ -466,8 +466,18 @@ function renderCatalogSelect() {
 const metres = (value) => `${Math.round(value * 100) / 100}`;
 
 function renderCatalog() {
-  const objects = [...catalog.items.values()].filter((item) => item.kind !== "terrain");
-  $("#catalog-list").replaceChildren(...objects.map((entry) => {
+  const query = $("#catalog-search").value;
+  const objects = [...catalog.items.values()].filter((item) => item.kind !== "terrain"
+    && matches(query, item.name, item.category, item.id));
+  if (!objects.length) {
+    $("#catalog-list").replaceChildren(el("li", { class: "hint" }, "見つかりません"));
+    return;
+  }
+  // By category, in the Catalog's order, each under its heading.
+  const groups = new Map();
+  for (const entry of objects) groups.set(entry.category || "その他", [...(groups.get(entry.category || "その他") || []), entry]);
+  $("#catalog-list").replaceChildren(...[...groups].flatMap(([category, members]) => [
+    el("li", { class: "catalog-heading" }, category), ...members.map((entry) => {
     const { envelope, height_m: height } = entry;
     const size = envelope.primitive === "cylinder"
       ? `φ${metres(envelope.width_m)}×H${metres(height)} m`
@@ -485,7 +495,7 @@ function renderCatalog() {
         el("span", {}, entry.name),
         el("span", { class: "meta" }, size),
         el("span", { class: "swatch", style: `background:${entry.params.color || "#cccccc"}` })));
-  }));
+  })]));
 }
 
 // Move a saved Recipe (and its visual assets, its imported map data) to the
@@ -508,8 +518,21 @@ async function deleteRecipe(item) {
   }
 }
 
+// Whether a text matches what is typed in a search box (any of its words, in any case).
+function matches(query, ...texts) {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = texts.filter(Boolean).join(" ").toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
 function renderRecipeList() {
-  $("#recipe-list").replaceChildren(...state.recipes.map((item) => el("li", { class: "recipe-row" },
+  const query = $("#recipe-search").value;
+  const shown = state.recipes.filter((item) => matches(query, item.id, item.name));
+  if (!shown.length) {
+    $("#recipe-list").replaceChildren(el("li", { class: "hint" }, query.trim() ? "見つかりません" : "まだありません"));
+    return;
+  }
+  $("#recipe-list").replaceChildren(...shown.map((item) => el("li", { class: "recipe-row" },
     el("button", {
       "aria-current": String(state.current?.id === item.id),
       onclick: () => {
@@ -518,7 +541,9 @@ function renderRecipeList() {
         setStatus(`${item.id} を開いています…`);
         openRecipe(item.id).catch((error) => setStatus(`${item.id} を開けません: ${error.message}`, "error"));
       },
-    }, el("span", {}, item.id), el("span", { class: "meta" }, item.error ? "エラー"
+    }, el("span", {}, item.name && item.name !== item.id ? item.name : item.id),
+    item.name && item.name !== item.id ? el("span", { class: "meta" }, item.id) : null,
+    el("span", { class: "meta" }, item.error ? "エラー"
       : `${item.size_m.east}×${item.size_m.north} m・${item.objects} 部品${item.terrain === "hfield" ? "・丘" : ""}${
         item.editable ? "" : "・例"}`)),
     item.editable ? el("button", {
@@ -864,6 +889,8 @@ async function init() {
   await loadCatalog((state.catalogs.find((item) => item.id === "my" && !item.error) ?? state.catalogs.find((item) => !item.error))?.id);
   await loadRecipes();
   $("#catalog-select").addEventListener("change", (event) => switchCatalog(event.target.value));
+  $("#recipe-search").addEventListener("input", renderRecipeList);
+  $("#catalog-search").addEventListener("input", renderCatalog);
   $("#terrain-select").addEventListener("change", (event) => setTerrain(event.target.value));
 
   $("#new-recipe").addEventListener("click", newRecipe);

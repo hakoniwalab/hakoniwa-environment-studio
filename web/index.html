@@ -36,6 +36,7 @@
           <span class="row"><a href="map.html" class="secondary button-link" title="OpenStreetMap などの地図データから建物と道路を取り込む">地図から</a>
           <button id="new-recipe" class="secondary">新規</button></span>
         </div>
+        <input id="recipe-search" class="search" type="search" placeholder="環境を探す（名前・ID）" autocomplete="off">
         <ul id="recipe-list" class="list"></ul>
       </section>
 
@@ -68,6 +69,7 @@
         <label class="field">カタログ<select id="catalog-select"></select></label>
         <p id="catalog-source" class="hint"></p>
         <p class="hint">上面図にドラッグして置きます（クリックで中央に置きます）。</p>
+        <input id="catalog-search" class="search" type="search" placeholder="部品を探す（名前・分類）" autocomplete="off">
         <ul id="catalog-list" class="catalog"></ul>
       </section>
     </aside>
