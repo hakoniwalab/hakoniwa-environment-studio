@@ -59,6 +59,7 @@ export class View3D {
     this.raycaster = new THREE.Raycaster();
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (event) => {
+      this.glide = null;  // the user takes the camera
       this.press = event.button === 0 ? { x: event.clientX, y: event.clientY, time: performance.now() } : null;
     });
     canvas.addEventListener("pointerup", (event) => {
@@ -113,17 +114,35 @@ export class View3D {
     if (Number.isFinite(screen)) this.needle.setAttribute("transform", `rotate(${screen.toFixed(1)})`);
   }
 
-  // Where a screen point (client pixels) meets the ground: the terrain, or
-  // without one the plane at height 0. [east, north] in metres, or null (the sky).
-  groundAt3d(clientX, clientY) {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    const pointer = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1);
-    this.raycaster.setFromCamera(pointer, this.camera);
-    const terrain = this.model.getObjectByName("terrain");
-    const hit = terrain ? this.raycaster.intersectObject(terrain, true)[0]?.point : null;
-    const point = hit || this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
-    return point ? [point.x, -point.z] : null;
+  // Bring the camera to objects (ids), keeping the way it looks: the point
+  // looked at moves to their centre and the distance fits their size, in a
+  // short glide. False when none of them is in the model yet.
+  focus(ids) {
+    const box = new THREE.Box3();
+    for (const id of ids) {
+      const node = this.nodes?.get(id);
+      if (node) box.expandByObject(node);
+    }
+    if (box.isEmpty()) return false;
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const fit = Math.max(sphere.radius, 0.5) / Math.sin((this.camera.fov * Math.PI) / 360) * 1.3;
+    const direction = this.camera.position.clone().sub(this.controls.target).normalize();
+    this.glide = {
+      start: performance.now(), duration: 450,
+      from: { position: this.camera.position.clone(), target: this.controls.target.clone() },
+      to: { position: sphere.center.clone().addScaledVector(direction, Math.max(fit, 3)), target: sphere.center.clone() },
+    };
+    return true;
+  }
+
+  stepGlide() {
+    const glide = this.glide;
+    if (!glide) return;
+    const t = Math.min((performance.now() - glide.start) / glide.duration, 1);
+    const eased = 1 - (1 - t) ** 3;
+    this.camera.position.lerpVectors(glide.from.position, glide.to.position, eased);
+    this.controls.target.lerpVectors(glide.from.target, glide.to.target, eased);
+    if (t >= 1) this.glide = null;
   }
 
   // The id of the part nearest the camera under a pointer event, or null
@@ -205,6 +224,7 @@ export class View3D {
   // Render only while the 3D view is shown.
   setActive(active) {
     this.renderer.setAnimationLoop(active ? () => {
+      this.stepGlide();
       this.controls.update();
       this.cameraMoved();
       this.renderer.render(this.scene, this.camera);
@@ -233,6 +253,7 @@ export class View3D {
   }
 
   look(position, target) {
+    this.glide = null;
     this.camera.position.copy(position);
     this.controls.target.copy(target);
     this.controls.update();

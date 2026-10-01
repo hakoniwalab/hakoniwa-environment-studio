@@ -472,7 +472,7 @@ function renderCatalog() {
           event.dataTransfer.setData("text/plain", entry.name);
           event.dataTransfer.effectAllowed = "copy";
         },
-        title: `${entry.category}：${entry.description || ""}\n上面図か 3D にドラッグして置きます（クリックで中央に置きます）`,
+        title: `${entry.category}：${entry.description || ""}\n上面図にドラッグして置きます（クリックで中央に置きます）`,
       },
         el("span", {}, entry.name),
         el("span", { class: "meta" }, size),
@@ -521,8 +521,8 @@ function renderRecipeList() {
 
 // --- Editing ----------------------------------------------------------------------
 
-// A part of the Catalog added to the environment: where it was dropped (on
-// the plan or the 3D view, on the grid), or at the centre (a click).
+// A part of the Catalog added to the environment: where it was dropped on
+// the plan (on the grid), or at the centre (a click).
 function addObject(itemId, at = null) {
   const entry = catalog.item(itemId);
   if (!entry || !state.current) return;
@@ -670,6 +670,17 @@ function nudgeSelected(dx, dy, far, fine) {
   moveSelected(dx * step, dy * step);
 }
 
+// The 3D camera brought to the selected parts (the button, or F): only when
+// asked, keeping the way it looks, so the view does not turn by itself.
+function focusSelected() {
+  if (!state.view3d || viewMode() === "plan") return;
+  if (!state.selection.length) {
+    setStatus("3D で見たい部品を選んでください", "error");
+    return;
+  }
+  if (!state.view3d.focus(state.selection)) setStatus("選んだ部品が 3D にまだありません（読み込み中です）", "error");
+}
+
 function onKey(event) {
   if (!state.current || event.target.closest?.("input, select, textarea")) return;
   const meta = event.metaKey || event.ctrlKey;
@@ -680,6 +691,7 @@ function onKey(event) {
   else if (meta && key === "a") select(recipe().objects.map((obj) => obj.id));
   else if (meta && key === "d") duplicateSelected();
   else if (!meta && key === "r") rotateSelected(event.shiftKey ? -90 : 90);
+  else if (!meta && key === "f") focusSelected();
   else if (event.key.startsWith("Arrow")) {
     const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[event.key];
     if (event.altKey && event.shiftKey) slideSelected(direction);
@@ -822,7 +834,7 @@ function dropTarget(host, locate) {
     event.preventDefault();
     const at = locate(event);
     if (!at) {
-      setStatus("地面の上に落としてください", "error");
+      setStatus("環境の上に落としてください", "error");
       return;
     }
     addObject(event.dataTransfer.getData(ITEM_DRAG), at);
@@ -837,9 +849,8 @@ async function init() {
     onDragEnd: () => render(), // panels, and the finished move as one undo step
   });
   state.plan.setGrid(Number($("#grid").value));
-  // A part dragged from the list is placed where it is dropped, on the plan or in 3D.
+  // A part dragged from the list is placed where it is dropped on the plan.
   dropTarget($("#plan"), (event) => state.plan.areaAt(event.clientX, event.clientY));
-  dropTarget($("#view3d"), (event) => state.view3d?.groundAt3d(event.clientX, event.clientY));
   state.catalogs = await api("GET", "catalogs");
   // マイカタログ when there is one (it includes the starter Catalog), else the first.
   await loadCatalog((state.catalogs.find((item) => item.id === "my" && !item.error) ?? state.catalogs.find((item) => !item.error))?.id);
@@ -860,6 +871,7 @@ async function init() {
   $("#view-overview").addEventListener("click", () => state.view3d?.overview());
   $("#view-car").addEventListener("click", () => state.view3d?.carView());
   $("#view-drone").addEventListener("click", () => state.view3d?.droneView());
+  $("#view-focus").addEventListener("click", focusSelected);
   setViewMode(viewMode());
   $("#grid").addEventListener("change", (event) => state.plan.setGrid(Number(event.target.value)));
   $("#size-preset").addEventListener("change", (event) => {
