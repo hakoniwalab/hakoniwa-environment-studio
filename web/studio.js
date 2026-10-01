@@ -272,6 +272,12 @@ async function ensure3d() {
     state.view3d = new View3D(host);
     // Side by side, the plan shows where the 3D camera is and what it sees.
     state.view3d.onCamera = (camera) => state.plan.setCamera(viewMode() === "split" ? camera : null);
+    // A click in 3D picks a part as on the plan (Shift adds or takes it out); moving stays on the plan.
+    state.view3d.onSelect = (id, additive) => {
+      if (!additive) return select(id ? [id] : []);
+      if (!id) return;
+      select(state.selection.includes(id) ? state.selection.filter((item) => item !== id) : [...state.selection, id]);
+    };
     host.querySelector(".view3d-message")?.remove();
     schedulePreview(0);
   } catch (error) {

@@ -8,6 +8,10 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const CAR_EYE_M = 1.2; // a driver's eye height
+// A press that moves less than this and is let go soon is a click (picks a
+// part); anything else turns the camera.
+const CLICK_SLOP_PX = 5;
+const CLICK_MS = 500;
 const HIGHLIGHT = new THREE.Color(0x3a6fd8);
 
 // Free what a model holds on the GPU (geometries, materials, their textures).
@@ -51,6 +55,20 @@ export class View3D {
     this.lastCamera = "";
     this.compass = this.makeCompass();
     container.append(this.compass);
+    // A click picks the part under the pointer: onSelect(id or null, additive).
+    this.onSelect = null;
+    this.raycaster = new THREE.Raycaster();
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener("pointerdown", (event) => {
+      this.press = event.button === 0 ? { x: event.clientX, y: event.clientY, time: performance.now() } : null;
+    });
+    canvas.addEventListener("pointerup", (event) => {
+      const press = this.press;
+      this.press = null;
+      if (!press || !this.onSelect || performance.now() - press.time > CLICK_MS
+          || Math.hypot(event.clientX - press.x, event.clientY - press.y) > CLICK_SLOP_PX) return;
+      this.onSelect(this.partAt(event), event.shiftKey || event.metaKey || event.ctrlKey);
+    });
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
     this.setActive(true);
@@ -108,6 +126,22 @@ export class View3D {
       target: { x: target.x, y: -target.z },
       looking_down: flat === up,
     });
+  }
+
+  // The id of the part nearest the camera under a pointer event, or null
+  // (the sky, the terrain).
+  partAt(event) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const pointer = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(pointer, this.camera);
+    for (const hit of this.raycaster.intersectObject(this.model, true)) {
+      for (let node = hit.object; node && node !== this.model; node = node.parent) {
+        if (node.userData?.object) return node.userData.object;
+        if (node.userData?.terrain) return null;  // what is behind the ground is out of sight
+      }
+    }
+    return null;
   }
 
   // Look north (from the south of the point looked at), keeping the distance and the height.
