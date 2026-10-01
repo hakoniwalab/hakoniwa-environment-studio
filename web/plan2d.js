@@ -98,7 +98,10 @@ export class PlanView {
     this.drawn = new Map(); // id -> {key, group, area}
     this.svg = svg("svg", { class: "plan", tabindex: "0" });
     this.world = svg("g");
-    this.svg.append(this.world);
+    // The 3D view's camera (setCamera): where it is and what it sees, over the parts.
+    this.cameraLayer = svg("g", { class: "camera-view", "pointer-events": "none" });
+    this.camera = null;
+    this.svg.append(this.world, this.cameraLayer);
     container.append(this.svg);
     this.svg.addEventListener("pointerdown", (event) => this.pointerDown(event));
     this.svg.addEventListener("pointermove", (event) => this.pointerMove(event));
@@ -274,6 +277,48 @@ export class PlanView {
     } else {
       for (const index of changed) this.world.replaceChild(nodes[index], current[index]);
     }
+    this.drawCamera();
+  }
+
+  // camera: {x, y, heading_deg, fov_deg, target: {x, y}, looking_down} from the 3D view, or null.
+  setCamera(camera) {
+    this.camera = camera;
+    this.drawCamera();
+  }
+
+  // The camera as a dot with the wedge it sees, reaching the point it looks at
+  // (looking straight down: a ring with a tick to the screen's top).
+  drawCamera() {
+    const camera = this.camera;
+    if (!camera || !this.area) {
+      this.cameraLayer.replaceChildren();
+      return;
+    }
+    const px = this.metresPerPixel();
+    const { minX, maxX, minY, maxY } = this.area;
+    const span = Math.max(maxX - minX, maxY - minY);
+    const heading = (camera.heading_deg * Math.PI) / 180;
+    const nodes = [];
+    if (camera.looking_down) {
+      const tick = 24 * px;
+      nodes.push(svg("circle", { cx: camera.x, cy: -camera.y, r: 10 * px, class: "camera-ring", "stroke-width": px * 2 }),
+        svg("path", { d: `M${camera.x},${-camera.y}l${Math.cos(heading) * tick},${-Math.sin(heading) * tick}`,
+                      class: "camera-ray", "stroke-width": px * 2 }));
+    } else {
+      const reach = Math.min(Math.max(Math.hypot(camera.target.x - camera.x, camera.target.y - camera.y) * 1.15,
+        60 * px), span * 1.5);
+      const half = Math.min((camera.fov_deg * Math.PI) / 360, Math.PI / 2 - 0.05);
+      const edge = (angle) => [camera.x + Math.cos(angle) * reach, -(camera.y + Math.sin(angle) * reach)];
+      const [lx, ly] = edge(heading + half);
+      const [rx, ry] = edge(heading - half);
+      nodes.push(svg("path", {
+        d: `M${camera.x},${-camera.y}L${lx},${ly}A${reach},${reach} 0 0 1 ${rx},${ry}Z`,
+        class: "camera-wedge", "stroke-width": px * 1.5,
+      }));
+      nodes.push(svg("circle", { cx: camera.target.x, cy: -camera.target.y, r: 3 * px, class: "camera-target" }));
+    }
+    nodes.push(svg("circle", { cx: camera.x, cy: -camera.y, r: 5 * px, class: "camera-eye", "stroke-width": px * 1.5 }));
+    this.cameraLayer.replaceChildren(...nodes);
   }
 
   // One part as drawn on the plan: its outlines, facing tick, label and (when

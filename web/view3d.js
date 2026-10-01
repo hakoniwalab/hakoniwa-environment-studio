@@ -45,12 +45,77 @@ export class View3D {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.02; // stay above the ground
+    // Which way the view looks: a compass that turns with the camera (a click
+    // turns the camera to look north), and onCamera(view) for the plan.
+    this.onCamera = null;
+    this.lastCamera = "";
+    this.compass = this.makeCompass();
+    container.append(this.compass);
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
-    this.renderer.setAnimationLoop(() => {
-      this.controls.update();
-      this.renderer.render(this.scene, this.camera);
+    this.setActive(true);
+  }
+
+  makeCompass() {
+    const ns = "http://www.w3.org/2000/svg";
+    const make = (tag, attributes) => {
+      const node = document.createElementNS(ns, tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+      return node;
+    };
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "compass";
+    button.title = "方位（赤が北）。クリックで北を奥にして見ます";
+    const icon = make("svg", { viewBox: "-20 -20 40 40", width: "44", height: "44", "aria-hidden": "true" });
+    icon.append(make("circle", { r: "19", class: "compass-dial" }));
+    this.needle = make("g", {});
+    this.needle.append(make("path", { d: "M0,-10 L4.5,0 L-4.5,0 Z", class: "compass-north" }),
+      make("path", { d: "M0,10 L4.5,0 L-4.5,0 Z", class: "compass-south" }));
+    const label = make("text", { y: "-11.5", "text-anchor": "middle", class: "compass-label" });
+    label.textContent = "N";
+    this.needle.append(label);
+    icon.append(this.needle);
+    button.append(icon);
+    button.addEventListener("click", () => this.faceNorth());
+    return button;
+  }
+
+  // Where the camera is and which way it looks, in the environment's axes
+  // (x east, y north, metres; heading counter-clockwise from east), when it moved.
+  cameraMoved() {
+    const { position, quaternion } = this.camera;
+    const target = this.controls.target;
+    const key = [position.x, position.y, position.z, target.x, target.y, target.z, this.camera.aspect]
+      .map((value) => value.toFixed(3)).join(",");
+    if (key === this.lastCamera) return;
+    this.lastCamera = key;
+    // The compass: where north (glTF -z) from the target appears on the screen.
+    const from = target.clone().project(this.camera);
+    const to = target.clone().add(new THREE.Vector3(0, 0, -1)).project(this.camera);
+    const screen = Math.atan2(to.x - from.x, to.y - from.y) * 180 / Math.PI; // clockwise from up
+    if (Number.isFinite(screen)) this.needle.setAttribute("transform", `rotate(${screen.toFixed(1)})`);
+    if (!this.onCamera) return;
+    // Its heading: the way it looks, or, looking straight down, the screen's up.
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
+    const flat = Math.hypot(forward.x, forward.z) > 0.2 ? forward : up;
+    const horizontalFov = 2 * Math.atan(Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.aspect);
+    this.onCamera({
+      x: position.x, y: -position.z,
+      heading_deg: (Math.atan2(-flat.z, flat.x) * 180) / Math.PI,
+      fov_deg: (horizontalFov * 180) / Math.PI,
+      target: { x: target.x, y: -target.z },
+      looking_down: flat === up,
     });
+  }
+
+  // Look north (from the south of the point looked at), keeping the distance and the height.
+  faceNorth() {
+    const target = this.controls.target;
+    const offset = this.camera.position.clone().sub(target);
+    const flat = Math.hypot(offset.x, offset.z);
+    this.look(new THREE.Vector3(target.x, this.camera.position.y, target.z + Math.max(flat, 0.01)), target.clone());
   }
 
   resize() {
@@ -109,6 +174,7 @@ export class View3D {
   setActive(active) {
     this.renderer.setAnimationLoop(active ? () => {
       this.controls.update();
+      this.cameraMoved();
       this.renderer.render(this.scene, this.camera);
     } : null);
   }

@@ -258,6 +258,8 @@ function setViewMode(mode) {
   }
   $("#views").className = `views mode-${mode}`;
   state.view3d?.setActive(mode !== "plan");
+  if (mode !== "split") state.plan.setCamera(null);
+  else if (state.view3d) state.view3d.lastCamera = "";  // tell the plan again
   if (mode !== "plan") ensure3d();
   schedulePreview();
 }
@@ -268,6 +270,8 @@ async function ensure3d() {
   try {
     const { View3D } = await import("./view3d.js");
     state.view3d = new View3D(host);
+    // Side by side, the plan shows where the 3D camera is and what it sees.
+    state.view3d.onCamera = (camera) => state.plan.setCamera(viewMode() === "split" ? camera : null);
     host.querySelector(".view3d-message")?.remove();
     schedulePreview(0);
   } catch (error) {

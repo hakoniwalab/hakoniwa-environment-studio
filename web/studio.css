@@ -152,3 +152,15 @@ textarea.points { width: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, Menl
 .list li.recipe-row button.delete { width: 28px; padding: 0; justify-content: center; color: var(--danger); border-color: var(--border); }
 .list li.recipe-row button.delete:hover { border-color: var(--danger); }
 .stale-banner { padding: 8px 20px; background: #fff0ee; color: #9b2c24; border-bottom: 1px solid #e8b4ae; font-weight: 600; }
+/* The 3D camera on the plan (side by side), and the 3D view's compass. */
+.plan .camera-wedge { fill: #e0782a; fill-opacity: 0.1; stroke: #e0782a; stroke-opacity: 0.8; }
+.plan .camera-eye { fill: #e0782a; stroke: #fff; }
+.plan .camera-target { fill: #e0782a; }
+.plan .camera-ring { fill: none; stroke: #e0782a; }
+.plan .camera-ray { stroke: #e0782a; }
+.compass { position: absolute; top: 8px; right: 8px; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; }
+.compass:hover .compass-dial { fill-opacity: 1; }
+.compass-dial { fill: #ffffff; fill-opacity: 0.85; stroke: #5d6879; stroke-width: 1; }
+.compass-north { fill: #d23f31; }
+.compass-south { fill: #9aa3ad; }
+.compass-label { font: 700 8px system-ui, sans-serif; fill: #d23f31; }
