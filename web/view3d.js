@@ -50,8 +50,7 @@ export class View3D {
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.02; // stay above the ground
     // Which way the view looks: a compass that turns with the camera (a click
-    // turns the camera to look north), and onCamera(view) for the plan.
-    this.onCamera = null;
+    // turns the camera to look north).
     this.lastCamera = "";
     this.compass = this.makeCompass();
     container.append(this.compass);
@@ -99,33 +98,19 @@ export class View3D {
     return button;
   }
 
-  // Where the camera is and which way it looks, in the environment's axes
-  // (x east, y north, metres; heading counter-clockwise from east), when it moved.
+  // Turn the compass when the camera moved: to where north (glTF -z) from
+  // the point looked at appears on the screen (right looking down too).
   cameraMoved() {
-    const { position, quaternion } = this.camera;
+    const { position } = this.camera;
     const target = this.controls.target;
     const key = [position.x, position.y, position.z, target.x, target.y, target.z, this.camera.aspect]
       .map((value) => value.toFixed(3)).join(",");
     if (key === this.lastCamera) return;
     this.lastCamera = key;
-    // The compass: where north (glTF -z) from the target appears on the screen.
     const from = target.clone().project(this.camera);
     const to = target.clone().add(new THREE.Vector3(0, 0, -1)).project(this.camera);
     const screen = Math.atan2(to.x - from.x, to.y - from.y) * 180 / Math.PI; // clockwise from up
     if (Number.isFinite(screen)) this.needle.setAttribute("transform", `rotate(${screen.toFixed(1)})`);
-    if (!this.onCamera) return;
-    // Its heading: the way it looks, or, looking straight down, the screen's up.
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
-    const flat = Math.hypot(forward.x, forward.z) > 0.2 ? forward : up;
-    const horizontalFov = 2 * Math.atan(Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.aspect);
-    this.onCamera({
-      x: position.x, y: -position.z,
-      heading_deg: (Math.atan2(-flat.z, flat.x) * 180) / Math.PI,
-      fov_deg: (horizontalFov * 180) / Math.PI,
-      target: { x: target.x, y: -target.z },
-      looking_down: flat === up,
-    });
   }
 
   // The id of the part nearest the camera under a pointer event, or null
