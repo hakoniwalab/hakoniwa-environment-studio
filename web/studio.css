@@ -171,3 +171,7 @@ button.attention { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, t
 .search { width: 100%; margin: 6px 0; }
 .catalog-heading { list-style: none; margin: 8px 0 2px; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
 .catalog .thumbnail { flex: none; width: 48px; height: 36px; object-fit: contain; border-radius: 4px; background: var(--plan-bg); }
+.my-items { margin-top: 10px; font-size: 13px; }
+.my-items summary { cursor: pointer; color: var(--muted); }
+.my-item { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.my-item button { padding: 2px 8px; font-size: 12px; }

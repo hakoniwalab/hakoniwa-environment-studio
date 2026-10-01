@@ -89,6 +89,8 @@ def inspect(center: tuple[float, float], half: tuple[float, float], client=None)
     cities = {item["city_code"]: {"city_code": item["city_code"], "city": item["city_name"], "year": item["year"],
                                   "spec": item.get("spec")} for item in unique.values()}
     missing = [name for name in REQUIRED if capabilities[name]["dataset_status"] != "available"]
+    # Where the buildings are (terrain and road files reach beyond the area): the City World's name.
+    building_cities = list(dict.fromkeys(item["city_name"] for item in selected["building"]))
     return {
         "status": "unavailable" if missing else "available",
         "reason": "required PLATEAU components are unavailable: " + ", ".join(missing) if missing else None,
@@ -98,6 +100,7 @@ def inspect(center: tuple[float, float], half: tuple[float, float], client=None)
         "query_meshes": query_meshes,
         "capabilities": capabilities,
         "municipalities": [cities[code] for code in sorted(cities)],
+        "building_municipalities": building_cities,
         "source_file_count": len(unique),
         "estimated_download_bytes": sum(int(item.get("file_size", 0)) for item in unique.values()),
     }

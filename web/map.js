@@ -308,7 +308,7 @@ async function init() {
     const size = numeric("eastWest") === numeric("northSouth") ? `${span(numeric("eastWest"))} m 四方`
       : `${span(numeric("eastWest"))} × ${span(numeric("northSouth"))} m`;
     const body = { selection: selection(), source: "osm", map_data: $("#source").value,
-      name: `OpenStreetMap（${numeric("latitude").toFixed(3)}, ${numeric("longitude").toFixed(3)}）付近（${size}）` };
+      name: `OpenStreetMap（${numeric("latitude").toFixed(3)}, ${numeric("longitude").toFixed(3)}） 付近（${size}）` };
     if (body.map_data === "geojson") {
       const file = $("#geojson").files[0];
       if (!file) { setStatus("GeoJSON ファイルを選んでください", "error"); return; }

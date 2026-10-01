@@ -164,6 +164,26 @@ class RegisterBuildingTest(unittest.TestCase):
         with self.assertRaisesRegex(env_catalog_items.RegisterError, "PNG"):
             env_catalog_items.register(self.city, "b1", "x", item_id="other", catalog=self.catalog, thumbnail_png=b"GIF89a")
 
+    def test_a_registered_building_is_renamed_drawn_and_deleted(self):
+        item = env_catalog_items.register(self.city, "b1", "ビル", catalog=self.catalog)["item"]
+        env_catalog_items.rename_item(item["id"], "茅場町のビル", catalog=self.catalog)
+        env_catalog_items.set_thumbnail(item["id"], b"\x89PNG\r\n\x1a\n", catalog=self.catalog)
+        loaded = env_schema.load_catalog(self.catalog).items[item["id"]]
+        self.assertEqual(loaded.name, "茅場町のビル")
+        self.assertTrue(loaded.thumbnail)
+        # An environment of this Catalog that places it: not deleted.
+        recipes = self.dir / "saved"
+        recipes.mkdir()
+        (recipes / "field.yaml").write_text(yaml.safe_dump({"catalog": str(self.catalog), "objects": [
+            {"id": "copy", "item": item["id"]}]}), encoding="utf-8")
+        with self.assertRaisesRegex(env_catalog_items.RegisterError, "field"):
+            env_catalog_items.delete_item(item["id"], recipes, self.dir / "trash", catalog=self.catalog)
+        (recipes / "field.yaml").unlink()
+        result = env_catalog_items.delete_item(item["id"], recipes, self.dir / "trash", catalog=self.catalog)
+        self.assertNotIn(item["id"], env_schema.load_catalog(self.catalog).items)
+        self.assertEqual(sorted(path.name for path in Path(result["trash"]).iterdir()),
+                         sorted(["item.yaml", f"{item['id']}.glb", f"{item['id']}.xml", f"{item['id']}.png"]))
+
     def test_only_a_building_is_registered(self):
         with self.assertRaisesRegex(env_catalog_items.RegisterError, "not an object"):
             env_catalog_items.register(self.city, "nothing", "x", catalog=self.catalog)

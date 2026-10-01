@@ -584,6 +584,41 @@ def _size(path: Path) -> int:
     return path.stat().st_size if path.is_file() else 0
 
 
+def size_text(selection: dict | None) -> str:
+    """"300 m 四方" or "400 × 300 m" of a selection (as the map page writes it)."""
+    try:
+        ew, ns = (float(selection["half_extent_m"][key]) * 2 for key in ("east_west", "north_south"))
+    except (KeyError, TypeError, ValueError):
+        return ""
+    return f"{round(ew)} m 四方" if abs(ew - ns) < 1e-6 else f"{round(ew)} × {round(ns)} m"
+
+
+def display_title(job: Path, record: dict) -> str:
+    """A City World's name for people: the one it was generated with, else
+    (one generated before names) its municipalities from the download record,
+    or OpenStreetMap and its centre, with its size."""
+    name = record.get("name")
+    if name and name != job.name:
+        return str(name)
+    request = record.get("request", {})
+    selection = request.get("selection")
+    size = size_text(selection)
+    if request.get("source") == "osm":
+        try:
+            centre = selection["center"]
+            place = f"OpenStreetMap（{float(centre['latitude']):.3f}, {float(centre['longitude']):.3f}）"
+        except (KeyError, TypeError, ValueError):
+            place = "OpenStreetMap"
+    else:
+        files = [item for item in _read_json(job / "build" / "download-manifest.json").get("files", [])
+                 if isinstance(item, dict) and item.get("city_name")]
+        # Where its buildings are (terrain and road files reach beyond the area).
+        buildings = [item for item in files if item.get("feature_type") == "bldg"] or files
+        cities = list(dict.fromkeys(str(item["city_name"]) for item in buildings))
+        place = "・".join(cities) or job.name
+    return f"{place} 付近（{size}）" if size else place
+
+
 def list_jobs() -> list[dict]:
     """The City Worlds this Studio built (city-worlds/<id>/ with a World and its
     viewer files), newest first, with what the Web UI's result list shows."""
@@ -598,7 +633,7 @@ def list_jobs() -> list[dict]:
         options = build_options(request.get("options")) if isinstance(request.get("options"), dict) else {}
         artifact = artifact_path(job)
         jobs.append({
-            "job_id": job.name, "title": record.get("name") or job.name, "path": str(job), "build": str(job / "build"),
+            "job_id": job.name, "title": display_title(job, record), "path": str(job), "build": str(job / "build"),
             "source": request.get("source") or "plateau",
             "selection": request.get("selection"),
             "building_physics_level": options.get("building_physics_level"),

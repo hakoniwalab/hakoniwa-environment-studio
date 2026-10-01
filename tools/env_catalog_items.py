@@ -248,3 +248,81 @@ def _included_ids(path: Path, data: dict) -> set[str]:
         except Exception:  # noqa: BLE001 - an unreadable include is reported when the Catalog is parsed
             continue
     return ids
+
+
+# --- Looking after the registered buildings ------------------------------------------
+
+def _entry(path: Path, item_id: str) -> tuple[dict, dict]:
+    """(the Catalog's data, the item's entry) of one of the user's items."""
+    if not path.is_file():
+        raise RegisterError("マイカタログはまだありません")
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    entry = next((item for item in data.get("items", []) if item.get("id") == item_id), None)
+    if entry is None:
+        raise RegisterError(f"マイカタログに {item_id} はありません")
+    return data, entry
+
+
+def rename_item(item_id: str, name: str, catalog: Path | None = None) -> dict:
+    path = catalog or catalog_path()
+    name = (name or "").strip()
+    if not name:
+        raise RegisterError("名前を入れてください")
+    data, entry = _entry(path, item_id)
+    entry["name"] = name
+    env_schema.save_yaml(data, path)
+    return {"item": entry}
+
+
+def set_thumbnail(item_id: str, png: bytes, catalog: Path | None = None) -> dict:
+    """The item's picture (made by the page from its look) replaced."""
+    path = catalog or catalog_path()
+    if not png or not png.startswith(b"\x89PNG"):
+        raise RegisterError("the picture is not a PNG")
+    data, entry = _entry(path, item_id)
+    assets = path.parent / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / f"{item_id}.png").write_bytes(png)
+    entry["thumbnail"] = f"assets/{item_id}.png"
+    env_schema.save_yaml(data, path)
+    return {"item": entry}
+
+
+def item_users(item_id: str, recipes: Path, catalog: Path | None = None) -> list[str]:
+    """The saved environments (recipes/*.yaml) of this Catalog that place the item."""
+    path = (catalog or catalog_path()).resolve()
+    users = []
+    for recipe in sorted(recipes.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(recipe.read_text(encoding="utf-8")) or {}
+            if (recipe.parent / str(data.get("catalog", ""))).resolve() != path:
+                continue
+        except (OSError, yaml.YAMLError):
+            continue
+        if any(isinstance(obj, dict) and obj.get("item") == item_id for obj in data.get("objects", [])):
+            users.append(recipe.stem)
+    return users
+
+
+def delete_item(item_id: str, recipes: Path, trash: Path, catalog: Path | None = None) -> dict:
+    """Take the item out of the Catalog, its files and its entry moved to
+    <trash>/<time>-catalog-<id>/ (nothing is erased). Refused while a saved
+    environment places it."""
+    import shutil
+    import time
+
+    path = catalog or catalog_path()
+    data, entry = _entry(path, item_id)
+    users = item_users(item_id, recipes, path)
+    if users:
+        raise RegisterError(f"{entry.get('name', item_id)} は {', '.join(users)} で使っているので削除できません（先にその環境から外してください）")
+    target = trash / f"{time.strftime('%Y%m%d-%H%M%S')}-catalog-{item_id}"
+    target.mkdir(parents=True, exist_ok=False)
+    for suffix in (".glb", ".xml", ".png"):
+        source = path.parent / "assets" / f"{item_id}{suffix}"
+        if source.exists():
+            shutil.move(str(source), str(target / source.name))
+    (target / "item.yaml").write_text(yaml.safe_dump(entry, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    data["items"] = [item for item in data["items"] if item.get("id") != item_id]
+    env_schema.save_yaml(data, path)
+    return {"deleted": item_id, "trash": str(target)}

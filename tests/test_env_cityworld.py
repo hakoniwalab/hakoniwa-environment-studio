@@ -188,6 +188,19 @@ class CityWorldBuildTest(unittest.TestCase):
         self.assertIsNone(env_cityworld.build_failure(["ERROR: no cached catalog response"]))
         self.assertEqual([line for line in lines if env_cityworld.EXCEPTION_LINE.match(line)], [lines[2]])
 
+    def test_a_city_world_generated_before_names_gets_one(self):
+        job = self.dir / "work/city-worlds/tokyo-x"
+        (job / "build").mkdir(parents=True)
+        (job / "build/download-manifest.json").write_text(json.dumps({"files": [
+            {"feature_type": "dem", "city_name": "港区"}, {"feature_type": "bldg", "city_name": "中央区"},
+            {"feature_type": "bldg", "city_name": "中央区"}, {"feature_type": "tran", "city_name": "江東区"}]}), encoding="utf-8")
+        record = {"name": "tokyo-x", "request": {"selection": SELECTION}}
+        # The municipalities of its buildings (terrain and roads reach further), and its size.
+        self.assertEqual(env_cityworld.display_title(job, record), "中央区 付近（40 × 20 m）")
+        osm = {"name": "osm-x", "request": {"source": "osm", "selection": SELECTION}}
+        self.assertEqual(env_cityworld.display_title(job.parent / "osm-x", osm), "OpenStreetMap（43.067, 141.351） 付近（40 × 20 m）")
+        self.assertEqual(env_cityworld.display_title(job, {"name": "札幌駅前"}), "札幌駅前")
+
     def test_progress_is_a_percentage_that_does_not_go_back(self):
         lines = ["[HAKO_PROGRESS] " + json.dumps(event) for event in (
             {"phase": "building_glb"}, {"phase": "source_download", "feature": "bldg", "current": 1, "total": 2,

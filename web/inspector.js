@@ -94,6 +94,10 @@ export function createInspector(host, app) {
         class: "secondary", title: "道路網の外形を、1 本ずつ編集できる道路（面）の部品にします。envsim の見た目（地形に沿った道路）の代わりに、平らな面を地面に置きます。",
         onclick: () => app.explode(part),
       }, "個別の道路部品に分解") : null,
+      entry?.type === "city_layer" && part.source?.id !== "roads" && part.params?.visual ? el("button", {
+        class: "secondary", title: "この層（路面標示・橋など）の上面図の外形を、見た目（GLB）の塊ごとの形で作り直します。前に取り込んだ環境では、全体を囲む長方形 1 つになっています。",
+        onclick: () => app.remakeOutlines(part),
+      }, "外形を作り直す") : null,
       entry?.type === "building_footprint" && entry?.category !== "登録した建物" ? el("button", {
         class: "secondary", title: "この建物（見た目・当たり判定も）を、ほかの環境にも置ける部品としてマイカタログに登録します。",
         onclick: () => app.register(part),

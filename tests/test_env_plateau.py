@@ -56,6 +56,7 @@ class PlateauInspectionTest(unittest.TestCase):
         self.assertEqual(result["municipalities"],
                          [{"city_code": "01100", "city": "札幌市", "year": 2020, "spec": "3.5"}])
         self.assertEqual((result["source_file_count"], result["estimated_download_bytes"]), (4, 4000))
+        self.assertEqual(result["building_municipalities"], ["札幌市"])
         # The third meshes asked about, to be drawn on the map.
         self.assertEqual(result["query_meshes"], [{"code": "64414278", "bbox": {
             "west": 141.35, "south": 43.0667, "east": 141.3625, "north": 43.075}}])

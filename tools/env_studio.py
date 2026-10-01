@@ -341,6 +341,22 @@ def item_thumbnail(catalog_id: str, item_id: str) -> Path:
     return Path(item.thumbnail)
 
 
+def _my_item(action):
+    try:
+        return action()
+    except env_catalog_items.RegisterError as exc:
+        raise StudioError(str(exc), HTTPStatus.CONFLICT) from exc
+
+
+def item_visual(catalog_id: str, item_id: str) -> Path:
+    """An item's look (its GLB), for the page to draw its picture."""
+    item = env_schema.load_catalog(_catalog_path(catalog_id)).items.get(item_id)
+    visual = Path(str((item.params if item else {}).get("visual") or ""))
+    if item is None or not visual.is_absolute() or not visual.is_file():
+        raise StudioError(f"{item_id} has no look (GLB)", HTTPStatus.NOT_FOUND)
+    return visual
+
+
 def register_building(body: object) -> dict:
     """Register a building of an unsaved Recipe in the user's Catalog
     (env_catalog_items.register): its look and colliders copied beside the
@@ -361,6 +377,21 @@ def register_building(body: object) -> dict:
     except env_catalog_items.RegisterError as exc:
         raise StudioError(f"登録できません: {exc}") from exc
     return result
+
+
+def layer_outlines(body: object) -> dict:
+    """A City World layer's outlines made again from its GLB, one per piece
+    (env_citygml._glb_outlines): a layer imported with one box over all of it
+    (road markings, bridges, before) gets its real pieces. Body: an unsaved
+    Recipe and {object: id}; the page puts them in (and saves when asked)."""
+    try:
+        recipe = _recipe_from_body(body, USER_RECIPES.resolve() / "outlines.yaml")
+    except DiagnosticError as exc:
+        raise StudioError(f"外形を作れません: {exc}") from exc
+    obj = next((item for item in recipe.objects if item.id == body.get("object")), None)
+    if obj is None or obj.type != "city_layer" or obj.visual is None:
+        raise StudioError(f"{body.get('object')!r} は見た目（GLB）のある街の層ではありません", HTTPStatus.NOT_FOUND)
+    return {"object": obj.id, "outlines": env_citygml._glb_outlines(obj.visual)}
 
 
 def explode_layer(body: object) -> dict:
@@ -900,6 +931,14 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("GET", ("catalogs", "*"), lambda self, parts: self._json(catalog_json(parts[1]))),
         ("POST", ("catalogs", "my", "items"), lambda self, _: self._json(register_building(self._body()))),
         ("GET", ("catalogs", "*", "items", "*", "thumbnail"), lambda self, parts: self._file(item_thumbnail(parts[1], parts[3]))),
+        ("GET", ("catalogs", "*", "items", "*", "visual"), lambda self, parts: self._file(item_visual(parts[1], parts[3]))),
+        ("POST", ("catalogs", "my", "items", "*", "rename"), lambda self, parts: self._json(_my_item(
+            lambda: env_catalog_items.rename_item(_check_id(parts[3]), str((self._body() or {}).get("name") or ""))))),
+        ("POST", ("catalogs", "my", "items", "*", "thumbnail"), lambda self, parts: self._json(_my_item(
+            lambda: env_catalog_items.set_thumbnail(_check_id(parts[3]), _png((self._body() or {}).get("thumbnail")) or b"")))),
+        ("POST", ("catalogs", "my", "items", "*", "delete"), lambda self, parts: self._json(_my_item(
+            lambda: env_catalog_items.delete_item(_check_id(parts[3]), USER_RECIPES.resolve(),
+                                                  USER_RECIPES.resolve().parent / "trash")))),
         ("GET", ("map", "config"), lambda self, _: self._json(map_config())),
         ("POST", ("map", "import"), lambda self, _: self._json(import_map(self._body()))),
         ("GET", ("city-worlds",), lambda self, _: self._json(list_city_worlds(self._query("root")))),
@@ -928,6 +967,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("POST", ("terrain",), lambda self, _: self._json(terrain_json(self._body()))),
         ("POST", ("poses",), lambda self, _: self._json(preview_poses(self._body()))),
         ("POST", ("explode",), lambda self, _: self._json(explode_layer(self._body()))),
+        ("POST", ("layer-outlines",), lambda self, _: self._json(layer_outlines(self._body()))),
         ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body()), "model/gltf-binary")),
     )
 

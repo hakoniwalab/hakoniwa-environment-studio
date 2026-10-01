@@ -272,7 +272,8 @@ export function cityWorlds(page) {
             : capabilityReasons[capability.reason] ?? capability.reason))));
     }
     // Its name for people (the list, urban's City list): the municipalities and the size.
-    const cities = [...new Set(inspected.municipalities.map((item) => item.city))].join("・") || "PLATEAU";
+    const cities = (inspected.building_municipalities?.length ? inspected.building_municipalities
+      : [...new Set(inspected.municipalities.map((item) => item.city))]).join("・") || "PLATEAU";
     lastAvailable = available ? { request, jobId: generatedJobId(request.selection, inspected),
       title: `${cities} 付近（${sizeText(request.selection)}）` } : null;
     elements["to-osm"].hidden = available;

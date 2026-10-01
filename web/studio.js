@@ -465,7 +465,63 @@ function renderCatalogSelect() {
 
 const metres = (value) => `${Math.round(value * 100) / 100}`;
 
+// マイカタログ's registered buildings: rename, (re)draw the picture, delete.
+function renderMyItems() {
+  const mine = state.catalogId === "my"
+    ? [...catalog.items.values()].filter((item) => item.category === "登録した建物") : [];
+  $("#my-items").hidden = !mine.length;
+  $("#my-items-list").replaceChildren(...mine.map((entry) => el("li", { class: "my-item" },
+    el("span", {}, entry.name),
+    el("span", { class: "row" },
+      el("button", { class: "secondary", title: "名前を変えます", onclick: () => renameMyItem(entry) }, "名前"),
+      el("button", { class: "secondary", title: "見た目から小さな絵を作り直します", onclick: () => drawMyItem(entry) }, "絵"),
+      el("button", { class: "danger", title: "マイカタログから外します（ファイルは work/trash/ へ）", onclick: () => deleteMyItem(entry) }, "削除")))));
+}
+
+async function reloadMyCatalog(message) {
+  state.catalogs = await api("GET", "catalogs");
+  state.catalogId = null;
+  await loadCatalog("my");
+  renderCatalogSelect();
+  render();
+  if (message) setStatus(message, "ok");
+}
+
+async function renameMyItem(entry) {
+  const name = window.prompt("新しい名前", entry.name);
+  if (!name || name === entry.name) return;
+  try {
+    await api("POST", `catalogs/my/items/${encodeURIComponent(entry.id)}/rename`, { name });
+    await reloadMyCatalog(`「${name}」に変えました`);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function drawMyItem(entry) {
+  setStatus(`${entry.name} の絵を作っています…`);
+  try {
+    const { pictureOfGlb } = await import("./view3d.js");
+    const thumbnail = await pictureOfGlb(`/api/catalogs/my/items/${encodeURIComponent(entry.id)}/visual`);
+    await api("POST", `catalogs/my/items/${encodeURIComponent(entry.id)}/thumbnail`, { thumbnail });
+    await reloadMyCatalog(`${entry.name} の絵を作りました`);
+  } catch (error) {
+    setStatus(`${entry.name} の絵を作れません: ${error.message}`, "error");
+  }
+}
+
+async function deleteMyItem(entry) {
+  if (!window.confirm(`「${entry.name}」をマイカタログから外しますか？\n見た目・当たり判定・絵のファイルは work/trash/ へ移します（そこから戻せます）。`)) return;
+  try {
+    const result = await api("POST", `catalogs/my/items/${encodeURIComponent(entry.id)}/delete`, {});
+    await reloadMyCatalog(`「${entry.name}」を外しました（${result.trash}）`);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
 function renderCatalog() {
+  renderMyItems();
   const query = $("#catalog-search").value;
   const objects = [...catalog.items.values()].filter((item) => item.kind !== "terrain"
     && matches(query, item.name, item.category, item.id));
@@ -643,6 +699,20 @@ async function registerBuilding(obj) {
       : `「${item.name}」をマイカタログに登録しました。置くには、環境のカタログを「マイカタログ」にしてください`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
+  }
+}
+
+// A layer's plan outlines made again from its GLB (POST /api/layer-outlines): one per piece.
+async function remakeOutlines(obj) {
+  setStatus(`${obj.id} の外形を作り直しています…`);
+  try {
+    const { outlines } = await api("POST", "layer-outlines", { ...recipeBody(), object: obj.id });
+    obj.params = { ...obj.params, outlines };
+    await catalog.prime([obj]);
+    render();
+    setStatus(`${obj.id} の外形を ${outlines.length} 個の形にしました（保存すると残ります）`, "ok");
+  } catch (error) {
+    setStatus(`${obj.id} の外形を作り直せません: ${error.message}`, "error");
   }
 }
 
@@ -852,6 +922,7 @@ const inspector = createInspector($("#inspector"), {
   remove: () => deleteSelected(),
   explode: (obj) => explodeLayer(obj),
   register: (obj) => registerBuilding(obj),
+  remakeOutlines: (obj) => remakeOutlines(obj),
   slide: (direction) => slideSelected(direction),
   move: (dx, dy) => moveSelected(dx, dy),
   applyPoses: (poses) => applyPoses(poses),
