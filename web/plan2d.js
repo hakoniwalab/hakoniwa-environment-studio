@@ -365,8 +365,9 @@ export class PlanView {
         return;
       }
       // Keep dragging the selected part when it is under the pointer; otherwise
-      // take the smallest part there.
-      const part = inSelection || hit;
+      // take the smallest part there. A locked layer (a City World's roads,
+      // under everything) is not kept: it would hold every click on the city.
+      const part = (inSelection && !inSelection.locked ? inSelection : null) || hit;
       this.onSelect([part.id]);
       if (part.locked) {  // a layer under everything: dragging pans instead of moving it
         this.drag = { mode: "pan", start: [event.clientX, event.clientY], view: { ...this.view } };
@@ -375,7 +376,7 @@ export class PlanView {
       this.drag = {
         mode: "move", id: part.id, offset: [part.x - x, part.y - y], moved: false, start: [event.clientX, event.clientY],
         // A click (no drag) on an already selected part goes to the next one under it.
-        next: inSelection && hits.length > 1 ? hits[(hits.indexOf(part) + 1) % hits.length].id : null,
+        next: part === inSelection && hits.length > 1 ? hits[(hits.indexOf(part) + 1) % hits.length].id : null,
       };
       return;
     }
