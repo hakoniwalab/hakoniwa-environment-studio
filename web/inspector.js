@@ -78,7 +78,7 @@ export function createInspector(host, app) {
         value: part.id,
         onchange: (event) => app.rename(part, event.target.value.trim()),
       })),
-      el("p", { class: "meta" }, `${entry?.name || part.item}（${entry?.category || ""}・${part.item}）`),
+      el("p", { class: "meta", title: entry?.description || "" }, partName(entry, part)),
       sourceLine(entry),
       objectSource(part),
       el("div", { class: "grid2" },
@@ -279,10 +279,17 @@ export function createInspector(host, app) {
       : "envsim の原本（見た目・当たり判定）を、そのままの位置・形で使っています。");
   }
 
-  // What the item is and where it comes from.
+  // The part's name, with its category when the name does not already say it.
+  function partName(entry, part) {
+    const name = entry?.name || part.item;
+    const category = entry?.category || "";
+    return category && !name.includes(category.split("（")[0]) ? `${name}（${category}）` : name;
+  }
+
+  // Where the item comes from (what it is: the name's tooltip).
   function sourceLine(entry) {
     const source = entry?.source || {};
-    const bits = [entry?.description, source.note, source.url].filter(Boolean);
+    const bits = [source.note, source.url].filter(Boolean);
     return bits.length ? el("div", { class: "source" }, ...bits.map((bit) => el("div", {}, bit))) : null;
   }
 
@@ -296,11 +303,15 @@ export function createInspector(host, app) {
       : [tags.source_kind, tags.source_id];
     const osm = source.provider === "openstreetmap" && ["node", "way", "relation"].includes(kind);
     const label = source.kind === "citygml" ? `${source.provider}（CityGML ${source.id}）` : `${source.provider} ${source.kind}/${source.id}`;
-    const text = Object.entries(tags).map(([key, value]) => `${key}=${value}`).join("、");
+    const entries = Object.entries(tags);
+    const name = tags.name || tags["osm:name"];
     return el("div", { class: "source" }, "出典：", label,
       osm ? el("span", {}, "・", el("a", { href: `https://www.openstreetmap.org/${kind}/${id}`, target: "_blank", rel: "noopener" },
         `OpenStreetMap ${kind}/${id}`)) : null,
-      text ? el("div", {}, text) : null);
+      name ? el("div", {}, `名前：${name}`) : null,
+      // The source's own attributes, as they are: folded (they are for checking, not for reading).
+      entries.length ? el("details", {}, el("summary", {}, `元データの属性（${entries.length} 件）`),
+        ...entries.map(([key, value]) => el("div", {}, `${key}=${value}`))) : null);
   }
 
   // Values the item assumes (not in its source), unless this part sets them itself.

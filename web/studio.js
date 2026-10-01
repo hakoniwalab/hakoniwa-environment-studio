@@ -117,6 +117,13 @@ function recipeBody() {
 
 // live: while a slider is being dragged, update the plan and the 3D view but
 // leave the panels (and the slider in them) alone.
+// Unsaved changes: a mark beside the name, and the save button stands out.
+function renderDirty() {
+  const dirty = Boolean(isDirty());
+  $("#dirty").hidden = !dirty;
+  $("#save").classList.toggle("attention", dirty);
+}
+
 function render({ live = false } = {}) {
   const current = state.current;
   if (!current) return; // shapes can arrive before the first Recipe is open
@@ -151,6 +158,7 @@ function render({ live = false } = {}) {
     renderRecipeList();
   }
   state.view3d?.setSelected(state.selection);
+  renderDirty();
   followPoses();
   schedulePreview();
   if (!live && !inspector.sliding && !state.plan.drag) checkpoint();
@@ -229,7 +237,7 @@ function onPaste(event) {
     return;
   }
   if (data.catalog_id !== state.catalogId) {
-    setStatus("コピーした部品は別の Catalog の品目です。同じ Catalog の環境に貼り付けてください。", "error");
+    setStatus("コピーした部品は別のカタログの部品です。同じカタログの環境に貼り付けてください。", "error");
     return;
   }
   state.lastPaste = { text, count: state.lastPaste.text === text ? state.lastPaste.count + 1 : 1 };
@@ -438,7 +446,7 @@ async function switchCatalog(id) {
       .filter((item) => item && !ids.has(item));
     if (missing.length) {
       $("#catalog-select").value = state.catalogId;
-      setStatus(`この環境の部品（${missing.slice(0, 3).join("、")}${missing.length > 3 ? " ほか" : ""}）が「${other.name}」にないので、Catalog を変えられません`, "error");
+      setStatus(`この環境の部品（${missing.slice(0, 3).join("、")}${missing.length > 3 ? " ほか" : ""}）が「${other.name}」にないので、カタログを変えられません`, "error");
       return;
     }
   }
@@ -601,7 +609,7 @@ async function registerBuilding(obj) {
     renderCatalogSelect();
     setStatus(state.catalogId === "my"
       ? `「${item.name}」をマイカタログに登録しました（部品一覧の「${item.category}」）`
-      : `「${item.name}」をマイカタログに登録しました。置くには、環境の Catalog を「マイカタログ」にしてください`, "ok");
+      : `「${item.name}」をマイカタログに登録しました。置くには、環境のカタログを「マイカタログ」にしてください`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }

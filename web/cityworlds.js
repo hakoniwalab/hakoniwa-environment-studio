@@ -12,40 +12,45 @@
 import { $, api, el } from "./dom.js";
 
 const capabilityLabels = {
-  building: "Building", terrain: "Terrain", road: "Road",
-  road_markings: "Road markings", bridge: "Bridge",
+  building: "建物", terrain: "地形（DEM）", road: "道路",
+  road_markings: "路面標示", bridge: "橋",
+};
+// The catalog's reasons (the Business Pack inspection's words) in the page's.
+const capabilityReasons = {
+  "dataset is not available in the selected bbox": "この範囲にはデータがありません",
+  "LOD3 geometry required by the current generator is not available": "LOD3 が無いので使いません（LOD3 だけを使います）",
 };
 const progressPhaseLabels = {
-  source_download: "PLATEAUソース",
-  geometry_extract: "建物形状抽出",
-  geometry_extract_files: "建物形状抽出",
-  building_collision: "建物Collider",
+  source_download: "データの取得",
+  geometry_extract: "建物の形",
+  geometry_extract_files: "建物の形",
+  building_collision: "建物の当たり判定",
   terrain: "地形",
-  terrain_extract: "DEM抽出",
-  terrain_gap_fill: "DEM欠損補間",
-  building_mjcf: "建物Physics",
-  building_physics_surfaces: "建物Physics面変換",
-  building_physics_exact_reduction: "建物Collider厳密統合",
-  building_physics_exact_groups: "建物Collider厳密統合",
-  building_physics_tolerant_reduction: "建物Collider 5cm許容統合",
-  building_physics_tolerant_groups: "建物Collider 5cm許容統合",
-  building_physics_assemble: "建物Physics構築",
-  building_physics_write: "建物Physics書出し",
-  building_visual: "建物Visual",
-  texture_download: "建物テクスチャ",
-  building_glb: "建物GLB",
-  building_glb_textures: "建物GLBテクスチャ処理",
-  building_glb_batches: "建物GLB構築",
-  building_glb_export: "建物GLB書出し",
-  roads: "道路Visual",
-  road_markings: "LOD3路面標示",
-  bridges_visual: "橋梁Visual",
-  bridges_physics: "橋梁Physics",
-  compose: "City World統合",
-  dataset_validation: "Capability検証",
-  world_generated: "生成完了確認",
-  collider_visualization: "Collider表示生成",
-  packaging: "検証・ZIP作成",
+  terrain_extract: "地形（DEM）",
+  terrain_gap_fill: "地形の欠けの補間",
+  building_mjcf: "建物の当たり判定",
+  building_physics_surfaces: "建物の当たり判定",
+  building_physics_exact_reduction: "当たり判定をまとめる",
+  building_physics_exact_groups: "当たり判定をまとめる",
+  building_physics_tolerant_reduction: "当たり判定をまとめる（5 cm）",
+  building_physics_tolerant_groups: "当たり判定をまとめる（5 cm）",
+  building_physics_assemble: "建物の当たり判定",
+  building_physics_write: "建物の当たり判定",
+  building_visual: "建物の見た目",
+  texture_download: "建物のテクスチャ",
+  building_glb: "建物の見た目",
+  building_glb_textures: "建物のテクスチャ",
+  building_glb_batches: "建物の見た目",
+  building_glb_export: "建物の見た目",
+  roads: "道路の見た目",
+  road_markings: "路面標示（LOD3）",
+  bridges_visual: "橋の見た目",
+  bridges_physics: "橋の当たり判定",
+  compose: "City World の組み立て",
+  dataset_validation: "データの検証",
+  world_generated: "できあがりの確認",
+  collider_visualization: "当たり判定の表示",
+  packaging: "ZIP の作成",
 };
 const LARGE_VISUAL_PREVIEW_BYTES = 256 * 1024 * 1024;
 const prefectureSlugs = {
@@ -79,6 +84,19 @@ function progressText(progress) {
   return `${progress.percent}% — ${heading}${progress.message}`;
 }
 
+// What a download will be: unknown when the catalog gives no sizes (it answers 0).
+function downloadSize(bytes) {
+  return bytes > 0 ? `約 ${formatBytes(bytes)}` : "サイズ不明";
+}
+
+const COMPONENT_NAMES = { buildings: "建物", terrain: "地形", roads: "道路", road_markings: "路面標示", bridges: "橋" };
+
+// Lines of a failure, folded under 詳細 (the log is for when it is needed).
+function details(lines, log) {
+  return el("details", { class: "failure-details" }, el("summary", {}, "詳細"),
+    ...lines.map((line) => el("div", {}, line)), log ? el("div", { class: "mono" }, `ログ：${log}`) : null);
+}
+
 function formatBytes(value) {
   if (value < 1000) return `${value} B`;
   if (value < 1_000_000) return `${(value / 1000).toFixed(1)} KB`;
@@ -86,9 +104,9 @@ function formatBytes(value) {
 }
 
 function capabilityPresentation(capability) {
-  if (capability.dataset_status !== "available") return { style: "unavailable", symbol: "—", title: "Not available" };
-  if (capability.generation_status !== "candidate") return { style: "limited", symbol: "△", title: "Limited" };
-  return { style: "candidate", symbol: "✓", title: "Available" };
+  if (capability.dataset_status !== "available") return { style: "unavailable", symbol: "—", title: "なし" };
+  if (capability.generation_status !== "candidate") return { style: "limited", symbol: "△", title: "あるが使わない" };
+  return { style: "candidate", symbol: "✓", title: "あり" };
 }
 
 function disposeObject(root) {
@@ -232,13 +250,13 @@ export function cityWorlds(page) {
     const available = inspected.status === "available" || flatGround;
     elements.overall.className = available ? "available" : "unavailable";
     if (inspected.status === "available") {
-      elements.overall.textContent = `生成候補あり — ${inspected.source_file_count} files / 約${(inspected.estimated_download_bytes / 1_000_000).toFixed(1)} MB / DEM未被覆: ${constant ? "標高0 mで補完" : "厳密停止"}`;
+      elements.overall.textContent = `生成できます — ${inspected.source_file_count} ファイル・${downloadSize(inspected.estimated_download_bytes)}・地形（DEM）が無い所：${constant ? "標高 0 m で埋める" : "止める"}`;
     } else if (flatGround) {
-      elements.overall.textContent = `生成候補あり（DEMなし：地面は標高0 mの平面） — ${inspected.source_file_count} files / 約${(inspected.estimated_download_bytes / 1_000_000).toFixed(1)} MB`;
+      elements.overall.textContent = `生成できます（地形 DEM なし：地面は標高 0 m の平面） — ${inspected.source_file_count} ファイル・${downloadSize(inspected.estimated_download_bytes)}`;
     } else if (inspected.flat_ground_possible) {
-      elements.overall.textContent = `生成不可 — ${inspected.reason}（DEM未被覆領域を「標高0 mで補完」にすると、平らな地面で生成できます）`;
+      elements.overall.textContent = "生成できません — この範囲には PLATEAU の地形（DEM）がありません。「地形（DEM）が無い所」を「標高 0 m で埋める」にして診断し直すと、平らな地面で生成できます。";
     } else {
-      elements.overall.textContent = `生成不可 — ${inspected.reason}`;
+      elements.overall.textContent = `生成できません — この範囲には PLATEAU の${inspected.missing.map((name) => capabilityLabels[name] || name).join("・")}がありません。`;
     }
     elements.municipality.textContent = inspected.municipalities.length
       ? inspected.municipalities.map((item) => `${item.city} (${item.year}, spec ${item.spec})`).join(" / ") : "";
@@ -249,10 +267,10 @@ export function cityWorlds(page) {
       elements.capabilities.append(el("div", { class: `capability ${view.style}` },
         el("div", { class: "symbol" }, view.symbol),
         el("div", {},
-          el("strong", {}, `${label}: ${view.title}`),
+          el("strong", {}, `${label}：${view.title}`),
           el("small", {}, capability.dataset_status === "available"
-            ? `max LOD ${capability.max_lod} / ${capability.source_file_count} files${capability.reason ? ` / ${capability.reason}` : ""}`
-            : capability.reason))));
+            ? `最大 LOD${capability.max_lod}・${capability.source_file_count} ファイル${capability.reason ? `・${capabilityReasons[capability.reason] ?? capability.reason}` : ""}`
+            : capabilityReasons[capability.reason] ?? capability.reason))));
     }
     lastAvailable = available ? { request, jobId: generatedJobId(request.selection, inspected) } : null;
     elements["to-osm"].hidden = available;
@@ -322,29 +340,28 @@ export function cityWorlds(page) {
         writeLog({ type: "BUILD_FINISHED", status: { ...status, log_tail: undefined } });
         if (status.state === "done") {
           ui.status.className = "generation ready";
-          ui.status.textContent = `Generate成功 — ${id}`;
+          ui.status.textContent = `生成しました — ${id}`;
           await afterGenerated(id, status.build);
           await refreshGeneratedJobs(id);
         } else if (status.state === "canceled") {
           ui.status.className = "generation canceled";
-          ui.status.textContent = "Generateをキャンセルしました。";
+          ui.status.textContent = "生成をキャンセルしました。";
         } else {
           ui.status.className = "generation failed";
           if (status.failure?.code === "DEM_UNCOVERED") {
             ui.status.replaceChildren(el("div", {}, `地形生成を停止しました — DEM が範囲の一部（${status.failure.uncovered_samples} 点：川や海の上など）を覆っていません。`
-              + "生成条件の「DEM未被覆領域」を「標高0 mで補完（水面向け）」にして、もう一度診断・生成してください。"),
-              el("div", {}, `（ログ：${status.log}）`));
+              + "生成条件の「地形（DEM）が無い所」を「標高 0 m で埋める（水面向け）」にして、もう一度診断・生成してください。"),
+              details([], status.log));
           } else {
             const lines = status.errors.length ? status.errors : status.log_tail.slice(-5);
-            ui.status.replaceChildren(el("div", {}, `Generate失敗 — ${id}（ログ：${status.log}）`),
-              ...lines.map((line) => el("div", {}, line)));
+            ui.status.replaceChildren(el("div", {}, `生成できませんでした — ${id}`), details(lines, status.log));
           }
         }
         break;
       }
     } catch (error) {
       ui.status.className = "generation failed";
-      ui.status.textContent = `Generateの状態を取得できません — ${error.message}`;
+      ui.status.textContent = `生成の状態を取得できません — ${error.message}`;
     } finally {
       saveRunning(null);
       generating = false;
@@ -361,13 +378,13 @@ export function cityWorlds(page) {
     if (generating) return;
     const ui = controls[mode];
     ui.status.className = "generation running";
-    ui.status.textContent = mode === "osm" ? "OpenStreetMap から地図データを取得しています…" : "Generateを送信しています";
+    ui.status.textContent = mode === "osm" ? "OpenStreetMap から地図データを取得しています…" : "生成を始めています…";
     ui.generate.disabled = true;
     try {
       await call("POST", "city-worlds/build", { id, name: id, ...body, overwrite: true });
     } catch (error) {
       ui.status.className = "generation failed";
-      ui.status.textContent = `Generate失敗 — ${error.message}`;
+      ui.status.textContent = `生成できませんでした — ${error.message}`;
       refresh();
       return;
     }
@@ -449,22 +466,20 @@ export function cityWorlds(page) {
     }
     elements["artifact-path"].textContent = job === null ? "—" : `${job.path}/`;
     const componentCounts = job?.colliders?.by_component ?? {};
-    const componentText = Object.entries(componentCounts).map(([name, count]) => `${name}=${count}`).join(", ");
+    const componentText = Object.entries(componentCounts).map(([name, count]) => `${COMPONENT_NAMES[name] || name} ${count}`).join("・");
     const classCounts = job?.colliders?.by_physics_class ?? {};
-    const classText = ["P0", "P1", "P2", "P3"].map((name) => `${name}=${classCounts[name] ?? 0}`).join(", ");
+    const classText = ["P0", "P1", "P2", "P3"].map((name) => `${name} ${classCounts[name] ?? 0}`).join("・");
     const geomTypes = job?.colliders?.building_by_geom_type;
     elements["artifact-detail"].textContent = job === null
-      ? "Physics Level: — / Collider: —"
+      ? "—"
       : [
-        `Source: ${job.source === "osm" ? "OpenStreetMap（地面は標高0 mの平面）" : "PLATEAU"}`,
-        `Physics Level: ${job.building_physics_level ?? "不明"}`,
-        `Collider reduction: ${job.building_collider_reduction ?? "safe"}`,
-        `Collider total: ${job.colliders?.total ?? "不明"} geoms`,
-        `Preview files: Visual=${formatBytes(job.visual_size_bytes ?? 0)}, Collider=${formatBytes(job.collider_size_bytes ?? 0)}`,
-        job.visual_size_bytes > LARGE_VISUAL_PREVIEW_BYTES ? "Visualは大容量のため、3D表示はColliderを既定にしています。" : null,
-        componentText ? `Components: ${componentText}` : null,
-        job.colliders?.by_physics_class ? `Building allocation: ${classText}` : null,
-        geomTypes ? `Building geom types: box=${geomTypes.box}, mesh=${geomTypes.mesh}` : null,
+        `データ：${job.source === "osm" ? "OpenStreetMap（地面は標高 0 m の平面）" : "PLATEAU"}`,
+        `建物の当たり判定の細かさ：${job.building_physics_level ?? "不明"}（減らし方 ${job.building_collider_reduction ?? "safe"}）`,
+        `当たり判定：${job.colliders?.total ?? "不明"} 個${componentText ? `（${componentText}）` : ""}`,
+        job.colliders?.by_physics_class ? `建物の内訳：${classText}` : null,
+        geomTypes ? `建物の形：箱 ${geomTypes.box}・メッシュ ${geomTypes.mesh}` : null,
+        `3D 表示のファイル：見た目 ${formatBytes(job.visual_size_bytes ?? 0)}・当たり判定 ${formatBytes(job.collider_size_bytes ?? 0)}`,
+        job.visual_size_bytes > LARGE_VISUAL_PREVIEW_BYTES ? "見た目が大きいので、3D は当たり判定だけを表示します（見た目も選べます）。" : null,
         job.exported ? `書き出し済み: ${job.exported.id}` : null,
       ].filter(Boolean).join("\n");
     if (restoreSelection) applyGeneratedSelection(job);
@@ -476,8 +491,8 @@ export function cityWorlds(page) {
       generatedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
       const cache = payload.shared_cache;
       elements["cache-info"].textContent = cache
-        ? `共有キャッシュ: ${cache.path}/ (${cache.object_count} files / ${formatBytes(cache.size_bytes)})`
-        : "共有キャッシュ: —";
+        ? `共有キャッシュ：${cache.object_count} ファイル・${formatBytes(cache.size_bytes)}（${cache.path}）`
+        : "共有キャッシュ：—";
       const previous = elements["artifact-select"].value;
       elements["artifact-select"].replaceChildren();
       if (generatedJobs.length === 0) {
@@ -496,7 +511,7 @@ export function cityWorlds(page) {
       updateArtifactSelection({ restoreSelection });
     } catch (error) {
       generatedJobs = [];
-      elements["cache-info"].textContent = "共有キャッシュ: 取得できません";
+      elements["cache-info"].textContent = "共有キャッシュ：取得できません";
       elements["artifact-select"].replaceChildren(new Option("生成履歴を取得できません", ""));
       elements["artifact-select"].disabled = true;
       updateArtifactSelection();
@@ -524,7 +539,7 @@ export function cityWorlds(page) {
     const job = selectedGeneratedJob();
     if (job === null) return;
     if (!window.confirm(`生成結果 ${job.job_id} を削除しますか？\n`
-      + "サーバー上のjobディレクトリ（ZIP・GLB・MJCF・中間生成物）を削除します。\n"
+      + "その City World のフォルダ（ZIP・見た目・当たり判定・途中のファイル）を削除します。\n"
       + "共有CityGMLキャッシュは削除しません。")) return;
     elements["delete-artifact"].disabled = true;
     try {
@@ -532,7 +547,7 @@ export function cityWorlds(page) {
       closeViewerForJob(job.job_id);
       generatedRectangle.setStyle({ opacity: 0 });
       elements["artifact-status"].className = "generation ready";
-      elements["artifact-status"].textContent = `サーバー上のjobを削除しました — ${job.job_id}（共有CityGMLキャッシュは保持）`;
+      elements["artifact-status"].textContent = `削除しました — ${job.job_id}（ダウンロード済みの CityGML は共有キャッシュに残しています）`;
       await refreshGeneratedJobs(null, { restoreSelection: false });
     } catch (error) {
       elements["artifact-status"].className = "generation failed";
@@ -580,8 +595,8 @@ export function cityWorlds(page) {
   }
 
   function viewerLayerLabel() {
-    if (elements["viewer-visual"].checked && elements["viewer-collider"].checked) return "Visual + Collider";
-    return elements["viewer-visual"].checked ? "Visual" : "Collider";
+    if (elements["viewer-visual"].checked && elements["viewer-collider"].checked) return "見た目＋当たり判定";
+    return elements["viewer-visual"].checked ? "見た目" : "当たり判定";
   }
 
   async function changeViewerLayer(changedElement) {
@@ -636,7 +651,7 @@ export function cityWorlds(page) {
     if (job === null) return;
     const loadSequence = ++viewerLoadSequence;
     document.body.classList.add("viewer-open");
-    elements["viewer-status"].textContent = `${job.job_id}を読み込み中…`;
+    elements["viewer-status"].textContent = `${job.job_id} を読み込み中…`;
     requestAnimationFrame(() => map.invalidateSize());
     const base = `/api/city-worlds/jobs/${encodeURIComponent(job.job_id)}`;
     try {
@@ -674,7 +689,7 @@ export function cityWorlds(page) {
       const box = new runtime.THREE.Box3();
       if (viewerModels.visual !== null) box.expandByObject(viewerModels.visual);
       if (viewerModels.collider !== null) box.expandByObject(viewerModels.collider);
-      if (box.isEmpty()) throw new Error("GLBに表示可能なgeometryがありません");
+      if (box.isEmpty()) throw new Error("表示できる形がありません");
       const center = box.getCenter(new runtime.THREE.Vector3());
       const size = box.getSize(new runtime.THREE.Vector3());
       if (viewerModels.visual !== null) viewerModels.visual.position.set(-center.x, -box.min.y, -center.z);
@@ -689,7 +704,7 @@ export function cityWorlds(page) {
       applyViewerMode();
       elements["viewer-status"].textContent = `${job.job_id} — ${viewerLayerLabel()}`;
     } catch (error) {
-      elements["viewer-status"].textContent = "3D表示に失敗しました。通信ログを確認してください。";
+      elements["viewer-status"].textContent = "3D で表示できませんでした（理由は「通信ログ」にあります）";
       writeLog({ type: "VIEWER_FAILED", job_id: job.job_id, error: String(error) });
     }
   }

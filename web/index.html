@@ -21,6 +21,7 @@
     <div class="row">
       <label class="field inline">ID<input id="recipe-id" placeholder="my-field" autocomplete="off"></label>
       <label class="field inline grow">名前<input id="recipe-name" placeholder="試験場" autocomplete="off"></label>
+      <span id="dirty" class="dirty" hidden title="この環境には保存していない変更があります">● 未保存</span>
       <button id="save">保存</button>
       <button id="urban" class="secondary" hidden title="保存した環境を City World ジョブとして書き出し先に書き出します（書き出し先を見ているツール、例えば hakoniwa-urban-mobility が World として取り込みます）">書き出す</button>
     </div>
@@ -64,9 +65,9 @@
 
       <section class="panel">
         <h2>部品</h2>
-        <label class="field">Catalog<select id="catalog-select"></select></label>
+        <label class="field">カタログ<select id="catalog-select"></select></label>
         <p id="catalog-source" class="hint"></p>
-        <p class="hint">クリックで環境の中央に追加します（地面の上に立ちます）。</p>
+        <p class="hint">上面図にドラッグして置きます（クリックで中央に置きます）。</p>
         <ul id="catalog-list" class="catalog"></ul>
       </section>
     </aside>
@@ -102,7 +103,20 @@
         <div id="plan" class="plan-host"></div>
         <div id="view3d" class="view3d-host"><p class="hint view3d-message">3D を読み込み中…</p></div>
       </div>
-      <p class="hint">ドラッグで移動（吸い付く部品は近くの部品・端にぴったり寄る。Alt で解除）／丸いハンドルで回転（15° 刻み、Shift で解除）／R で 90° 回転／矢印キーでグリッド分移動／Shift＋クリックで複数選択／⌘ / Ctrl＋C・V・Z／Delete で削除／背景ドラッグで移動、ホイールで拡大縮小</p>
+      <details class="keys">
+        <summary title="マウスとキーボードの操作">? 操作方法</summary>
+        <dl>
+          <dt>ドラッグ</dt><dd>部品を動かす（吸い付く部品は近くの部品・端にぴったり寄る。Alt で解除）</dd>
+          <dt>丸いハンドル</dt><dd>回す（15° 刻み、Shift で解除）。R で 90°</dd>
+          <dt>矢印キー</dt><dd>グリッド分動かす（Alt：1 cm、Shift：10 倍、Alt＋Shift：何かに当たるまで寄せる）</dd>
+          <dt>Shift＋クリック</dt><dd>複数選ぶ（上面図でも 3D でも）</dd>
+          <dt>F</dt><dd>選んだ部品に 3D のカメラを寄せる</dd>
+          <dt>⌘ / Ctrl＋C・V・D</dt><dd>コピー・貼り付け・複製</dd>
+          <dt>⌘ / Ctrl＋Z</dt><dd>元に戻す（Shift で やり直す）</dd>
+          <dt>Delete</dt><dd>削除</dd>
+          <dt>背景ドラッグ・ホイール</dt><dd>上面図を動かす・拡大縮小</dd>
+        </dl>
+      </details>
       <ul id="problems" class="problems"></ul>
     </section>
 

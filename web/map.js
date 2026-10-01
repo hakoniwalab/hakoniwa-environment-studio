@@ -269,7 +269,7 @@ async function importWorld(build, given = null) {
 // surfaces); OpenStreetMap covers anywhere, with buildings as extruded outlines.
 const MODE_KEY = "hakoniwa-environment-map-mode";
 const MODE_HINTS = {
-  plateau: "PLATEAU：整備された都市だけですが、LOD2 の建物（テクスチャ付き）・建物ごとの当たり判定・地形（DEM）・道路面まであります。まず「2. Capabilityを診断」でデータがあるか確かめてください。",
+  plateau: "PLATEAU：整備された都市だけですが、LOD2 の建物（テクスチャ付き）・建物ごとの当たり判定・地形（DEM）・道路面まであります。まず「2. データを診断」でデータがあるか確かめてください。",
   osm: "OpenStreetMap：世界中どこでも使えます。建物は外形を押し出した箱（高さは推定を含む）、地面は平らです。できた City World は PLATEAU と同じく「生成結果」で 3D で確かめられます。",
 };
 function setMode(mode) {

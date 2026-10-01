@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Map Import</title>
+  <title>地図から環境を作る</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="studio.css">
   <link rel="stylesheet" href="map.css">
@@ -21,14 +21,14 @@
       <section class="panel">
         <h2>1. 対象範囲</h2>
         <div class="row">
-          <label class="field">Latitude<input id="latitude" type="number" step="0.000001"></label>
-          <label class="field">Longitude<input id="longitude" type="number" step="0.000001"></label>
+          <label class="field">緯度<input id="latitude" type="number" step="0.000001"></label>
+          <label class="field">経度<input id="longitude" type="number" step="0.000001"></label>
         </div>
         <div class="row">
-          <label class="field">N/S half extent [m]<input id="northSouth" type="number" min="10" max="1000" step="10" value="150"></label>
-          <label class="field">E/W half extent [m]<input id="eastWest" type="number" min="10" max="1000" step="10" value="150"></label>
+          <label class="field" title="中心から北・南それぞれの距離（N/S half extent）">南北の半分 (m)<input id="northSouth" type="number" min="10" max="1000" step="10" value="150"></label>
+          <label class="field" title="中心から東・西それぞれの距離（E/W half extent）">東西の半分 (m)<input id="eastWest" type="number" min="10" max="1000" step="10" value="150"></label>
         </div>
-        <p class="hint">地図のクリック、中心マーカーまたは青い区画のドラッグで位置を変更できます。四隅のハンドルで範囲を変更できます。100m + 100mは一辺200mの範囲です。</p>
+        <p class="hint">地図のクリック、中心マーカーまたは青い区画のドラッグで位置を変更できます。四隅のハンドルで範囲を変更できます。100 m なら一辺 200 m の範囲です。</p>
         <div id="selection-summary" class="meta"></div>
       </section>
 
@@ -44,36 +44,36 @@
         <section class="panel">
           <h2>生成条件</h2>
           <div class="grid">
-            <label>Building Physics Level
+            <label title="建物の当たり判定をどこまで細かくするか（Building Physics Level）。0 は建物ごとの箱、3 は屋根・壁の面ごと">建物の当たり判定の細かさ
               <select id="physics-level">
-                <option value="0">0 — P0のみ（最軽量）</option>
+                <option value="0">0 — P0 だけ（いちばん軽い）</option>
                 <option value="1">1 — P1 → P0</option>
                 <option value="2">2 — P2 → P1 → P0</option>
                 <option value="3" selected>3 — P3 → P2 → P1 → P0</option>
               </select>
             </label>
-            <label>DEM未被覆領域
+            <label title="地形（DEM）が範囲を覆っていない所の扱い（海・川の上など）">地形（DEM）が無い所
               <select id="terrain-uncovered-policy">
-                <option value="error" selected>停止する（厳密・既定）</option>
-                <option value="constant">標高0 mで補完（水面向け）</option>
+                <option value="error" selected>止める（厳密・既定）</option>
+                <option value="constant">標高 0 m で埋める（水面向け）</option>
               </select>
             </label>
             <label class="checkbox-option">
               <input id="coplanar-union" type="checkbox">
-              <span>同一平面の隣接する凸面も統合する（Collider削減）</span>
+              <span>同じ平面で隣り合う凸面をまとめる（当たり判定を減らす）</span>
             </label>
             <label class="checkbox-option">
               <input id="convex-decompose" type="checkbox">
-              <span>凹polygonの三角Colliderも少数の凸領域へ再構成する（実験的）</span>
+              <span>凹んだ面の三角形の当たり判定も、少数の凸形にまとめ直す（実験的）</span>
             </label>
             <label class="checkbox-option">
               <input id="tolerant-planar" type="checkbox">
-              <span>WallSurfaceを派生平面まで最大5cmで統合する（box維持・近似あり）</span>
+              <span>壁面を最大 5 cm の近似でまとめる（箱は保つ・近似あり）</span>
             </label>
           </div>
-          <p class="hint">海・河川を含む範囲では、PLATEAU DEMの未被覆部分を標高0 mで補完できます。DEMがまったく無い範囲も、標高0 mで補完にすると平らな地面で生成できます。</p>
+          <p class="hint">海・川を含む範囲では、地形（DEM）の無い所を標高 0 m で埋められます。DEM がまったく無い範囲も、「標高 0 m で埋める」にすると平らな地面で生成できます。</p>
           <div id="mesh-summary" class="mono"></div>
-          <button id="inspect" class="wide" type="button">2. Capabilityを診断</button>
+          <button id="inspect" class="wide" type="button">2. データを診断</button>
         </section>
 
         <section class="panel">
@@ -115,16 +115,16 @@
           <h2>生成結果</h2>
           <label><select id="artifact-select" aria-label="生成結果" disabled><option>生成結果はありません</option></select></label>
           <div id="artifact-path" class="mono">—</div>
-          <div id="artifact-detail">Physics Level: — / Collider: —</div>
+          <div id="artifact-detail">—</div>
           <div id="cache-info" class="mono">共有キャッシュ: —</div>
           <fieldset class="viewer-layers">
-            <legend>3D表示</legend>
-            <label><input id="viewer-visual" type="checkbox" checked disabled>Visual</label>
-            <label><input id="viewer-collider" type="checkbox" disabled>Collider</label>
+            <legend>3D で見るもの</legend>
+            <label><input id="viewer-visual" type="checkbox" checked disabled>見た目</label>
+            <label><input id="viewer-collider" type="checkbox" disabled>当たり判定</label>
           </fieldset>
           <div class="artifact-actions">
-            <button id="download" type="button" disabled>Download ZIP</button>
-            <button id="view3d" type="button" disabled>3D Viewer</button>
+            <button id="download" type="button" disabled>ZIP をダウンロード</button>
+            <button id="view3d" type="button" disabled>3D で見る</button>
             <button id="export-artifact" class="secondary" type="button" disabled hidden>書き出す</button>
             <button id="import-artifact" class="secondary" type="button" disabled title="この City World を、Studio で編集できる部品にします">部品として取り込む</button>
             <button id="delete-artifact" type="button" disabled>生成結果を削除</button>
@@ -153,7 +153,7 @@
     <section class="panel map-panel">
       <div id="map"></div>
       <section id="viewer-panel" aria-label="生成した City World の 3D 表示">
-        <div id="viewer-status">3D Viewer</div>
+        <div id="viewer-status">3D</div>
         <canvas id="viewer-canvas"></canvas>
       </section>
     </section>

@@ -221,21 +221,22 @@ def _check_offline(job: Path, job_id: str, center, half) -> None:
 # Envsim's [HAKO_PROGRESS] events as a percentage, a phase, and a message.
 _BUILD_PHASES = {
     "geometry_extract": (35, "建物形状を抽出しています"),
-    "building_collision": (42, "建物Colliderを生成しています"),
+    "building_collision": (42, "建物の当たり判定を作っています"),
     "terrain": (43, "地形生成を開始しています"),
-    "building_mjcf": (52, "建物Physicsを生成しています"),
-    "building_visual": (56, "建物Visualを生成しています"),
-    "building_glb": (72, "建物GLBを書き出しています"),
-    "roads": (76, "道路と地形のVisualを生成しています"),
+    "building_mjcf": (52, "建物の当たり判定（物理）を作っています"),
+    "building_visual": (56, "建物の見た目を作っています"),
+    "building_glb": (72, "建物の見た目（GLB）を書き出しています"),
+    "roads": (76, "道路と地形の見た目を作っています"),
     "road_markings": (79, "LOD3路面標示を生成しています"),
-    "bridges_visual": (81, "橋梁Visualを生成しています"),
-    "bridges_physics": (83, "橋梁Physicsを生成しています"),
+    "bridges_visual": (81, "橋の見た目を作っています"),
+    "bridges_physics": (83, "橋の当たり判定を作っています"),
     "compose": (86, "City Worldを統合しています"),
-    "dataset_validation": (88, "Dataset Capabilityを検証しています"),
+    "dataset_validation": (88, "データの内容を検証しています"),
     # After Envsim (build_job below).
-    "collider_visualization": (92, "Collider表示用GLBを生成しています"),
+    "collider_visualization": (92, "当たり判定の表示用 GLB を作っています"),
     "packaging": (96, "検証・ZIP作成をしています"),
 }
+FEATURE_NAMES = {"bldg": "建物", "tran": "道路", "dem": "地形（DEM）", "frn": "路面標示", "brid": "橋"}
 _SOURCE_ACTIONS = {
     "cache-reused": "共有キャッシュを再利用しました",
     "offline-reused": "ローカルデータを再利用しました",
@@ -251,7 +252,8 @@ def progress_step(event: dict) -> tuple[int, str] | None:
     class_id = str(event.get("class_id", "P?"))
     if phase == "source_download":
         action = _SOURCE_ACTIONS.get(event.get("mode"), "取得またはキャッシュ再利用を確認しています")
-        return 15, f"PLATEAU {event.get('feature', 'source')}ソース: {action}（{current}/{total}）"
+        feature = FEATURE_NAMES.get(event.get("feature"), event.get("feature", ""))
+        return 15, f"PLATEAU の{feature}データ: {action}（{current}/{total}）"
     if phase == "terrain_extract":
         return (43 if total == 0 else 43 + int(3 * current / total)), f"DEMソースを並列抽出しています（{current}/{total}）"
     if phase == "terrain_gap_fill":
@@ -263,24 +265,24 @@ def progress_step(event: dict) -> tuple[int, str] | None:
     if phase == "geometry_extract_files":
         return 35, f"建物GMLを並列抽出しています（{current}/{total}）"
     if phase == "building_glb_batches":
-        return 72, f"建物GLBのmaterial/meshを構築しています（{current}/{total}）"
+        return 72, f"建物の見た目（GLB）を組み立てています（{current}/{total}）"
     if phase == "building_glb_textures":
-        return 72, f"建物GLB用テクスチャを並列デコードしています（{current}/{total}）"
+        return 72, f"建物のテクスチャを読み込んでいます（{current}/{total}）"
     if phase == "building_glb_export":
-        return 72, "建物GLBバイナリを書き出しています"
+        return 72, "建物の見た目（GLB）を書き出しています"
     if phase == "building_physics_surfaces":
-        return 52, f"LOD2建物面をColliderへ変換しています（GML {current}/{total}）"
+        return 52, f"LOD2 の建物の面を当たり判定にしています（GML {current}/{total}）"
     if phase in ("building_physics_exact_reduction", "building_physics_tolerant_reduction"):
-        label = "厳密統合" if phase == "building_physics_exact_reduction" else "5cm許容統合"
-        return 52, f"建物Colliderを{label}しています（{class_id} {current}/{total}, {int(event.get('colliders', 0))}個）"
+        label = "厳密にまとめ" if phase == "building_physics_exact_reduction" else "5 cm 許容でまとめ"
+        return 52, f"建物の当たり判定を{label}しています（{class_id} {current}/{total}、{int(event.get('colliders', 0))} 個）"
     if phase == "building_physics_tolerant_groups":
-        return 52, f"建物Colliderを5cm許容統合しています（{class_id} 建物面群 {current}/{total}）"
+        return 52, f"建物の当たり判定を 5 cm 許容でまとめています（{class_id} 面のまとまり {current}/{total}）"
     if phase == "building_physics_exact_groups":
-        return 52, f"建物Colliderを厳密統合しています（{class_id} 平面群 {current}/{total}）"
+        return 52, f"建物の当たり判定を厳密にまとめています（{class_id} 平面のまとまり {current}/{total}）"
     if phase == "building_physics_assemble":
-        return 52, "建物ColliderのMJCF要素を構築しています"
+        return 52, "建物の当たり判定（MJCF）を組み立てています"
     if phase == "building_physics_write":
-        return 52, "建物PhysicsのMJCFを書き出しています"
+        return 52, "建物の当たり判定（MJCF）を書き出しています"
     if phase in _BUILD_PHASES:
         return _BUILD_PHASES[phase]
     return None
