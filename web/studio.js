@@ -494,7 +494,10 @@ function renderCatalog() {
       },
         el("span", {}, entry.name),
         el("span", { class: "meta" }, size),
-        el("span", { class: "swatch", style: `background:${entry.params.color || "#cccccc"}` })));
+        entry.thumbnail
+          ? el("img", { class: "thumbnail", alt: "", loading: "lazy",
+            src: `/api/catalogs/${encodeURIComponent(state.catalogId)}/items/${encodeURIComponent(entry.id)}/thumbnail` })
+          : el("span", { class: "swatch", style: `background:${entry.params.color || "#cccccc"}` })));
   })]));
 }
 
@@ -624,8 +627,11 @@ async function registerBuilding(obj) {
   if (!name) return;
   setStatus(`${obj.id} をマイカタログに登録しています…`);
   try {
+    // Its picture from the 3D view, when the view has it (else the list shows its colour).
+    let thumbnail;
+    try { thumbnail = state.view3d?.snapshot(obj.id) || undefined; } catch { thumbnail = undefined; }
     const { item } = await api("POST", "catalogs/my/items",
-      { ...recipeBody(), object: obj.id, item_name: name, recipe_id: state.current?.id || undefined });
+      { ...recipeBody(), object: obj.id, item_name: name, recipe_id: state.current?.id || undefined, thumbnail });
     state.catalogs = await api("GET", "catalogs");
     if (state.catalogId === "my") {
       state.catalogId = null;

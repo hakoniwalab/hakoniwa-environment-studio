@@ -22,8 +22,18 @@
         <button class="secondary" data-tab="make" role="tab" aria-pressed="true">作る</button>
         <button class="secondary" data-tab="made" role="tab" aria-pressed="false">できたもの <span id="made-count" class="count"></span></button>
       </div>
+      <button id="guide-open" type="button" class="link-button" title="3 ステップの案内をもう一度見る">? はじめに</button>
 
       <div id="tab-make">
+      <section class="panel guide" id="guide" hidden>
+        <h2>はじめに：3 ステップで街を作る</h2>
+        <ol>
+          <li><strong>範囲を選ぶ</strong>：地図をクリックすると中心が動きます。四隅のハンドルで大きさを変えます。</li>
+          <li><strong>データを診断する</strong>：PLATEAU にその範囲のデータがあるか確かめます（ダウンロードはしません）。無ければ OpenStreetMap に切り替えます。</li>
+          <li><strong>City World を生成する</strong>：数分〜数十分でできあがり、「できたもの」に並びます。urban から開いたときは、そのまま urban に届きます。</li>
+        </ol>
+        <button id="guide-close" type="button" class="secondary">わかった</button>
+      </section>
       <section class="panel">
         <h2>1. 対象範囲</h2>
         <div class="row">

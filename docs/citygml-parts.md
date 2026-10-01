@@ -57,7 +57,7 @@ LOD2 の見た目（B-1、4.1 節）と envsim の当たり判定（B-2、7.1 �
 
 ### 4.1 LOD2 の見た目（B-1）
 
-ワークスペースの City World から取り込むときは（`--envsim-build`、地図ページの「ワークスペースの街」）、LOD2 のある建物ごとに、その建物だけの GLB を `<Recipe 名>.assets/<部品 ID>.glb` に書き、部品の `visual` パラメータで指します（Recipe からの相対パス）。
+ワークスペースの City World から取り込むときは（`--envsim-build`、地図ページの「できたもの」）、LOD2 のある建物ごとに、その建物だけの GLB を `<Recipe 名>.assets/<部品 ID>.glb` に書き、部品の `visual` パラメータで指します（Recipe からの相対パス）。
 
 - **中身**：その建物の LOD2 の面（`lod2MultiSurface`・`lod2Geometry`・`lod2Solid`）を三角形にしたもの。PLATEAU のテクスチャ（写真）はテクスチャ座標ごと埋め込みます。
   - 画像は、City World の `components/buildings/buildings-glb-receipt.json` に記録された場所（ビジネスパックの共有キャッシュなど）から引き当てます。
@@ -95,7 +95,7 @@ LOD2 の見た目（B-1、4.1 節）と envsim の当たり判定（B-2、7.1 �
   - `query`（変換器の版と、元ファイルのパス・SHA-256）
   - 地図ページから取り込んだ場合は、さらに `data_timestamp` と Overpass のクエリ
 
-## 7. ワークスペースの街（変換済みの City World）
+## 7. できたもの（変換済みの City World）
 
 hakoniwa-envsim でビルド済みの街（ビジネスパックの City World ジョブなど）を、そのまま部品にできます。
 
@@ -165,7 +165,7 @@ PLATEAU のデータには、外形がもともと重なっている建物もあ
 
 地図ページの「PLATEAU から City World を作る」で、選んだ範囲の City World を hakoniwa-envsim に作らせ、終わったらそのまま部品として取り込みます（7 章。envsim の出力はそのまま使います）。実装は `tools/env_cityworld.py` です。
 
-- **置き場所**：`<ws>/city-worlds/<ID>/`。ビジネスパックの City World Web UI のジョブと同じ形（`hakoniwa-envsim-build.yaml`、`job.json`、`generation.log`、`build/`）なので、「ワークスペースの街」の一覧にも出ます。
+- **置き場所**：`<ws>/city-worlds/<ID>/`。ビジネスパックの City World Web UI のジョブと同じ形（`hakoniwa-envsim-build.yaml`、`job.json`、`generation.log`、`build/`）なので、「できたもの」の一覧にも出ます。
 - **設定**：City World Web UI と同じ（visual-physics-v1：LOD2 の見た目、建物の当たり判定 P0〜P3、DEM の地形、道路、路面標示、橋）。範囲の指定も同じです。
 - **ダウンロード**：envsim が PLATEAU のカタログに問い合わせて CityGML を取ります。取った CityGML は共有のキャッシュに残し、次から使い回します。キャッシュは `HAKONIWA_PLATEAU_CACHE`、無ければ地図ページの「フォルダ」（ビジネスパックの work）の `recipes/city-world-web-ui/runtime/cache/plateau-citygml`、それも無ければ `work/city-worlds/cache` です。
 - **実行**：`hako.py --config … build` を裏で動かし、`[HAKO_PROGRESS]` の行から進み具合を表示します（`GET /api/city-worlds/build/<ID>`）。同時に動かすのは 1 つだけで、中止もできます（`POST …/cancel`）。ページを開き直しても、作っている途中のものを追い続けます。

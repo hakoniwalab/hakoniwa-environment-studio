@@ -180,8 +180,9 @@ def item_id_for(obj: env_schema.EnvObject) -> str:
 
 
 def register(recipe: env_schema.Recipe, object_id: str, name: str, item_id: str | None = None,
-             catalog: Path | None = None) -> dict:
-    """Add the object (a building) to the user's Catalog; returns the item."""
+             catalog: Path | None = None, thumbnail_png: bytes | None = None) -> dict:
+    """Add the object (a building) to the user's Catalog, with a small picture
+    of it (a PNG the page made from its 3D view) when given; returns the item."""
     path = catalog or catalog_path()
     obj = next((item for item in recipe.objects if item.id == object_id), None)
     if obj is None:
@@ -227,6 +228,12 @@ def register(recipe: env_schema.Recipe, object_id: str, name: str, item_id: str 
     source["recipe"] = recipe.path.stem
     item = {"id": item_id, "type": "building_footprint", "name": name or item_id, "category": CATEGORY,
             "params": params, "source": source}
+    if thumbnail_png:
+        if not thumbnail_png.startswith(b"\x89PNG"):
+            raise RegisterError("the picture is not a PNG")
+        assets.mkdir(parents=True, exist_ok=True)
+        (assets / f"{item_id}.png").write_bytes(thumbnail_png)
+        item["thumbnail"] = f"assets/{item_id}.png"
     items.append(item)
     env_schema.save_yaml(data, path)
     env_schema.load_catalog(path)  # it parses (assets readable, the outline valid)

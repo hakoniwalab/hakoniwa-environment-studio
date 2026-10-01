@@ -114,6 +114,47 @@ export class View3D {
     if (Number.isFinite(screen)) this.needle.setAttribute("transform", `rotate(${screen.toFixed(1)})`);
   }
 
+  // A small picture of one object as a PNG data URL (for a Catalog item):
+  // seen from the south-west, above, on a clear background. Null when it is not in the model.
+  snapshot(id, width = 160, height = 120) {
+    const node = this.nodes?.get(id);
+    if (!node) return null;
+    const copy = node.clone(true);
+    copy.traverse((child) => {
+      if (!child.isMesh) return;
+      child.material = Array.isArray(child.material) ? child.material.map((m) => m.clone()) : child.material.clone();
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+        material.emissive?.copy(BLACK);  // not the selection's highlight
+      }
+    });
+    copy.position.set(0, 0, 0);
+    copy.rotation.set(0, 0, 0);
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x6f7a66, 1.8));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+    sun.position.set(-30, 60, 20);
+    scene.add(sun, copy);
+    const sphere = new THREE.Box3().setFromObject(copy).getBoundingSphere(new THREE.Sphere());
+    const camera = new THREE.PerspectiveCamera(35, width / height, 0.05, 10000);
+    const distance = Math.max(sphere.radius, 0.3) / Math.sin((35 * Math.PI) / 360) * 1.1;
+    camera.position.copy(sphere.center).add(new THREE.Vector3(-0.6, 0.55, 0.6).normalize().multiplyScalar(distance));
+    camera.lookAt(sphere.center);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    try {
+      renderer.setSize(width, height, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setClearColor(0x000000, 0);
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL("image/png");
+    } finally {
+      copy.traverse((child) => {
+        if (child.isMesh) for (const m of Array.isArray(child.material) ? child.material : [child.material]) m.dispose();
+      });
+      renderer.dispose();
+      renderer.forceContextLoss();
+    }
+  }
+
   // Bring the camera to objects (ids), keeping the way it looks: the point
   // looked at moves to their centre and the distance fits their size, in a
   // short glide. False when none of them is in the model yet.

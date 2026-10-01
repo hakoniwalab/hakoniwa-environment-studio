@@ -35,7 +35,7 @@ ID_PATTERN = env_rules.ID_PATTERN
 MAX_SIZE_M = 10_000.0
 # Sides of the polygon that stands for a circle on the plan (web/geometry.js too).
 CIRCLE_SEGMENTS = env_rules.CIRCLE_SEGMENTS
-ITEM_KEYS = {"id", "type", "extends", "name", "description", "category", "params", "source", "assumed"}
+ITEM_KEYS = {"id", "type", "extends", "name", "description", "category", "params", "source", "assumed", "thumbnail"}
 RECIPE_KEYS = {"schema", "name", "description", "catalog", "size_m", "terrain", "objects", "geo"}
 OBJECT_KEYS = {"id", "item", "pose", "params", "source", "anchor"}
 # Where an object's assets (its visual GLB, its colliders) were made for: the
@@ -66,6 +66,8 @@ class Item:
     category: str
     source: dict = field(default_factory=dict)
     assumed: dict = field(default_factory=dict)
+    # A small picture of it (a PNG beside the Catalog, path made absolute): a registered building.
+    thumbnail: str | None = None
 
     def as_json(self) -> dict:
         return {
@@ -75,7 +77,7 @@ class Item:
             "param_labels": {name: param.label for name, param in self.type.params.items()},
             "placement_params": [param.as_json() for param in self.placement_params.values()],
             **(self.shape.as_json() if self.shape else {}),
-            "source": self.source, "assumed": self.assumed,
+            "source": self.source, "assumed": self.assumed, "thumbnail": bool(self.thumbnail),
         }
 
 
@@ -324,6 +326,7 @@ def _item(value, path: str, library: env_types.TypeLibrary, raws: dict[str, dict
         params=params, placement_params=placement, shape=shape,
         category=_text(raw.get("category", env_type.label), f"{path}.category"),
         source=dict(raw["source"]), assumed=dict(raw["assumed"]),
+        thumbnail=str(value["thumbnail"]) if value.get("thumbnail") else None,
     )
     return item, raw
 
@@ -394,6 +397,8 @@ def _assets_beside(item: Item, base: Path) -> Item:
         text = str(item.params.get(name) or "").strip()
         if text and not Path(text).expanduser().is_absolute():
             changed[name] = (base / text).resolve().as_posix()
+    if item.thumbnail and not Path(item.thumbnail).expanduser().is_absolute():
+        item = replace(item, thumbnail=(base / item.thumbnail).resolve().as_posix())
     if not changed:
         return item
     placement = {name: (param.with_default(changed[name]) if name in changed else param)

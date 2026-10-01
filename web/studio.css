@@ -170,3 +170,4 @@ button.attention { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, t
 .failure-details summary { cursor: pointer; }
 .search { width: 100%; margin: 6px 0; }
 .catalog-heading { list-style: none; margin: 8px 0 2px; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
+.catalog .thumbnail { flex: none; width: 48px; height: 36px; object-fit: contain; border-radius: 4px; background: var(--plan-bg); }

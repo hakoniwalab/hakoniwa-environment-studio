@@ -322,6 +322,25 @@ def preview_poses(body: object) -> dict:
     return {"poses": poses}
 
 
+def _png(data_url: object) -> bytes | None:
+    """The PNG of a data: URL (a picture the page made), or None."""
+    import base64
+
+    if not isinstance(data_url, str) or not data_url.startswith("data:image/png;base64,"):
+        return None
+    try:
+        return base64.b64decode(data_url.split(",", 1)[1], validate=True)
+    except ValueError:
+        return None
+
+
+def item_thumbnail(catalog_id: str, item_id: str) -> Path:
+    item = env_schema.load_catalog(_catalog_path(catalog_id)).items.get(item_id)
+    if item is None or not item.thumbnail or not Path(item.thumbnail).is_file():
+        raise StudioError(f"{item_id} has no picture", HTTPStatus.NOT_FOUND)
+    return Path(item.thumbnail)
+
+
 def register_building(body: object) -> dict:
     """Register a building of an unsaved Recipe in the user's Catalog
     (env_catalog_items.register): its look and colliders copied beside the
@@ -333,9 +352,10 @@ def register_building(body: object) -> dict:
         raise StudioError(f"recipe_id {name!r} is not an id")
     try:
         recipe = _recipe_from_body({key: value for key, value in body.items()
-                                    if key not in ("object", "item_name", "recipe_id")},
+                                    if key not in ("object", "item_name", "recipe_id", "thumbnail")},
                                    USER_RECIPES.resolve() / f"{name}.yaml")
-        result = env_catalog_items.register(recipe, str(body.get("object") or ""), str(body.get("item_name") or ""))
+        result = env_catalog_items.register(recipe, str(body.get("object") or ""), str(body.get("item_name") or ""),
+                                            thumbnail_png=_png(body.get("thumbnail")))
     except DiagnosticError as exc:
         raise StudioError(f"登録できません: {exc}") from exc
     except env_catalog_items.RegisterError as exc:
@@ -848,7 +868,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
 
     def _file(self, path: Path) -> None:
         """A file as it is (a City World's GLB may be hundreds of MB: streamed)."""
-        types = {".glb": "model/gltf-binary", ".zip": "application/zip"}
+        types = {".glb": "model/gltf-binary", ".zip": "application/zip", ".png": "image/png"}
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", types.get(path.suffix, "application/octet-stream"))
         self.send_header("Content-Length", str(path.stat().st_size))
@@ -879,6 +899,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("GET", ("catalogs",), lambda self, _: self._json(list_catalogs())),
         ("GET", ("catalogs", "*"), lambda self, parts: self._json(catalog_json(parts[1]))),
         ("POST", ("catalogs", "my", "items"), lambda self, _: self._json(register_building(self._body()))),
+        ("GET", ("catalogs", "*", "items", "*", "thumbnail"), lambda self, parts: self._file(item_thumbnail(parts[1], parts[3]))),
         ("GET", ("map", "config"), lambda self, _: self._json(map_config())),
         ("POST", ("map", "import"), lambda self, _: self._json(import_map(self._body()))),
         ("GET", ("city-worlds",), lambda self, _: self._json(list_city_worlds(self._query("root")))),

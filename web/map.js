@@ -278,6 +278,17 @@ async function init() {
   // The same selection in the other source: from OSM to a PLATEAU diagnosis.
   $("#to-plateau").addEventListener("click", () => { setMode("plateau"); worlds.inspect(); });
 
+  // The three steps, shown until they are dismissed (the ? on 作る shows them again).
+  const GUIDE_KEY = "hakoniwa-environment-map-guide-seen";
+  let seen = false;
+  try { seen = localStorage.getItem(GUIDE_KEY) === "1"; } catch { /* storage unavailable */ }
+  $("#guide").hidden = seen;
+  $("#guide-close").addEventListener("click", () => {
+    $("#guide").hidden = true;
+    try { localStorage.setItem(GUIDE_KEY, "1"); } catch { /* storage unavailable */ }
+  });
+  $("#guide-open").addEventListener("click", () => { setTab("make"); $("#guide").hidden = false; });
+
   // 作る / できたもの: making a City World, and what was made.
   for (const button of document.querySelectorAll("#side-tabs button")) {
     button.addEventListener("click", () => setTab(button.dataset.tab));

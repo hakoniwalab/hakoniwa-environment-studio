@@ -155,6 +155,15 @@ class RegisterBuildingTest(unittest.TestCase):
         path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
         self.assertEqual([obj.item for obj in env_schema.load_recipe(path).objects], ["building-footprint"])
 
+    def test_a_picture_goes_with_the_item(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
+        item = env_catalog_items.register(self.city, "b1", "ビル", catalog=self.catalog, thumbnail_png=png)["item"]
+        loaded = env_schema.load_catalog(self.catalog).items[item["id"]]
+        self.assertEqual(Path(loaded.thumbnail).read_bytes(), png)
+        self.assertTrue(loaded.as_json()["thumbnail"])
+        with self.assertRaisesRegex(env_catalog_items.RegisterError, "PNG"):
+            env_catalog_items.register(self.city, "b1", "x", item_id="other", catalog=self.catalog, thumbnail_png=b"GIF89a")
+
     def test_only_a_building_is_registered(self):
         with self.assertRaisesRegex(env_catalog_items.RegisterError, "not an object"):
             env_catalog_items.register(self.city, "nothing", "x", catalog=self.catalog)

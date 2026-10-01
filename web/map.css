@@ -99,3 +99,6 @@ body.viewer-open #viewer-panel { display: block; }
 .other-folders summary { cursor: pointer; }
 .other-folders .row { margin-top: 6px; }
 .other-folders input { flex: 1; }
+.guide { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.guide ol { margin: 6px 0 10px; padding-left: 20px; font-size: 13px; line-height: 1.6; }
+.link-button { align-self: flex-end; margin-top: -8px; padding: 0; border: none; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
