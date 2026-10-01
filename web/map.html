@@ -18,6 +18,12 @@
 
   <main class="map-layout">
     <aside class="sidebar">
+      <div class="segmented side-tabs" id="side-tabs" role="tablist" aria-label="地図から環境を作る">
+        <button class="secondary" data-tab="make" role="tab" aria-pressed="true">作る</button>
+        <button class="secondary" data-tab="made" role="tab" aria-pressed="false">できたもの <span id="made-count" class="count"></span></button>
+      </div>
+
+      <div id="tab-make">
       <section class="panel">
         <h2>1. 対象範囲</h2>
         <div class="row">
@@ -109,11 +115,23 @@
           <button id="to-plateau" class="secondary wide" type="button">この範囲が PLATEAU にあるか確かめる</button>
         </section>
       </div>
+      </div>
 
+      <div id="tab-made" hidden>
       <div id="city-worlds">
-        <section class="panel artifact-controls">
-          <h2>生成結果</h2>
-          <label><select id="artifact-select" aria-label="生成結果" disabled><option>生成結果はありません</option></select></label>
+        <section class="panel">
+          <h2>できた City World</h2>
+          <p class="hint">Studio で生成したものと、Business Pack などで作ったもの。選ぶと地図にオレンジの枠で範囲を示します。</p>
+          <ul id="world-entries" class="world-entries"><li class="hint">まだありません</li></ul>
+          <details class="other-folders">
+            <summary>ほかのフォルダも探す</summary>
+            <span class="row"><input id="world-root" autocomplete="off" placeholder="…/hakoniwa-business-pack/work">
+              <button id="world-search" class="secondary" type="button">探す</button></span>
+          </details>
+        </section>
+
+        <section class="panel artifact-controls" id="entry-detail" hidden>
+          <h2 id="entry-title">—</h2>
           <div id="artifact-path" class="mono">—</div>
           <div id="artifact-detail">—</div>
           <div id="cache-info" class="mono">共有キャッシュ: —</div>
@@ -132,21 +150,13 @@
           <div id="artifact-status" class="generation"></div>
         </section>
 
-        <details class="panel">
-          <summary>通信ログ</summary>
-          <pre id="log"></pre>
-        </details>
+      </div>
       </div>
 
-      <section class="panel">
-        <h2>ワークスペースの街（City World）</h2>
-        <p class="hint">hakoniwa-envsim で変換済みの街（PLATEAU など）を探して、建物・道路を部品として取り込みます。地図上のオレンジの枠がその範囲です。</p>
-        <label class="field">フォルダ
-          <span class="row"><input id="world-root" autocomplete="off" placeholder="…/hakoniwa-business-pack/work">
-            <button id="world-search" class="secondary">探す</button></span>
-        </label>
-        <ul id="world-list" class="list"></ul>
-      </section>
+      <details class="panel">
+        <summary>通信ログ</summary>
+        <pre id="log"></pre>
+      </details>
 
     </aside>
 

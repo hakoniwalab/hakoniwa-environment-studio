@@ -183,73 +183,6 @@ function selectionControls(map, onChange) {
   return { refresh };
 }
 
-const ROOT_KEY = "hakoniwa-environment-world-root";
-
-// The City Worlds (Envsim builds) in a workspace: listed, outlined on the map,
-// and imported as parts (POST /api/city-worlds/import).
-function worldBounds(build) {
-  return boundsOf(build.center.latitude, build.center.longitude, build.half_extent_m.north_south,
-    build.half_extent_m.east_west);
-}
-
-async function searchWorlds(map, layer) {
-  const root = $("#world-root").value.trim();
-  try { localStorage.setItem(ROOT_KEY, root); } catch { /* storage unavailable */ }
-  setStatus("探しています…");
-  let found;
-  try {
-    found = await api("GET", `city-worlds${root ? `?root=${encodeURIComponent(root)}` : ""}`);
-  } catch (error) {
-    setStatus(error.message, "error");
-    return;
-  }
-  if (!root) $("#world-root").value = found.roots.join(", ");
-  layer.clearLayers();
-  $("#world-list").replaceChildren(...found.builds.map((build) => {
-    const bounds = worldBounds(build);
-    L.rectangle(bounds, { color: "#e07b00", weight: 2, fillOpacity: 0.05 }).bindTooltip(build.title).addTo(layer);
-    const importButton = el("button", { class: "secondary", onclick: () => importWorld(build) }, "取り込む");
-    const exportButton = !found.export_dir ? null : build.exported
-      ? el("button", { class: "secondary", title: `書き出し先の ${build.exported.id}（City World 自体は残ります）`,
-        onclick: () => removeExport(build, () => searchWorlds(map, layer)) }, "書き出しを消す")
-      : el("button", { class: "secondary", disabled: !build.exportable,
-        title: build.exportable ? "作った City World をそのまま書き出し先に書き出します" : "City World がないビルドです",
-        onclick: () => exportWorld(build, () => searchWorlds(map, layer)) }, "書き出す");
-    return el("li", {},
-      el("button", { onclick: () => map.fitBounds(bounds, { padding: [30, 30] }) },
-        el("span", {}, build.title),
-        el("span", { class: "meta" }, `建物 ${build.buildings}・${build.feature_types.join(" / ")}${build.world ? "・City World あり" : ""}${build.dem ? "・地形（DEM）あり" : ""}${build.exported ? `・書き出し済み（${build.exported.id}）` : ""}`)),
-      el("span", { class: "row" }, importButton, ...(exportButton ? [exportButton] : [])));
-  }));
-  if (!found.builds.length) $("#world-list").replaceChildren(el("li", { class: "hint" }, "Envsim のビルドは見つかりませんでした"));
-  setStatus(`${found.builds.length} 件見つかりました`, found.builds.length ? "ok" : "");
-}
-
-// A City World written to the export folder as it is (no Recipe in between):
-// POST /api/city-worlds/export. The tool watching that folder
-// (hakoniwa-urban-mobility) takes it as a World named after the job folder.
-async function exportWorld(build, then = null) {
-  setStatus(`${build.title} を書き出しています…`);
-  try {
-    const result = await api("POST", "city-worlds/export", { path: build.path, title: build.title });
-    setStatus(`${build.title} を ${result.id} として書き出しました（${result.job}）`, "ok");
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-  if (then) await then();
-}
-
-async function removeExport(build, then = null) {
-  if (!window.confirm(`書き出し先の ${build.exported.id} を消しますか？（City World 自体は残ります）`)) return;
-  try {
-    await api("POST", `exports/${encodeURIComponent(build.exported.id)}/delete`, {});
-    setStatus(`書き出し先の ${build.exported.id} を消しました`, "ok");
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-  if (then) await then();
-}
-
 // A City World taken in as parts (POST /api/city-worlds/import), then opened in Studio to edit.
 async function importWorld(build, given = null) {
   const id = given || window.prompt("作る環境の ID（小文字・数字・- _）", build.id ?? build.title);
@@ -272,6 +205,17 @@ const MODE_HINTS = {
   plateau: "PLATEAU：整備された都市だけですが、LOD2 の建物（テクスチャ付き）・建物ごとの当たり判定・地形（DEM）・道路面まであります。まず「2. データを診断」でデータがあるか確かめてください。",
   osm: "OpenStreetMap：世界中どこでも使えます。建物は外形を押し出した箱（高さは推定を含む）、地面は平らです。できた City World は PLATEAU と同じく「生成結果」で 3D で確かめられます。",
 };
+const TAB_KEY = "hakoniwa-environment-map-tab";
+
+function setTab(tab) {
+  for (const button of document.querySelectorAll("#side-tabs button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.tab === tab));
+  }
+  $("#tab-make").hidden = tab !== "make";
+  $("#tab-made").hidden = tab !== "made";
+  try { localStorage.setItem(TAB_KEY, tab); } catch { /* storage unavailable */ }
+}
+
 function setMode(mode) {
   for (const button of document.querySelectorAll("#source-mode button")) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
@@ -319,6 +263,7 @@ async function init() {
       controls.refresh();
     },
     toOsm: () => setMode("osm"),
+    showMade: () => setTab("made"),
   });
   worlds.selectionChanged(selectionIsValid());
 
@@ -333,10 +278,13 @@ async function init() {
   // The same selection in the other source: from OSM to a PLATEAU diagnosis.
   $("#to-plateau").addEventListener("click", () => { setMode("plateau"); worlds.inspect(); });
 
-  const workspaceWorlds = L.layerGroup().addTo(map);
-  try { $("#world-root").value = localStorage.getItem(ROOT_KEY) || ""; } catch { /* storage unavailable */ }
-  $("#world-search").addEventListener("click", () => searchWorlds(map, workspaceWorlds));
-  searchWorlds(map, workspaceWorlds);
+  // 作る / できたもの: making a City World, and what was made.
+  for (const button of document.querySelectorAll("#side-tabs button")) {
+    button.addEventListener("click", () => setTab(button.dataset.tab));
+  }
+  let tab = "make";
+  try { tab = localStorage.getItem(TAB_KEY) === "made" ? "made" : "make"; } catch { /* storage unavailable */ }
+  setTab(tab);
 
   // OpenStreetMap: a City World of the selection's map data, generated like PLATEAU's.
   $("#osm-generate").addEventListener("click", async () => {
@@ -345,7 +293,11 @@ async function init() {
       setStatus("ID は小文字・数字・- _ で付けてください", "error");
       return;
     }
-    const body = { selection: selection(), source: "osm", map_data: $("#source").value };
+    const span = (half) => Math.round(half * 2);
+    const size = numeric("eastWest") === numeric("northSouth") ? `${span(numeric("eastWest"))} m 四方`
+      : `${span(numeric("eastWest"))} × ${span(numeric("northSouth"))} m`;
+    const body = { selection: selection(), source: "osm", map_data: $("#source").value,
+      name: `OpenStreetMap（${numeric("latitude").toFixed(3)}, ${numeric("longitude").toFixed(3)}）付近（${size}）` };
     if (body.map_data === "geojson") {
       const file = $("#geojson").files[0];
       if (!file) { setStatus("GeoJSON ファイルを選んでください", "error"); return; }

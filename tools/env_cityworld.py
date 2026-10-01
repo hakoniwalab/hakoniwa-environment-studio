@@ -593,11 +593,12 @@ def list_jobs() -> list[dict]:
         visual, colliders = job / "viewer" / "city-world.glb", job / "viewer" / "city-world-colliders.glb"
         if not visual.is_file() or BUILDS.running() == job.name:
             continue
-        request = _read_json(job / "job.json").get("request", {})
+        record = _read_json(job / "job.json")
+        request = record.get("request", {})
         options = build_options(request.get("options")) if isinstance(request.get("options"), dict) else {}
         artifact = artifact_path(job)
         jobs.append({
-            "job_id": job.name, "path": str(job), "build": str(job / "build"),
+            "job_id": job.name, "title": record.get("name") or job.name, "path": str(job), "build": str(job / "build"),
             "source": request.get("source") or "plateau",
             "selection": request.get("selection"),
             "building_physics_level": options.get("building_physics_level"),

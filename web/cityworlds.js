@@ -130,7 +130,7 @@ export function cityWorlds(page) {
     "physics-level", "terrain-uncovered-policy", "coplanar-union", "convex-decompose", "tolerant-planar",
     "inspect", "generate", "cancel", "mesh-summary", "overall", "municipality", "capabilities", "generation",
     "to-osm", "osm-generate", "osm-cancel", "osm-generation", "artifact-status",
-    "artifact-select", "artifact-path", "artifact-detail", "cache-info", "download", "view3d", "delete-artifact",
+    "world-entries", "world-root", "world-search", "made-count", "entry-detail", "entry-title", "artifact-path", "artifact-detail", "cache-info", "download", "view3d", "delete-artifact",
     "export-artifact", "import-artifact", "viewer-visual", "viewer-collider", "viewer-panel", "viewer-status",
     "viewer-canvas", "log",
   ].map((id) => [id, document.getElementById(id)]));
@@ -140,7 +140,6 @@ export function cityWorlds(page) {
   let generating = false;
   let canceling = false;
   let lastAvailable = null;
-  let generatedJobs = [];
   let viewerRuntime = null;
   let viewerModels = { visual: null, collider: null };
   let viewerJobId = null;
@@ -272,7 +271,10 @@ export function cityWorlds(page) {
             ? `最大 LOD${capability.max_lod}・${capability.source_file_count} ファイル${capability.reason ? `・${capabilityReasons[capability.reason] ?? capability.reason}` : ""}`
             : capabilityReasons[capability.reason] ?? capability.reason))));
     }
-    lastAvailable = available ? { request, jobId: generatedJobId(request.selection, inspected) } : null;
+    // Its name for people (the list, urban's City list): the municipalities and the size.
+    const cities = [...new Set(inspected.municipalities.map((item) => item.city))].join("・") || "PLATEAU";
+    lastAvailable = available ? { request, jobId: generatedJobId(request.selection, inspected),
+      title: `${cities} 付近（${sizeText(request.selection)}）` } : null;
     elements["to-osm"].hidden = available;
   }
 
@@ -302,8 +304,8 @@ export function cityWorlds(page) {
   // --- Generation -----------------------------------------------------------
 
   // Started with an export folder (from hakoniwa-urban-mobility): a new City World goes there.
-  async function afterGenerated(id, build) {
-    if (page.exportDir) await exportWorld({ path: build, title: id });
+  async function afterGenerated(id, build, title) {
+    if (page.exportDir) await exportWorld({ path: build, title: title || id });
   }
 
   function saveRunning(value) {
@@ -321,14 +323,15 @@ export function cityWorlds(page) {
     } catch { return null; }
   }
 
-  async function follow(id, mode) {
+  async function follow(id, mode, title = null) {
     const ui = controls[mode] ?? controls.plateau;
     generating = true;
     refresh();
     ui.generate.textContent = "生成中…";
     ui.cancel.disabled = false;
     ui.status.className = "generation running";
-    saveRunning({ id, mode });
+    saveRunning({ id, mode, title });
+    const running = { title };
     try {
       for (;;) {
         const status = await api("GET", `city-worlds/build/${encodeURIComponent(id)}`);
@@ -341,8 +344,9 @@ export function cityWorlds(page) {
         if (status.state === "done") {
           ui.status.className = "generation ready";
           ui.status.textContent = `生成しました — ${id}`;
-          await afterGenerated(id, status.build);
-          await refreshGeneratedJobs(id);
+          await afterGenerated(id, status.build, running?.title);
+          await refreshGeneratedJobs(`studio:${id}`);
+          page.showMade?.();
         } else if (status.state === "canceled") {
           ui.status.className = "generation canceled";
           ui.status.textContent = "生成をキャンセルしました。";
@@ -388,13 +392,13 @@ export function cityWorlds(page) {
       refresh();
       return;
     }
-    await follow(id, mode);
+    await follow(id, mode, body.name || null);
   }
 
   async function generateWorld() {
     if (lastAvailable === null) return;
     // The Web UI's id (the municipality and the centre): the same place generated again replaces it.
-    await generate(lastAvailable.jobId, { ...lastAvailable.request, source: "plateau" }, "plateau");
+    await generate(lastAvailable.jobId, { ...lastAvailable.request, name: lastAvailable.title, source: "plateau" }, "plateau");
   }
 
   async function cancelGeneration() {
@@ -417,43 +421,97 @@ export function cityWorlds(page) {
     }
   }
 
-  // --- Results --------------------------------------------------------------
+  // --- What was made: one list ---------------------------------------------
+  // The City Worlds this Studio generated (GET /api/city-worlds/jobs: 3D, ZIP,
+  // delete) and the Envsim builds found in the workspace, the Business Pack's
+  // City World jobs among them (GET /api/city-worlds: take in as parts, write
+  // out). An entry: {key, kind: "studio" | "workspace", title, selection, job | build}.
+  let entries = [];
+  let chosenKey = null;
+  const ROOT_KEY = "hakoniwa-environment-world-root";
+  try { elements["world-root"].value = localStorage.getItem(ROOT_KEY) || ""; } catch { /* storage unavailable */ }
 
-  function selectedGeneratedJob() {
-    return generatedJobs.find((item) => item.job_id === elements["artifact-select"].value) ?? null;
+  function selectedEntry() {
+    return entries.find((entry) => entry.key === chosenKey) ?? null;
   }
 
-  function applyGeneratedSelection(job) {
-    const selection = job?.selection;
+  // The Studio's own job (3D, ZIP, delete), or null.
+  function selectedGeneratedJob() {
+    const entry = selectedEntry();
+    return entry?.kind === "studio" ? entry.job : null;
+  }
+
+  function sizeText(selection) {
+    if (!selection) return "";
+    const { east_west: ew, north_south: ns } = selection.half_extent_m;
+    return ew === ns ? `${Math.round(ew * 2)} m 四方` : `${Math.round(ew * 2)} × ${Math.round(ns * 2)} m`;
+  }
+
+  function badgeOf(entry) {
+    if (entry.kind === "workspace") return "Business Pack など";
+    return entry.job.source === "osm" ? "Studio・OpenStreetMap" : "Studio・PLATEAU";
+  }
+
+  function renderEntries() {
+    elements["made-count"].textContent = entries.length ? `${entries.length}` : "";
+    elements["world-entries"].replaceChildren(...(entries.length ? entries.map((entry) => el("li", {},
+      el("button", {
+        class: `world-entry${entry.key === chosenKey ? " chosen" : ""}`, type: "button",
+        onclick: () => choose(entry.key, { restoreSelection: true }),
+      },
+        el("span", { class: "entry-title" }, entry.title),
+        el("span", { class: "entry-meta" },
+          el("span", { class: `badge ${entry.kind}` }, badgeOf(entry)),
+          ` ${sizeText(entry.selection)}${entry.exported ? "・書き出し済み" : ""}`)))) : [el("li", { class: "hint" }, "まだありません")]));
+  }
+
+  function applyGeneratedSelection(entry) {
+    const selection = entry?.selection;
     if (selection === null || selection === undefined) {
       generatedRectangle.setStyle({ opacity: 0 });
       return;
     }
-    if (Number.isInteger(job.building_physics_level)) elements["physics-level"].value = String(job.building_physics_level);
-    const reduction = job.building_collider_reduction;
-    elements["coplanar-union"].checked = ["coplanar-union", "convex-decompose", "tolerant-planar"].includes(reduction);
-    elements["convex-decompose"].checked = ["convex-decompose", "tolerant-planar"].includes(reduction);
-    elements["tolerant-planar"].checked = reduction === "tolerant-planar";
-    elements["terrain-uncovered-policy"].value = job.terrain_uncovered_policy === "constant" ? "constant" : "error";
+    const job = entry.kind === "studio" ? entry.job : null;
+    if (job) {
+      if (Number.isInteger(job.building_physics_level)) elements["physics-level"].value = String(job.building_physics_level);
+      const reduction = job.building_collider_reduction;
+      elements["coplanar-union"].checked = ["coplanar-union", "convex-decompose", "tolerant-planar"].includes(reduction);
+      elements["convex-decompose"].checked = ["convex-decompose", "tolerant-planar"].includes(reduction);
+      elements["tolerant-planar"].checked = reduction === "tolerant-planar";
+      elements["terrain-uncovered-policy"].value = job.terrain_uncovered_policy === "constant" ? "constant" : "error";
+    }
     page.applySelection(selection);
     invalidateInspection();
     refresh();
     const bounds = page.selectionBounds();
     generatedRectangle.setBounds(bounds);
     generatedRectangle.setStyle({ opacity: 1 });
-    generatedRectangle.unbindTooltip().bindTooltip(`生成結果: ${job.job_id}`);
+    generatedRectangle.unbindTooltip().bindTooltip(entry.title);
     map.fitBounds(bounds.pad(0.35), { maxZoom: 19 });
   }
 
+  function choose(key, { restoreSelection = false } = {}) {
+    chosenKey = key;
+    renderEntries();
+    updateArtifactSelection({ restoreSelection });
+  }
+
   function updateArtifactSelection({ restoreSelection = false } = {}) {
+    const entry = selectedEntry();
     const job = selectedGeneratedJob();
-    for (const id of ["download", "view3d", "delete-artifact", "import-artifact", "export-artifact", "viewer-visual"]) {
-      elements[id].disabled = job === null;
-    }
+    elements["entry-detail"].hidden = entry === null;
+    if (entry === null) return;
+    elements["entry-title"].textContent = entry.title;
+    // 3D, the ZIP and deleting: the Studio's own City Worlds; taking in and writing out: any.
+    for (const id of ["download", "view3d", "delete-artifact", "viewer-visual", "viewer-collider"]) elements[id].hidden = job === null;
+    elements["viewer-visual"].closest("fieldset").hidden = job === null;
+    for (const id of ["download", "view3d", "delete-artifact", "viewer-visual"]) elements[id].disabled = job === null;
     elements["viewer-collider"].disabled = job === null || !job?.collider_available;
-    elements["export-artifact"].textContent = job?.exported ? "書き出しを消す" : "書き出す";
-    elements["export-artifact"].title = job?.exported
-      ? `書き出し先の ${job.exported.id} を消します（City World 自体は残ります）`
+    elements["import-artifact"].disabled = false;
+    elements["export-artifact"].disabled = entry.kind === "workspace" && !entry.build.exportable;
+    elements["export-artifact"].textContent = entry.exported ? "書き出しを消す" : "書き出す";
+    elements["export-artifact"].title = entry.exported
+      ? `書き出し先の ${entry.exported.id} を消します（City World 自体は残ります）`
       : "この City World を変換せずにそのまま書き出し先に書き出します";
     if (job !== null && !job.collider_available) {
       elements["viewer-visual"].checked = true;
@@ -464,59 +522,62 @@ export function cityWorlds(page) {
       elements["viewer-visual"].checked = false;
       elements["viewer-collider"].checked = true;
     }
-    elements["artifact-path"].textContent = job === null ? "—" : `${job.path}/`;
-    const componentCounts = job?.colliders?.by_component ?? {};
-    const componentText = Object.entries(componentCounts).map(([name, count]) => `${COMPONENT_NAMES[name] || name} ${count}`).join("・");
-    const classCounts = job?.colliders?.by_physics_class ?? {};
-    const classText = ["P0", "P1", "P2", "P3"].map((name) => `${name} ${classCounts[name] ?? 0}`).join("・");
-    const geomTypes = job?.colliders?.building_by_geom_type;
-    elements["artifact-detail"].textContent = job === null
-      ? "—"
-      : [
+    elements["artifact-path"].textContent = job ? `${job.path}/` : entry.build.path;
+    elements["cache-info"].hidden = job === null;
+    if (job === null) {
+      const build = entry.build;
+      elements["artifact-detail"].textContent = [
+        `建物 ${build.buildings} 棟・${build.feature_types.join(" / ")}`,
+        build.world ? "City World あり" : "City World なし（部品として取り込むだけできます）",
+        build.dem ? "地形（DEM）あり" : null,
+        entry.exported ? `書き出し済み：${entry.exported.id}` : null,
+      ].filter(Boolean).join("\n");
+    } else {
+      const componentCounts = job.colliders?.by_component ?? {};
+      const componentText = Object.entries(componentCounts).map(([name, count]) => `${COMPONENT_NAMES[name] || name} ${count}`).join("・");
+      const classCounts = job.colliders?.by_physics_class ?? {};
+      const classText = ["P0", "P1", "P2", "P3"].map((name) => `${name} ${classCounts[name] ?? 0}`).join("・");
+      const geomTypes = job.colliders?.building_by_geom_type;
+      elements["artifact-detail"].textContent = [
         `データ：${job.source === "osm" ? "OpenStreetMap（地面は標高 0 m の平面）" : "PLATEAU"}`,
+        `ID：${job.job_id}`,
         `建物の当たり判定の細かさ：${job.building_physics_level ?? "不明"}（減らし方 ${job.building_collider_reduction ?? "safe"}）`,
         `当たり判定：${job.colliders?.total ?? "不明"} 個${componentText ? `（${componentText}）` : ""}`,
         job.colliders?.by_physics_class ? `建物の内訳：${classText}` : null,
         geomTypes ? `建物の形：箱 ${geomTypes.box}・メッシュ ${geomTypes.mesh}` : null,
         `3D 表示のファイル：見た目 ${formatBytes(job.visual_size_bytes ?? 0)}・当たり判定 ${formatBytes(job.collider_size_bytes ?? 0)}`,
         job.visual_size_bytes > LARGE_VISUAL_PREVIEW_BYTES ? "見た目が大きいので、3D は当たり判定だけを表示します（見た目も選べます）。" : null,
-        job.exported ? `書き出し済み: ${job.exported.id}` : null,
+        entry.exported ? `書き出し済み：${entry.exported.id}` : null,
       ].filter(Boolean).join("\n");
-    if (restoreSelection) applyGeneratedSelection(job);
+    }
+    if (restoreSelection) applyGeneratedSelection(entry);
   }
 
-  async function refreshGeneratedJobs(preferredJobId = null, { restoreSelection = true } = {}) {
-    try {
-      const payload = await api("GET", "city-worlds/jobs");
-      generatedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
-      const cache = payload.shared_cache;
-      elements["cache-info"].textContent = cache
-        ? `共有キャッシュ：${cache.object_count} ファイル・${formatBytes(cache.size_bytes)}（${cache.path}）`
-        : "共有キャッシュ：—";
-      const previous = elements["artifact-select"].value;
-      elements["artifact-select"].replaceChildren();
-      if (generatedJobs.length === 0) {
-        elements["artifact-select"].append(new Option("生成結果はありません", ""));
-        elements["artifact-select"].disabled = true;
-      } else {
-        for (const job of generatedJobs) {
-          elements["artifact-select"].append(new Option(job.selection
-            ? `${job.job_id} — ${job.source === "osm" ? "OSM" : "PLATEAU"} — ${job.selection.half_extent_m.east_west * 2}m × ${job.selection.half_extent_m.north_south * 2}m — ${formatBytes(job.size_bytes)}`
-            : `${job.job_id} — ${formatBytes(job.size_bytes)}`, job.job_id));
-        }
-        elements["artifact-select"].disabled = false;
-        const keep = preferredJobId ?? previous;
-        if (keep && generatedJobs.some((job) => job.job_id === keep)) elements["artifact-select"].value = keep;
-      }
-      updateArtifactSelection({ restoreSelection });
-    } catch (error) {
-      generatedJobs = [];
-      elements["cache-info"].textContent = "共有キャッシュ：取得できません";
-      elements["artifact-select"].replaceChildren(new Option("生成履歴を取得できません", ""));
-      elements["artifact-select"].disabled = true;
-      updateArtifactSelection();
-      writeLog({ type: "GENERATED_INDEX_FAILED", error: String(error.message ?? error) });
-    }
+  async function refreshGeneratedJobs(preferredKey = null, { restoreSelection = true } = {}) {
+    const root = elements["world-root"].value.trim();
+    const [studio, workspace] = await Promise.all([
+      api("GET", "city-worlds/jobs").catch((error) => ({ error })),
+      api("GET", `city-worlds${root ? `?root=${encodeURIComponent(root)}` : ""}`).catch((error) => ({ error })),
+    ]);
+    const jobs = Array.isArray(studio.jobs) ? studio.jobs : [];
+    if (studio.error) writeLog({ type: "GENERATED_INDEX_FAILED", error: String(studio.error.message ?? studio.error) });
+    if (workspace.error) writeLog({ type: "WORKSPACE_SEARCH_FAILED", error: String(workspace.error.message ?? workspace.error) });
+    const cache = studio.shared_cache;
+    elements["cache-info"].textContent = cache
+      ? `共有キャッシュ：${cache.object_count} ファイル・${formatBytes(cache.size_bytes)}（${cache.path}）`
+      : "共有キャッシュ：取得できません";
+    const own = new Set(jobs.map((job) => job.build));
+    entries = [
+      ...jobs.map((job) => ({ key: `studio:${job.job_id}`, kind: "studio", title: job.title || job.job_id,
+        selection: job.selection, exported: job.exported, job })),
+      ...(Array.isArray(workspace.builds) ? workspace.builds : []).filter((build) => !own.has(build.path)).map((build) => ({
+        key: `workspace:${build.path}`, kind: "workspace", title: build.title, exported: build.exported, build,
+        selection: build.center ? { center: build.center, half_extent_m: build.half_extent_m } : null })),
+    ];
+    const keep = preferredKey ?? chosenKey;
+    chosenKey = entries.some((entry) => entry.key === keep) ? keep : null;
+    renderEntries();
+    updateArtifactSelection({ restoreSelection: restoreSelection && chosenKey !== null });
   }
 
   function closeViewerForJob(jobId) {
@@ -548,6 +609,7 @@ export function cityWorlds(page) {
       generatedRectangle.setStyle({ opacity: 0 });
       elements["artifact-status"].className = "generation ready";
       elements["artifact-status"].textContent = `削除しました — ${job.job_id}（ダウンロード済みの CityGML は共有キャッシュに残しています）`;
+      chosenKey = null;
       await refreshGeneratedJobs(null, { restoreSelection: false });
     } catch (error) {
       elements["artifact-status"].className = "generation failed";
@@ -569,20 +631,20 @@ export function cityWorlds(page) {
   }
 
   async function exportSelected() {
-    const job = selectedGeneratedJob();
-    if (job === null) return;
-    if (job.exported) {
-      if (!window.confirm(`書き出し先の ${job.exported.id} を消しますか？（City World 自体は残ります）`)) return;
+    const entry = selectedEntry();
+    if (entry === null) return;
+    if (entry.exported) {
+      if (!window.confirm(`書き出し先の ${entry.exported.id} を消しますか？（City World 自体は残ります）`)) return;
       try {
-        await call("POST", `exports/${encodeURIComponent(job.exported.id)}/delete`, {});
-        page.setStatus(`書き出し先の ${job.exported.id} を消しました`, "ok");
+        await call("POST", `exports/${encodeURIComponent(entry.exported.id)}/delete`, {});
+        page.setStatus(`書き出し先の ${entry.exported.id} を消しました`, "ok");
       } catch (error) {
         page.setStatus(error.message, "error");
       }
     } else {
-      await exportWorld({ path: job.build, title: job.job_id });
+      await exportWorld({ path: entry.kind === "studio" ? entry.job.build : entry.build.path, title: entry.title });
     }
-    await refreshGeneratedJobs(job.job_id, { restoreSelection: false });
+    await refreshGeneratedJobs(entry.key, { restoreSelection: false });
   }
 
   // --- 3D viewer ------------------------------------------------------------
@@ -714,7 +776,6 @@ export function cityWorlds(page) {
   elements.cancel.addEventListener("click", cancelGeneration);
   elements["osm-cancel"].addEventListener("click", cancelGeneration);
   elements["to-osm"].addEventListener("click", () => page.toOsm());
-  elements["artifact-select"].addEventListener("change", () => updateArtifactSelection({ restoreSelection: true }));
   elements["viewer-visual"].addEventListener("change", (event) => changeViewerLayer(event.target));
   elements["viewer-collider"].addEventListener("change", (event) => changeViewerLayer(event.target));
   elements.download.addEventListener("click", () => {
@@ -725,13 +786,20 @@ export function cityWorlds(page) {
   elements["delete-artifact"].addEventListener("click", deleteSelectedArtifact);
   elements["export-artifact"].addEventListener("click", exportSelected);
   elements["import-artifact"].addEventListener("click", () => {
-    const job = selectedGeneratedJob();
-    if (job !== null) page.importWorld({ id: job.job_id, path: job.build, title: job.job_id });
+    const entry = selectedEntry();
+    if (entry === null) return;
+    page.importWorld(entry.kind === "studio"
+      ? { id: entry.job.job_id, path: entry.job.build, title: entry.title }
+      : { id: entry.build.id, path: entry.build.path, title: entry.title });
+  });
+  elements["world-search"].addEventListener("click", () => {
+    try { localStorage.setItem(ROOT_KEY, elements["world-root"].value.trim()); } catch { /* storage unavailable */ }
+    refreshGeneratedJobs();
   });
 
   refreshGeneratedJobs(null, { restoreSelection: false });
   const running = loadRunning();  // a generation started before this page was opened again
-  if (running) follow(running.id, running.mode);
+  if (running) follow(running.id, running.mode, running.title);
 
   return {
     // The selection moved: a diagnosis is for the selection it was made for.

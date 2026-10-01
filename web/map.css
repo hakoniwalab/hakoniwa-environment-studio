@@ -81,3 +81,21 @@ body.viewer-open #viewer-panel { display: block; }
 @media (max-width: 800px) {
   #viewer-panel { flex-basis: 360px; }
 }
+/* 作る / できたもの, and the one list of what was made. */
+.side-tabs { width: 100%; }
+.side-tabs button { flex: 1; }
+.side-tabs .count:not(:empty) { margin-left: 4px; padding: 0 6px; border-radius: 9px; background: var(--accent-text); color: var(--accent); font-size: 11px; }
+.side-tabs button[aria-pressed="false"] .count:not(:empty) { background: var(--accent); color: var(--accent-text); }
+#tab-make, #tab-made { display: flex; flex-direction: column; gap: 16px; }
+#tab-make[hidden], #tab-made[hidden] { display: none; }
+.world-entries { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; max-height: 40vh; overflow: auto; }
+.world-entry { width: 100%; display: grid; gap: 2px; text-align: left; padding: 8px 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.world-entry.chosen { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.entry-title { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.entry-meta { font-size: 12px; color: var(--muted); }
+.badge { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; background: #e6eefc; color: #1f4fa8; }
+.badge.workspace { background: #f1ece2; color: #7a5a1e; }
+.other-folders { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.other-folders summary { cursor: pointer; }
+.other-folders .row { margin-top: 6px; }
+.other-folders input { flex: 1; }
