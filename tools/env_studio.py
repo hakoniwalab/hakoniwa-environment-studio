@@ -66,6 +66,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
+import env_catalog_items  # noqa: E402
 import env_citygml  # noqa: E402
 import env_envsim  # noqa: E402
 import env_cityworld  # noqa: E402
@@ -115,10 +116,14 @@ def _check_id(recipe_id: str) -> str:
 
 
 def _catalog_paths() -> dict[str, Path]:
-    """Catalog id (its folder name) -> catalog.yaml."""
-    if not CATALOGS.is_dir():
-        return {}
-    return {path.parent.name: path.resolve() for path in sorted(CATALOGS.glob("*/catalog.yaml"))}
+    """Catalog id (its folder name) -> catalog.yaml: this repository's Catalogs,
+    then the user's (<ws>/catalogs/, the buildings registered from cities)."""
+    found = {}
+    for folder in (CATALOGS, env_catalog_items.USER_CATALOGS):
+        if folder.is_dir():
+            for path in sorted(folder.glob("*/catalog.yaml")):
+                found.setdefault(path.parent.name, path.resolve())
+    return found
 
 
 def _catalog_path(catalog_id: str) -> Path:
@@ -136,7 +141,8 @@ def _catalog_id_of(path: Path) -> str | None:
 def list_catalogs() -> list[dict]:
     entries = []
     for catalog_id, path in _catalog_paths().items():
-        entry = {"id": catalog_id, "path": str(path)}
+        entry = {"id": catalog_id, "path": str(path),
+                 "user": path.is_relative_to(env_catalog_items.USER_CATALOGS.resolve())}
         try:
             catalog = env_schema.load_catalog(path)
             entry.update(name=catalog.meta.get("name", catalog_id), description=catalog.meta.get("description", ""),
@@ -314,6 +320,27 @@ def preview_poses(body: object) -> dict:
                         else (obj.pose.x_m, obj.pose.y_m, obj.pose.z_m, obj.pose.yaw_deg))
         poses[obj.id] = {"translation": [x, z, -y], "yaw_deg": yaw}
     return {"poses": poses}
+
+
+def register_building(body: object) -> dict:
+    """Register a building of an unsaved Recipe in the user's Catalog
+    (env_catalog_items.register): its look and colliders copied beside the
+    Catalog in its own frame. Body: the Recipe and {object, item_name?}."""
+    if not isinstance(body, dict):
+        raise StudioError("the request body must be a Recipe and {object, item_name?, recipe_id?}")
+    name = str(body.get("recipe_id") or "register")
+    if not ID_PATTERN.match(name):
+        raise StudioError(f"recipe_id {name!r} is not an id")
+    try:
+        recipe = _recipe_from_body({key: value for key, value in body.items()
+                                    if key not in ("object", "item_name", "recipe_id")},
+                                   USER_RECIPES.resolve() / f"{name}.yaml")
+        result = env_catalog_items.register(recipe, str(body.get("object") or ""), str(body.get("item_name") or ""))
+    except DiagnosticError as exc:
+        raise StudioError(f"登録できません: {exc}") from exc
+    except env_catalog_items.RegisterError as exc:
+        raise StudioError(f"登録できません: {exc}") from exc
+    return result
 
 
 def explode_layer(body: object) -> dict:
@@ -849,6 +876,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("POST", ("shutdown",), lambda self, _: self._shutdown()),
         ("GET", ("catalogs",), lambda self, _: self._json(list_catalogs())),
         ("GET", ("catalogs", "*"), lambda self, parts: self._json(catalog_json(parts[1]))),
+        ("POST", ("catalogs", "my", "items"), lambda self, _: self._json(register_building(self._body()))),
         ("GET", ("map", "config"), lambda self, _: self._json(map_config())),
         ("POST", ("map", "import"), lambda self, _: self._json(import_map(self._body()))),
         ("GET", ("city-worlds",), lambda self, _: self._json(list_city_worlds(self._query("root")))),

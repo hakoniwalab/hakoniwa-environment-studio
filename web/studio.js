@@ -421,12 +421,19 @@ async function loadCatalog(id) {
   renderCatalog();
 }
 
-// A Recipe keeps its Catalog; it can change only while the Recipe has no objects.
+// A Recipe keeps its Catalog; it can change to one that has every part it
+// uses (マイカタログ includes the starter Catalog), or freely while it is empty.
 async function switchCatalog(id) {
   if (state.current && recipe().objects.length) {
-    $("#catalog-select").value = state.catalogId;
-    setStatus("部品がある環境の Catalog は変えられません。新規作成で選んでください。", "error");
-    return;
+    const other = await api("GET", `catalogs/${id}`);
+    const ids = new Set(other.items.map((item) => item.id));
+    const missing = [...new Set([recipe().terrain?.item, ...recipe().objects.map((obj) => obj.item)])]
+      .filter((item) => item && !ids.has(item));
+    if (missing.length) {
+      $("#catalog-select").value = state.catalogId;
+      setStatus(`この環境の部品（${missing.slice(0, 3).join("、")}${missing.length > 3 ? " ほか" : ""}）が「${other.name}」にないので、Catalog を変えられません`, "error");
+      return;
+    }
   }
   await loadCatalog(id);
   if (state.current && !catalog.item(recipe().terrain?.item)) recipe().terrain = { item: terrainItems()[0]?.id };
@@ -438,7 +445,6 @@ function renderCatalogSelect() {
   select.replaceChildren(...state.catalogs.filter((item) => !item.error).map((item) =>
     el("option", { value: item.id, selected: item.id === state.catalogId }, item.name || item.id)));
   select.value = state.catalogId;
-  select.disabled = Boolean(state.current && recipe().objects.length);
   $("#catalog-source").textContent = state.catalogInfo?.description || "";
 }
 
@@ -553,6 +559,30 @@ async function explodeLayer(obj) {
     setStatus(`${obj.id} を ${objects.length} 個の道路部品にしました`, "ok");
   } catch (error) {
     setStatus(`${obj.id} を分解できません: ${error.message}`, "error");
+  }
+}
+
+// A building of this environment registered in the user's Catalog (POST
+// /api/catalogs/my/items): its look and colliders copied there in its own
+// frame, so it can be placed in any environment that uses マイカタログ.
+async function registerBuilding(obj) {
+  const name = window.prompt("マイカタログに登録する名前", obj.source?.tags?.name || obj.id);
+  if (!name) return;
+  setStatus(`${obj.id} をマイカタログに登録しています…`);
+  try {
+    const { item } = await api("POST", "catalogs/my/items",
+      { ...recipeBody(), object: obj.id, item_name: name, recipe_id: state.current?.id || undefined });
+    state.catalogs = await api("GET", "catalogs");
+    if (state.catalogId === "my") {
+      state.catalogId = null;
+      await loadCatalog("my");
+    }
+    renderCatalogSelect();
+    setStatus(state.catalogId === "my"
+      ? `「${item.name}」をマイカタログに登録しました（部品一覧の「${item.category}」）`
+      : `「${item.name}」をマイカタログに登録しました。置くには、環境の Catalog を「マイカタログ」にしてください`, "ok");
+  } catch (error) {
+    setStatus(error.message, "error");
   }
 }
 
@@ -749,6 +779,7 @@ const inspector = createInspector($("#inspector"), {
   duplicate: () => duplicateSelected(),
   remove: () => deleteSelected(),
   explode: (obj) => explodeLayer(obj),
+  register: (obj) => registerBuilding(obj),
   slide: (direction) => slideSelected(direction),
   move: (dx, dy) => moveSelected(dx, dy),
   applyPoses: (poses) => applyPoses(poses),
@@ -763,7 +794,8 @@ async function init() {
   });
   state.plan.setGrid(Number($("#grid").value));
   state.catalogs = await api("GET", "catalogs");
-  await loadCatalog(state.catalogs.find((item) => !item.error)?.id);
+  // マイカタログ when there is one (it includes the starter Catalog), else the first.
+  await loadCatalog((state.catalogs.find((item) => item.id === "my" && !item.error) ?? state.catalogs.find((item) => !item.error))?.id);
   await loadRecipes();
   $("#catalog-select").addEventListener("change", (event) => switchCatalog(event.target.value));
   $("#terrain-select").addEventListener("change", (event) => setTerrain(event.target.value));

@@ -603,9 +603,10 @@ def _copied(element: ET.Element, prefix: str) -> ET.Element:
 
 def _add_collision(asset: ET.Element, world: ET.Element, recipe: env_schema.Recipe, obj: env_schema.EnvObject) -> None:
     """An object's own colliders: Envsim's geoms as written (in Envsim's frame),
-    carried from the anchor's frame to asset_frame()."""
+    carried from the anchor's frame to asset_frame(). Without an anchor (a
+    Catalog's building) they are in the object's own frame, in Envsim's axes."""
     x, y, z, yaw = asset_frame(recipe, obj)
-    anchor = obj.anchor
+    anchor = obj.anchor or {"x_m": 0.0, "y_m": 0.0, "z_m": 0.0}
     body = ET.SubElement(world, "body", {"name": BODY_PREFIX + obj.id, "pos": _numbers((x, y, z)),
                                          "quat": _numbers(quaternion(0, 0, yaw))})
     frame = ET.SubElement(body, "body", {"name": f"{obj.id}/envsim-frame",

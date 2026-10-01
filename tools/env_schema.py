@@ -48,7 +48,7 @@ ANCHOR_KEYS = {"x_m", "y_m", "z_m", "yaw_deg", "terrain"}
 # Earth and where the data came from. Kept as it is; it does not change the world.
 GEO_KEYS = {"provider", "origin", "bbox_deg", "projection", "attribution", "license", "data_timestamp", "query"}
 # Provenance of one object (the map feature it was made from).
-SOURCE_KEYS = {"provider", "kind", "id", "tags", "note"}
+SOURCE_KEYS = {"provider", "kind", "id", "tags", "note", "attribution", "license"}
 POSE_KEYS = {"x_m", "y_m", "yaw_deg"}
 
 
@@ -335,11 +335,33 @@ def parse_catalog(data: dict, path: Path, library: env_types.TypeLibrary | None 
     if data.get("schema") != CATALOG_SCHEMA:
         problems.add("schema", "wrong_schema", "wrong schema", expected=CATALOG_SCHEMA, actual=data.get("schema"))
     meta = problems.check(mapping, data.get("catalog", {}), "catalog") or {}
-    problems.check(only, meta, {"id", "name", "description", "source"}, "catalog")
+    problems.check(only, meta, {"id", "name", "description", "source", "includes"}, "catalog")
     entries = data.get("items")
     items: dict[str, Item] = {}
     raws: dict[str, dict] = {}
-    if not isinstance(entries, list) or not entries:
+    # Catalogs this one includes (paths relative to it): their items come first,
+    # so a Recipe of the included Catalog keeps working with this one.
+    includes = meta.get("includes", [])
+    if not isinstance(includes, list) or not all(isinstance(entry, str) and entry for entry in includes):
+        problems.add("catalog.includes", "wrong_type", "a list of Catalog paths", expected="list of paths",
+                     actual=includes)
+        includes = []
+    included_paths = []
+    for index, entry in enumerate(includes):
+        included = (path.parent / entry).resolve()
+        if included == path.resolve():
+            problems.add(f"catalog.includes[{index}]", "not_allowed", "a Catalog cannot include itself", actual=entry)
+            continue
+        try:
+            other = load_catalog(included)
+        except DiagnosticError as exc:
+            problems.add(f"catalog.includes[{index}]", "unknown_reference", f"cannot read the Catalog: {exc}",
+                         actual=entry)
+            continue
+        included_paths.append(included)
+        items.update(other.items)
+    _INCLUDES[path.resolve()] = included_paths
+    if not isinstance(entries, list) or (not entries and not items):
         problems.add("items", "missing_field", "must be a non-empty list", expected="list")
         entries = []
     for index, entry in enumerate(entries):
@@ -347,6 +369,7 @@ def parse_catalog(data: dict, path: Path, library: env_types.TypeLibrary | None 
         if result is None:
             continue
         item, raw = result
+        item = _assets_beside(item, path.parent)
         if item.id in items:
             problems.add(f"items[{index}].id", "duplicate_id", "used twice", actual=item.id)
             continue
@@ -356,19 +379,51 @@ def parse_catalog(data: dict, path: Path, library: env_types.TypeLibrary | None 
     return Catalog(path=path, items=items, meta=dict(meta))
 
 
+# The Catalogs each parsed Catalog includes (its cache depends on them too).
+_INCLUDES: dict[Path, list[Path]] = {}
+# Item parameters that name a file: in a Catalog, relative to the Catalog.
+ASSET_PARAMS = ("visual", "collision")
+
+
+def _assets_beside(item: Item, base: Path) -> Item:
+    """An item whose asset parameters (a GLB look, an MJCF of colliders) are
+    files beside its Catalog, with those paths made absolute (a Recipe
+    elsewhere uses them as they are)."""
+    changed = {}
+    for name in ASSET_PARAMS:
+        text = str(item.params.get(name) or "").strip()
+        if text and not Path(text).expanduser().is_absolute():
+            changed[name] = (base / text).resolve().as_posix()
+    if not changed:
+        return item
+    placement = {name: (param.with_default(changed[name]) if name in changed else param)
+                 for name, param in item.placement_params.items()}
+    return replace(item, params={**item.params, **changed}, placement_params=placement)
+
+
+def _stamp(path: Path) -> tuple:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None, None)
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
 def load_catalog(path: Path) -> Catalog:
-    """A Catalog file, parsed once while the file is unchanged (every Studio
-    request needs it; parsing resolves every item's shape)."""
+    """A Catalog file, parsed once while the file (and the Catalogs it
+    includes) are unchanged (every Studio request needs it; parsing resolves
+    every item's shape)."""
     path = Path(path).resolve()
     try:
         stat = path.stat()
     except OSError:
         return parse_catalog(_load_yaml(path, "catalog"), path)  # reports the missing file
-    return _load_catalog_cached(path, stat.st_mtime_ns, stat.st_size)
+    included = tuple(_stamp(item) for item in _INCLUDES.get(path, []))
+    return _load_catalog_cached(path, stat.st_mtime_ns, stat.st_size, included)
 
 
 @functools.lru_cache(maxsize=16)
-def _load_catalog_cached(path: Path, _mtime_ns: int, _size: int) -> Catalog:
+def _load_catalog_cached(path: Path, _mtime_ns: int, _size: int, _included: tuple) -> Catalog:
     return parse_catalog(_load_yaml(path, "catalog"), path)
 
 
@@ -436,7 +491,9 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
     params, shape = resolved
     visual, visual_sha = _asset(params, "visual", path, base_dir, "GLB")
     collision, collision_sha = _asset(params, "collision", path, base_dir, "MJCF")
-    if collision is not None and anchor is None:
+    # Colliders a placement names are placed from its anchor (where they were made
+    # for); a Catalog item's own (a registered building) are in the object's frame.
+    if collision is not None and anchor is None and params.get("collision") != item.params.get("collision"):
         raise fail(f"{path}.params.collision", "missing_field",
                    "colliders are placed from the object's anchor (where they were made for)", expected="anchor")
     obj = EnvObject(id=object_id, item=item.id, type=item.type.id, pose=Pose(x, y, 0.0, float(yaw) % 360.0),

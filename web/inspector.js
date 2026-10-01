@@ -94,6 +94,10 @@ export function createInspector(host, app) {
         class: "secondary", title: "道路網の外形を、1 本ずつ編集できる道路（面）の部品にします。envsim の見た目（地形に沿った道路）の代わりに、平らな面を地面に置きます。",
         onclick: () => app.explode(part),
       }, "個別の道路部品に分解") : null,
+      entry?.type === "building_footprint" && entry?.category !== "登録した建物" ? el("button", {
+        class: "secondary", title: "この建物（見た目・当たり判定も）を、ほかの環境にも置ける部品としてマイカタログに登録します。",
+        onclick: () => app.register(part),
+      }, "マイカタログに登録") : null,
       ...paramSection(entry, part),
       el("h2", {}, "動かす"),
       el("div", { class: "move-row" }, el("span", { class: "meta" }, "寄せる"),
