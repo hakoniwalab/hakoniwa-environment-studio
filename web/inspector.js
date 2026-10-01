@@ -90,7 +90,7 @@ export function createInspector(host, app) {
         ? `地面から ${view.z} m 上に置きます` : "地面の上に立ちます（丘の上では足元の高さに合わせます）"),
       assumedLine(entry, part),
       anchorLine(part),
-      entry?.type === "city_layer" ? el("button", {
+      entry?.type === "city_layer" && part.source?.id === "roads" ? el("button", {
         class: "secondary", title: "道路網の外形を、1 本ずつ編集できる道路（面）の部品にします。envsim の見た目（地形に沿った道路）の代わりに、平らな面を地面に置きます。",
         onclick: () => app.explode(part),
       }, "個別の道路部品に分解") : null,

@@ -212,11 +212,12 @@ export class PlanView {
     // sight on top of them, and the selected part last of all. Elevated parts
     // (raised above the ground) are drawn faint and dashed, so what is
     // under them shows through.
-    // Roads and markings (the surface layer) lie under everything.
+    // Roads and markings (the surface layer) lie under everything, selected
+    // too (a City World's markings would cover the city).
     const areas = new Map(this.parts.map((part) => [part, part.width * part.depth])); // the envelope's area, once
     const ordered = [...this.parts].sort((a, b) =>
-      Number(this.selection.has(a.id)) - Number(this.selection.has(b.id))
-      || Number(b.layer === "surface") - Number(a.layer === "surface")
+      Number(b.layer === "surface") - Number(a.layer === "surface")
+      || Number(this.selection.has(a.id)) - Number(this.selection.has(b.id))
       || areas.get(b) - areas.get(a));
     const single = this.selection.size === 1;
     const kept = new Map();

@@ -112,6 +112,23 @@ def make_build(root: Path) -> tuple[Path, dict]:
 
 
 @unittest.skipUnless(READY, "hakoniwa-envsim or MuJoCo is not available")
+class LayerOutlineTest(unittest.TestCase):
+    """A layer's outlines on the plan (road markings, bridges): one per piece of
+    its triangles, not one box over all of it (a box would cover the city)."""
+
+    def test_each_piece_of_a_layer_has_its_own_outline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "markings.glb"
+            # Two stripes 40 m apart (east, north, up), each two triangles.
+            path.write_bytes(glb([("a", [(0, 0, 0), (3, 0, 0), (3, 0.2, 0), (0, 0.2, 0)]),
+                                  ("b", [(40, 10, 0), (43, 10, 0), (43, 10.2, 0), (40, 10.2, 0)])]))
+            outlines = env_citygml._glb_outlines(path)
+        self.assertEqual(len(outlines), 2)
+        boxes = sorted((min(x for x, _ in o), max(x for x, _ in o), min(y for _, y in o), max(y for _, y in o))
+                       for o in outlines)
+        self.assertEqual(boxes, [(0.0, 3.0, 0.0, 0.2), (40.0, 43.0, 10.0, 10.2)])
+
+
 class PassthroughTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

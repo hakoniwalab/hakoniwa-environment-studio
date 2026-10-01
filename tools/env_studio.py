@@ -354,6 +354,8 @@ def explode_layer(body: object) -> dict:
     obj = next((item for item in recipe.objects if item.id == body.get("object")), None)
     if obj is None or obj.type != "city_layer":
         raise StudioError(f"{body.get('object')!r} は街の層（city-layer）ではありません", HTTPStatus.NOT_FOUND)
+    if (obj.source or {}).get("id") != "roads":
+        raise StudioError(f"{obj.id} は道路網ではありません（分解できるのは envsim の道路網の層だけです）")
     from shapely.geometry import Polygon
 
     turn = math.radians(obj.pose.yaw_deg)

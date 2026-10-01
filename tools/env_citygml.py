@@ -710,6 +710,89 @@ def _glb_outline(glb: Path) -> list[list[float]]:
     return [[west, south], [east, south], [east, north], [west, north]]
 
 
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Counter-clockwise hull of points (Andrew's monotone chain)."""
+    points = sorted(set(points))
+    if len(points) < 3:
+        return points
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower, upper = [], []
+    for point in points:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    for point in reversed(points):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    return lower[:-1] + upper[:-1]
+
+
+def _glb_outlines(glb: Path) -> list[list[list[float]]]:
+    """What a layer (road markings, bridges) covers on the plan: one outline
+    per connected piece of its triangles (vertices within a millimetre are one),
+    each piece's hull from above (glTF: x east, z = -north), in metres. A GLB
+    without triangles gives its box (_glb_outline)."""
+    import struct
+
+    import env_generate
+
+    document, binary = env_generate.read_glb(glb.read_bytes())
+    views = document.get("bufferViews", [])
+    formats = {5126: "f", 5125: "I", 5123: "H", 5121: "B"}
+    widths = {"SCALAR": 1, "VEC3": 3}
+
+    def read(index: int) -> list[tuple]:
+        accessor = document["accessors"][index]
+        view = views[accessor["bufferView"]]
+        width = widths[accessor["type"]]
+        code = formats[accessor["componentType"]]
+        item = struct.calcsize("<" + code * width)
+        stride = view.get("byteStride") or item
+        start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+        return [struct.unpack_from("<" + code * width, binary, start + n * stride) for n in range(accessor["count"])]
+
+    parent: dict = {}
+
+    def find(key):
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    positions: dict = {}
+    for mesh in document.get("meshes", []):
+        for primitive in mesh["primitives"]:
+            if primitive.get("mode", 4) != 4 or "POSITION" not in primitive["attributes"]:
+                continue
+            keys = []
+            for x, _y, z in read(primitive["attributes"]["POSITION"]):
+                key = (round(x * 1000), round(-z * 1000))
+                positions[key] = (x, -z)
+                parent.setdefault(key, key)
+                keys.append(key)
+            order = [value[0] for value in read(primitive["indices"])] if "indices" in primitive else range(len(keys))
+            order = list(order)
+            for n in range(0, len(order) - 2, 3):
+                a, b, c = (keys[order[n + k]] for k in range(3))
+                for other in (b, c):
+                    root_a, root_other = find(a), find(other)
+                    if root_a != root_other:
+                        parent[root_a] = root_other
+    pieces: dict = {}
+    for key in parent:
+        pieces.setdefault(find(key), []).append(positions[key])
+    outlines = []
+    for points in pieces.values():
+        hull = _convex_hull([(_mm(x), _mm(y)) for x, y in points])
+        if len(hull) >= 3:
+            outlines.append([[x, y] for x, y in hull])
+    return sorted(outlines) or [_glb_outline(glb)]
+
+
 def copy_terrain(terrain: dict, asset_dir: Path, base_dir: Path) -> tuple[dict, str]:
     """(terrain params, hfield sha256) of an Envsim terrain copied beside the
     Recipe as it is (its receipt pointing at the copies)."""
@@ -757,7 +840,7 @@ def pass_through(objects: list[dict], passthrough: dict, road_outlines: list, us
         asset_dir.mkdir(parents=True, exist_ok=True)
         glb = asset_dir / f"layer-{name}.glb"
         shutil.copyfile(layer["glb"], glb)
-        outlines = road_outlines if name == "roads" and road_outlines else [_glb_outline(layer["glb"])]
+        outlines = road_outlines if name == "roads" and road_outlines else _glb_outlines(layer["glb"])
         params = {"outlines": outlines, "visual": relative(glb)}
         if layer["xml"] is not None:
             xml = asset_dir / f"layer-{name}.xml"
