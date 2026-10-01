@@ -18,6 +18,7 @@ import { terrainImage } from "./terrain.js";
 const PREVIEW_DELAY_MS = 300;
 const VALIDATE_DELAY_MS = 300;
 const NUDGE_FAR = 10; // Shift + arrow moves ten grid steps
+const ITEM_DRAG = "application/x-hakoniwa-item"; // a Catalog part dragged from the list
 const NUDGE_FINE_M = 0.01; // Alt + arrow
 const HISTORY_LIMIT = 200; // undo steps kept
 // Copied objects go to the system clipboard as JSON text with this format tag
@@ -464,7 +465,15 @@ function renderCatalog() {
       ? `φ${metres(envelope.width_m)}×H${metres(height)} m`
       : `${metres(envelope.width_m)}×${metres(envelope.depth_m)}×${metres(height)} m`;
     return el("li", {},
-      el("button", { onclick: () => addObject(entry.id), title: `${entry.category}：${entry.description || ""}` },
+      el("button", {
+        onclick: () => addObject(entry.id), draggable: "true",
+        ondragstart: (event) => {
+          event.dataTransfer.setData(ITEM_DRAG, entry.id);
+          event.dataTransfer.setData("text/plain", entry.name);
+          event.dataTransfer.effectAllowed = "copy";
+        },
+        title: `${entry.category}：${entry.description || ""}\n上面図か 3D にドラッグして置きます（クリックで中央に置きます）`,
+      },
         el("span", {}, entry.name),
         el("span", { class: "meta" }, size),
         el("span", { class: "swatch", style: `background:${entry.params.color || "#cccccc"}` })));
@@ -512,10 +521,16 @@ function renderRecipeList() {
 
 // --- Editing ----------------------------------------------------------------------
 
-function addObject(itemId) {
+// A part of the Catalog added to the environment: where it was dropped (on
+// the plan or the 3D view, on the grid), or at the centre (a click).
+function addObject(itemId, at = null) {
   const entry = catalog.item(itemId);
+  if (!entry || !state.current) return;
   const id = uniqueId(entry.id_prefix || "object");
-  recipe().objects.push({ id, item: itemId, pose: { x_m: 0, y_m: 0, yaw_deg: 0 } });
+  const step = Number($("#grid").value) || 0;
+  const onGrid = (value) => roundMm(step > 0 ? Math.round(value / step) * step : value);
+  const [x, y] = at ? at.map(onGrid) : [0, 0];
+  recipe().objects.push({ id, item: itemId, pose: { x_m: x, y_m: y, yaw_deg: 0 } });
   state.selection = [id];
   render();
 }
@@ -791,6 +806,29 @@ const inspector = createInspector($("#inspector"), {
   applyPoses: (poses) => applyPoses(poses),
 });
 
+// Where a Catalog part can be dropped: locate(event) gives [east, north] (or null).
+function dropTarget(host, locate) {
+  const carries = (event) => event.dataTransfer?.types.includes(ITEM_DRAG);
+  host.addEventListener("dragover", (event) => {
+    if (!carries(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    host.classList.add("drop-target");
+  });
+  host.addEventListener("dragleave", () => host.classList.remove("drop-target"));
+  host.addEventListener("drop", (event) => {
+    host.classList.remove("drop-target");
+    if (!carries(event)) return;
+    event.preventDefault();
+    const at = locate(event);
+    if (!at) {
+      setStatus("地面の上に落としてください", "error");
+      return;
+    }
+    addObject(event.dataTransfer.getData(ITEM_DRAG), at);
+  });
+}
+
 async function init() {
   state.plan = new PlanView($("#plan"), {
     onSelect: select,
@@ -799,6 +837,9 @@ async function init() {
     onDragEnd: () => render(), // panels, and the finished move as one undo step
   });
   state.plan.setGrid(Number($("#grid").value));
+  // A part dragged from the list is placed where it is dropped, on the plan or in 3D.
+  dropTarget($("#plan"), (event) => state.plan.areaAt(event.clientX, event.clientY));
+  dropTarget($("#view3d"), (event) => state.view3d?.groundAt3d(event.clientX, event.clientY));
   state.catalogs = await api("GET", "catalogs");
   // マイカタログ when there is one (it includes the starter Catalog), else the first.
   await loadCatalog((state.catalogs.find((item) => item.id === "my" && !item.error) ?? state.catalogs.find((item) => !item.error))?.id);

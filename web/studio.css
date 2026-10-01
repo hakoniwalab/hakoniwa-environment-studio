@@ -159,3 +159,4 @@ textarea.points { width: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, Menl
 .compass-north { fill: #d23f31; }
 .compass-south { fill: #9aa3ad; }
 .compass-label { font: 700 8px system-ui, sans-serif; fill: #d23f31; }
+.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; }

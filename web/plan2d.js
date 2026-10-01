@@ -162,9 +162,14 @@ export class PlanView {
 
   // Pointer position in environment metres.
   toArea(event) {
+    return this.areaAt(event.clientX, event.clientY);
+  }
+
+  // A screen point (client pixels) in environment metres.
+  areaAt(clientX, clientY) {
     const point = this.svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
+    point.x = clientX;
+    point.y = clientY;
     const local = point.matrixTransform(this.svg.getScreenCTM().inverse());
     return [local.x, -local.y];
   }

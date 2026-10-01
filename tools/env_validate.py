@@ -79,6 +79,16 @@ def check(recipe: env_schema.Recipe, tolerance_m: float = TOLERANCE_M) -> list:
             outside[key] = max(outside.get(key, 0.0), depth)
         elif len(objects) == 1 and others[0] == env_generate.TERRAIN_GEOM:
             sunk[objects[0]] = max(sunk.get(objects[0], 0.0), depth)
+    # An object wholly beyond an edge touches no boundary box: its outline tells.
+    half_east, half_north = recipe.terrain.half_east, recipe.terrain.half_north
+    for obj in recipe.objects:
+        xs, ys = zip(*env_schema.footprint(obj))
+        for edge, beyond, reach in (("east", min(xs) - half_east, max(xs) - half_east),
+                                    ("west", -half_east - max(xs), -half_east - min(xs)),
+                                    ("north", min(ys) - half_north, max(ys) - half_north),
+                                    ("south", -half_north - max(ys), -half_north - min(ys))):
+            if beyond > 0:
+                outside[(obj.id, edge)] = max(outside.get((obj.id, edge), 0.0), reach)
     expected = f"<= {tolerance_m} m"
     for (a, b), depth in sorted(overlaps.items(), key=lambda entry: (index[entry[0][0]], index[entry[0][1]])):
         problems.add(f"objects[{index[a]}]", "overlap", f"{a} and {b} penetrate each other by {depth * 1000:.0f} mm",

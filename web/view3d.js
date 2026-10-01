@@ -113,6 +113,19 @@ export class View3D {
     if (Number.isFinite(screen)) this.needle.setAttribute("transform", `rotate(${screen.toFixed(1)})`);
   }
 
+  // Where a screen point (client pixels) meets the ground: the terrain, or
+  // without one the plane at height 0. [east, north] in metres, or null (the sky).
+  groundAt3d(clientX, clientY) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const pointer = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(pointer, this.camera);
+    const terrain = this.model.getObjectByName("terrain");
+    const hit = terrain ? this.raycaster.intersectObject(terrain, true)[0]?.point : null;
+    const point = hit || this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    return point ? [point.x, -point.z] : null;
+  }
+
   // The id of the part nearest the camera under a pointer event, or null
   // (the sky, the terrain).
   partAt(event) {
