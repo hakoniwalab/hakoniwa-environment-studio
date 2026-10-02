@@ -51,8 +51,9 @@ INK = "#2f3237"
 BULB = "#ffe7b0"
 LIGHT = "#fff3c4"
 # Lights glow (emissive) so they show in the viewer's night mode: colour ->
-# emissive strength (KHR_materials_emissive_strength; > 1 reads as a light at night).
-GLOWS = {LAMP: 4.0, BULB: 6.0, LIGHT: 5.0}
+# (emissive colour, linear; KHR_materials_emissive_strength). The strength
+# stays low enough that the warm orange survives instead of clipping to white.
+GLOWS = {LAMP: ((1.0, 0.25, 0.04), 1.6), BULB: ((1.0, 0.40, 0.10), 1.5), LIGHT: ((1.0, 0.40, 0.10), 1.5)}
 
 STALL_COLOURS = {"orange": "#f26b1d", "red": "#d8352a", "blue": "#2f6fc0"}
 OPEN_SPACE_ACCENT = "#f26b1d"
@@ -271,6 +272,7 @@ class Asset:
     shapes: list = field(default_factory=list)       # type solids (dicts), in the object's frame
     looks: list = field(default_factory=list)        # (Mesh in object frame, colour or PNG bytes)
     only: str | None = None                          # the layout the next pieces belong to
+    lights: list = field(default_factory=list)       # (position in object frame, light) punctual lights
 
     def _place(self, mesh: Mesh, u, y, z, roll=0.0, pitch=0.0, yaw=0.0) -> Mesh:
         rot = rotation(roll, pitch, yaw)
@@ -314,6 +316,13 @@ class Asset:
         """Looks only (a lantern, a parasol, a bush)."""
         if self._keep():
             self.looks.append((self._place(mesh, u, y, z, roll, pitch, yaw), colour or self.accent))
+
+    def light(self, u, y, z, colour=(1.0, 0.62, 0.30), intensity=12.0, range_m=9.0):
+        """A warm point light (KHR_lights_punctual; candela) that lights its
+        surroundings at night."""
+        if self._keep():
+            self.lights.append(((-u, y, z), {"type": "point", "color": list(colour), "intensity": intensity,
+                                             "range": range_m}))
 
     def panel(self, canvas: Canvas, w, h, u, y, z, roll=0.0, pitch=0.0, yaw=0.0):
         """A printed panel (lettering, marks) facing +y unless turned."""
@@ -363,6 +372,8 @@ class Asset:
             # own colours and glow alone.
             uv_all = np.vstack(uvs) if isinstance(material, bytes) else np.zeros((len(positions_all), 2))
             writer.primitive(positions_all, np.vstack(normals), np.concatenate(indices), uv_all, material)
+        for (x, y, z), light in self.lights:
+            writer.light([x, z, -y], light)
         return writer.bytes()
 
 
@@ -410,8 +421,9 @@ class GlbWriter:
             entry = {"name": material, "pbrMetallicRoughness": {"baseColorFactor": [*rgb, 1.0],
                                                                 "metallicFactor": 0.0, "roughnessFactor": 0.85}}
             if material in GLOWS:
-                entry["emissiveFactor"] = [round(c, 4) for c in rgb]
-                entry["extensions"] = {"KHR_materials_emissive_strength": {"emissiveStrength": GLOWS[material]}}
+                glow, strength = GLOWS[material]
+                entry["emissiveFactor"] = list(glow)
+                entry["extensions"] = {"KHR_materials_emissive_strength": {"emissiveStrength": strength}}
                 used = self.doc.setdefault("extensionsUsed", [])
                 if "KHR_materials_emissive_strength" not in used:
                     used.append("KHR_materials_emissive_strength")
@@ -426,6 +438,16 @@ class GlbWriter:
         self.doc["meshes"][0]["primitives"].append({
             "attributes": attributes, "material": self._material(material),
             "indices": self._accessor(indices, "SCALAR", 34963, component=5125)})
+
+    def light(self, translation, light: dict) -> None:
+        store = self.doc.setdefault("extensions", {}).setdefault("KHR_lights_punctual", {"lights": []})
+        used = self.doc.setdefault("extensionsUsed", [])
+        if "KHR_lights_punctual" not in used:
+            used.append("KHR_lights_punctual")
+        store["lights"].append(light)
+        self.doc["nodes"].append({"translation": [round(v, 4) for v in translation],
+                                  "extensions": {"KHR_lights_punctual": {"light": len(store["lights"]) - 1}}})
+        self.doc["scenes"][0]["nodes"].append(len(self.doc["nodes"]) - 1)
 
     def bytes(self) -> bytes:
         while len(self.binary) % 4:
@@ -477,6 +499,7 @@ def stall(accent: str, variant: str) -> Asset:
         a.box(f"roof-end-{tag}", 0.14, 1.66, roof_h + 0.03, su * (roof_w / 2 + 0.06), 0.0, roof_z, collide=True, r=0.06)
     # A strip of bulbs under the front of the roof (they glow at night).
     a.box("roof-light", roof_w - 0.2, 0.05, 0.03, 0, 0.74, roof_z - roof_h / 2 - 0.02, BULB, r=0.012, solid=False)
+    a.light(0, 0.9, roof_z - roof_h / 2 - 0.15)  # the stall's light, spilling onto the counter and the street
     sign = Canvas(2.0, 0.21, WHITE)
     sign.house(0.12, 0.105, 0.16, accent, WHITE)
     sign.text(0.24, 0.085, "箱庭屋台", 0.125, INK)
@@ -597,7 +620,7 @@ def parasol_table(a: Asset, name, u, y, floor, radius):
 
 def open_space(variant: str) -> Asset:
     a = Asset("open_space", OPEN_SPACE_ACCENT, variant)
-    w, d, floor = 6.0, 5.0, 0.3
+    w, d, floor = 6.0, 5.0, 0.23  # the floor's top at 0.25 m: people step up onto it
 
     # The deck: a kerb of dark blocks and a floor of light tiles.
     a.box("deck", w, d, floor, colour=DARK, collide=True, r=0.04)
@@ -658,6 +681,7 @@ def open_space(variant: str) -> Asset:
         a.box(f"lamp-{tag}", 0.14, 0.14, 0.62, u, y, floor + 0.31, DARK, collide=True, r=0.025)
         a.box(f"lamp-{tag}-light", 0.11, 0.11, 0.16, u, y, floor + 0.70, LIGHT, r=0.02)
         a.box(f"lamp-{tag}-cap", 0.17, 0.17, 0.05, u, y, floor + 0.805, DARK, r=0.015)
+    a.light(0, 0.3, floor + 2.6, intensity=10.0, range_m=8.0)  # over the tables
     a.box("bin", 0.46, 0.46, 0.8, 1.85, 2.0, floor + 0.4, DARK, collide=True, r=0.05)
     a.box("bin-lid", 0.5, 0.5, 0.05, 1.85, 2.0, floor + 0.825, "#2b2e33", r=0.02)
     label = Canvas(0.26, 0.36, WHITE, ppm=600)

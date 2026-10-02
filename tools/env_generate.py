@@ -389,6 +389,33 @@ class _GlbBuilder:
             5125 if big else 5123, len(indices), "SCALAR")
         return {"attributes": {"POSITION": position, "NORMAL": normal}, "indices": index, "material": self.material(color)}
 
+    def asset_lights(self, glb: bytes) -> list[tuple[list, dict]]:
+        """The punctual lights of a part's visual GLB (KHR_lights_punctual): each
+        light node's translation in the part's frame (glTF axes) and the light."""
+        document, _binary = read_glb(glb)
+        lights = document.get("extensions", {}).get("KHR_lights_punctual", {}).get("lights", [])
+        found = []
+        for node in document.get("nodes", []):
+            index = node.get("extensions", {}).get("KHR_lights_punctual", {}).get("light")
+            if index is not None and 0 <= index < len(lights):
+                found.append((list(node.get("translation", [0.0, 0.0, 0.0])), lights[index]))
+        return found
+
+    def add_lights(self, parent: int, lights: list[tuple[list, dict]]) -> None:
+        """Lights as children of an object's node (they move and turn with it)."""
+        if not lights:
+            return
+        store = self.gltf.setdefault("extensions", {}).setdefault("KHR_lights_punctual", {"lights": []})
+        used = self.gltf.setdefault("extensionsUsed", [])
+        if "KHR_lights_punctual" not in used:
+            used.append("KHR_lights_punctual")
+        children = self.gltf["nodes"][parent].setdefault("children", [])
+        for translation, light in lights:
+            store["lights"].append(dict(light))
+            self.gltf["nodes"].append({"translation": translation,
+                                       "extensions": {"KHR_lights_punctual": {"light": len(store["lights"]) - 1}}})
+            children.append(len(self.gltf["nodes"]) - 1)
+
     def node(self, name: str, pieces, translation, yaw_deg: float, extras: dict, primitives=None) -> int:
         """One node per object, its mesh one primitive per (mesh, colour) piece
         (or the given `primitives`, such as a visual asset's)."""
@@ -481,8 +508,10 @@ def environment_glb(recipe: env_schema.Recipe) -> bytes:
         placement = ((obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m), obj.pose.yaw_deg)
         if obj.visual is not None:  # its own look (LOD2 with textures, an Envsim layer) instead of the solids
             x, y, z, yaw = asset_frame(recipe, obj)
-            builder.node(obj.id, None, (x, z, -y), yaw, {**extras, "visual": obj.visual.name},
-                         primitives=builder.asset_primitives(obj.visual.read_bytes()))
+            visual = obj.visual.read_bytes()
+            index = builder.node(obj.id, None, (x, z, -y), yaw, {**extras, "visual": obj.visual.name},
+                                 primitives=builder.asset_primitives(visual))
+            builder.add_lights(index, builder.asset_lights(visual))  # a part's own lights (a stall's lamp)
             continue
         pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
         builder.node(obj.id, pieces, *placement, extras)
