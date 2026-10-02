@@ -343,12 +343,18 @@ class _GlbBuilder:
             factor = source.get("pbrMetallicRoughness", {}).get("baseColorFactor", [0.7, 0.7, 0.7, 1.0])
             # A part's lights (a stall's lanterns) glow: keep their emission.
             emissive = source.get("emissiveFactor")
-            key = f"asset:{json.dumps(factor)}:{json.dumps(emissive)}"
+            strength = source.get("extensions", {}).get("KHR_materials_emissive_strength")
+            key = f"asset:{json.dumps(factor)}:{json.dumps(emissive)}:{json.dumps(strength)}"
             if key not in self.material_ids:
                 entry = {"name": key, "doubleSided": True, "pbrMetallicRoughness": {
                     "baseColorFactor": factor, "metallicFactor": 0.0, "roughnessFactor": 0.85}}
                 if emissive:
                     entry["emissiveFactor"] = emissive
+                if emissive and strength:
+                    entry["extensions"] = {"KHR_materials_emissive_strength": strength}
+                    used = self.gltf.setdefault("extensionsUsed", [])
+                    if "KHR_materials_emissive_strength" not in used:
+                        used.append("KHR_materials_emissive_strength")
                 self.gltf["materials"].append(entry)
                 self.material_ids[key] = len(self.gltf["materials"]) - 1
             return self.material_ids[key]

@@ -50,8 +50,9 @@ CONCRETE = "#c9ccd0"
 INK = "#2f3237"
 BULB = "#ffe7b0"
 LIGHT = "#fff3c4"
-# Lights glow (emissive) so they show in the viewer's night mode: colour -> emission strength.
-GLOWS = {LAMP: 0.85, BULB: 1.0, LIGHT: 1.0}
+# Lights glow (emissive) so they show in the viewer's night mode: colour ->
+# emissive strength (KHR_materials_emissive_strength; > 1 reads as a light at night).
+GLOWS = {LAMP: 4.0, BULB: 6.0, LIGHT: 5.0}
 
 STALL_COLOURS = {"orange": "#f26b1d", "red": "#d8352a", "blue": "#2f6fc0"}
 OPEN_SPACE_ACCENT = "#f26b1d"
@@ -356,8 +357,12 @@ class Asset:
                     uvs.append(mesh.uvs)
                 indices.append(mesh.indices.reshape(-1) + base)
                 base += len(p)
-            writer.primitive(np.vstack(positions), np.vstack(normals), np.concatenate(indices),
-                             np.vstack(uvs) if isinstance(material, bytes) else None, material)
+            positions_all = np.vstack(positions)
+            # Every primitive carries texture coordinates: a viewer that paints a
+            # pattern on untextured surfaces (terrain, roads) leaves the parts'
+            # own colours and glow alone.
+            uv_all = np.vstack(uvs) if isinstance(material, bytes) else np.zeros((len(positions_all), 2))
+            writer.primitive(positions_all, np.vstack(normals), np.concatenate(indices), uv_all, material)
         return writer.bytes()
 
 
@@ -405,7 +410,11 @@ class GlbWriter:
             entry = {"name": material, "pbrMetallicRoughness": {"baseColorFactor": [*rgb, 1.0],
                                                                 "metallicFactor": 0.0, "roughnessFactor": 0.85}}
             if material in GLOWS:
-                entry["emissiveFactor"] = [round(c * GLOWS[material], 4) for c in rgb]
+                entry["emissiveFactor"] = [round(c, 4) for c in rgb]
+                entry["extensions"] = {"KHR_materials_emissive_strength": {"emissiveStrength": GLOWS[material]}}
+                used = self.doc.setdefault("extensionsUsed", [])
+                if "KHR_materials_emissive_strength" not in used:
+                    used.append("KHR_materials_emissive_strength")
         self.doc["materials"].append(entry)
         return len(self.doc["materials"]) - 1
 
