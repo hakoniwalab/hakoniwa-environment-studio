@@ -5,8 +5,9 @@
 # Catalog items name as their visual: rounded edges and the lettering); edit
 # that script, not this file.
 #
-# Only the frame, the roof, the counter, the shelf, the crate and the board
-# collide; the goods, the cloths and the lanterns are looks only.
+# Only the frame, the roof, the counter, the crate and the board collide; the
+# shelf, the goods, the cloths and the lanterns are looks only (the staff
+# stands between the counter and the shelf).
 schema: hakoniwa.environment-types/v1
 types:
   - id: food_stall
@@ -56,19 +57,19 @@ types:
       - {name: plant-top, primitive: box, w: 0.17, d: 0.17, h: 0.14, x: -0.38, y: 0.38, z: 1.43, yaw: 50, color: "#6dbd4a", collide: false}
       - {name: tray-1, primitive: box, w: 0.34, d: 0.24, h: 0.14, x: -0.68, y: 0.22, z: 1.07, color: "#3d6fb6", collide: false}
       - {name: tray-2, primitive: box, w: 0.3, d: 0.22, h: 0.12, x: -0.94, y: 0.42, z: 1.06, color: "#e6e7e9", collide: false}
-      - {name: shelf-bottom, primitive: box, w: 2.1, d: 0.42, h: 0.04, x: 0, y: -0.36, z: 0.04, color: "#3a3d42"}
-      - {name: shelf-middle, primitive: box, w: 2.1, d: 0.42, h: 0.04, x: 0, y: -0.36, z: 0.46, color: "#3a3d42"}
-      - {name: shelf-top, primitive: box, w: 2.1, d: 0.42, h: 0.04, x: 0, y: -0.36, z: 0.88, color: "#3a3d42"}
-      - {name: shelf-side-left, primitive: box, w: 0.04, d: 0.42, h: 0.86, x: 1.03, y: -0.36, z: 0.47, color: "#3a3d42"}
-      - {name: shelf-side-centre, primitive: box, w: 0.04, d: 0.42, h: 0.86, x: 0, y: -0.36, z: 0.47, color: "#3a3d42"}
-      - {name: shelf-side-right, primitive: box, w: 0.04, d: 0.42, h: 0.86, x: -1.03, y: -0.36, z: 0.47, color: "#3a3d42"}
-      - {name: bin-1, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: 0.52, y: -0.36, z: 0.64, color: "#b8bcc2", collide: false}
-      - {name: bin-2, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: -0.52, y: -0.36, z: 0.64, color: "#3d6fb6", collide: false}
-      - {name: bin-3, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: 0.52, y: -0.36, z: 0.22, color: "#3d6fb6", collide: false}
-      - {name: bin-4, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: -0.52, y: -0.36, z: 0.22, color: "#b8bcc2", collide: false}
-      - {name: stock-1, primitive: box, w: 0.26, d: 0.26, h: 0.16, x: 0.6, y: -0.36, z: 0.98, color: "#b8bcc2", collide: false}
-      - {name: stock-2, primitive: box, w: 0.26, d: 0.26, h: 0.16, x: 0.25, y: -0.36, z: 0.98, color: "#3a3d42", collide: false}
-      - {name: stock-3, primitive: box, w: 0.26, d: 0.26, h: 0.16, x: -0.15, y: -0.36, z: 0.98, color: "#3d6fb6", collide: false}
+      - {name: shelf-bottom, primitive: box, w: 2.1, d: 0.3, h: 0.04, x: 0, y: -0.42, z: 0.04, color: "#3a3d42", collide: false}
+      - {name: shelf-middle, primitive: box, w: 2.1, d: 0.3, h: 0.04, x: 0, y: -0.42, z: 0.46, color: "#3a3d42", collide: false}
+      - {name: shelf-top, primitive: box, w: 2.1, d: 0.3, h: 0.04, x: 0, y: -0.42, z: 0.88, color: "#3a3d42", collide: false}
+      - {name: shelf-side-left, primitive: box, w: 0.04, d: 0.3, h: 0.86, x: 1.03, y: -0.42, z: 0.47, color: "#3a3d42", collide: false}
+      - {name: shelf-side-centre, primitive: box, w: 0.04, d: 0.3, h: 0.86, x: 0, y: -0.42, z: 0.47, color: "#3a3d42", collide: false}
+      - {name: shelf-side-right, primitive: box, w: 0.04, d: 0.3, h: 0.86, x: -1.03, y: -0.42, z: 0.47, color: "#3a3d42", collide: false}
+      - {name: bin-1, primitive: box, w: 0.8, d: 0.24, h: 0.3, x: 0.52, y: -0.42, z: 0.64, color: "#b8bcc2", collide: false}
+      - {name: bin-2, primitive: box, w: 0.8, d: 0.24, h: 0.3, x: -0.52, y: -0.42, z: 0.64, color: "#3d6fb6", collide: false}
+      - {name: bin-3, primitive: box, w: 0.8, d: 0.24, h: 0.3, x: 0.52, y: -0.42, z: 0.22, color: "#3d6fb6", collide: false}
+      - {name: bin-4, primitive: box, w: 0.8, d: 0.24, h: 0.3, x: -0.52, y: -0.42, z: 0.22, color: "#b8bcc2", collide: false}
+      - {name: stock-1, primitive: box, w: 0.24, d: 0.22, h: 0.16, x: 0.6, y: -0.42, z: 0.98, color: "#b8bcc2", collide: false}
+      - {name: stock-2, primitive: box, w: 0.24, d: 0.22, h: 0.16, x: 0.25, y: -0.42, z: 0.98, color: "#3a3d42", collide: false}
+      - {name: stock-3, primitive: box, w: 0.24, d: 0.22, h: 0.16, x: -0.15, y: -0.42, z: 0.98, color: "#3d6fb6", collide: false}
       - {name: crate, primitive: box, w: 0.55, d: 0.5, h: 0.55, x: -1.46, y: -0.12, z: 0.275, color: "#3a3d42"}
       - {name: sign-front, primitive: box, w: 0.56, d: 0.03, h: 0.9, x: 1.62, y: 1.21, z: 0.45, roll: 12, color: "#2f3237"}
       - {name: sign-back, primitive: box, w: 0.56, d: 0.03, h: 0.9, x: 1.62, y: 1.03, z: 0.45, roll: -12, color: "#2f3237"}

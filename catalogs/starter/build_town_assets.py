@@ -530,16 +530,16 @@ def stall(accent: str, variant: str) -> Asset:
     a.box("tray-1", 0.34, 0.24, 0.14, 0.68, 0.22, top + 0.07, BLUE, r=0.02)
     a.box("tray-2", 0.30, 0.22, 0.12, 0.94, 0.42, top + 0.06, "#e6e7e9", r=0.02)
 
-    # Shelf behind the counter.
-    sy, sd = -0.36, 0.42
+    # Shelf at the back: looks only, so the staff has room to stand behind the counter.
+    sy, sd = -0.42, 0.30
     for z, tag in ((0.04, "bottom"), (0.46, "middle"), (0.88, "top")):
-        a.box(f"shelf-{tag}", 2.10, sd, 0.04, 0, sy, z, DARK, collide=True, r=0.01)
+        a.box(f"shelf-{tag}", 2.10, sd, 0.04, 0, sy, z, DARK, r=0.01)
     for u, tag in ((-1.03, "left"), (0.0, "centre"), (1.03, "right")):
-        a.box(f"shelf-side-{tag}", 0.04, sd, 0.86, u, sy, 0.47, DARK, collide=True, r=0.01)
+        a.box(f"shelf-side-{tag}", 0.04, sd, 0.86, u, sy, 0.47, DARK, r=0.01)
     for i, (u, z, c) in enumerate(((-0.52, 0.64, GREY), (0.52, 0.64, BLUE), (-0.52, 0.22, BLUE), (0.52, 0.22, GREY)), 1):
-        a.box(f"bin-{i}", 0.80, 0.34, 0.30, u, sy, z, c, r=0.03)
+        a.box(f"bin-{i}", 0.80, 0.24, 0.30, u, sy, z, c, r=0.03)
     for i, (u, c) in enumerate(((-0.60, GREY), (-0.25, DARK), (0.15, BLUE)), start=1):
-        a.box(f"stock-{i}", 0.26, 0.26, 0.16, u, sy, 0.98, c, r=0.025)
+        a.box(f"stock-{i}", 0.24, 0.22, 0.16, u, sy, 0.98, c, r=0.025)
 
     # The crate by its side and the board out front.
     a.box("crate", 0.55, 0.50, 0.55, 1.46, -0.12, colour=DARK, collide=True, r=0.03)
@@ -694,8 +694,9 @@ STALL_HEADER = '''# 箱庭屋台 (Hakoniwa Stall): a small street stall to line 
 # Catalog items name as their visual: rounded edges and the lettering); edit
 # that script, not this file.
 #
-# Only the frame, the roof, the counter, the shelf, the crate and the board
-# collide; the goods, the cloths and the lanterns are looks only.
+# Only the frame, the roof, the counter, the crate and the board collide; the
+# shelf, the goods, the cloths and the lanterns are looks only (the staff
+# stands between the counter and the shelf).
 schema: hakoniwa.environment-types/v1
 types:
   - id: food_stall
