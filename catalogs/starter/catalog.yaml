@@ -141,3 +141,9 @@ items:
     extends: hakoniwa-open-space
     name: 箱庭オープンスペース（にぎやか）
     params: {layout: lively, visual: assets/hakoniwa-open-space-lively.glb}
+
+  - id: hakoniwa-shuttle-stop
+    type: shuttle_stop
+    name: 箱庭シャトル停留所
+    description: A shuttle stop with a sign (lit at night) and a bench.
+    params: {visual: assets/hakoniwa-shuttle-stop.glb}

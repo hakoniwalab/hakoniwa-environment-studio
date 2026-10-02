@@ -1,0 +1,26 @@
+# 箱庭シャトル停留所 (Hakoniwa shuttle stop): a pole with a sign (lit at
+# night) and a bench, facing +y. Written by catalogs/starter/build_town_assets.py
+# with its looks (the GLB the Catalog item names as its visual); edit that
+# script, not this file.
+schema: hakoniwa.environment-types/v1
+types:
+  - id: shuttle_stop
+    extends: object
+    label: 停留所
+    description: A shuttle stop with a sign and a bench, facing its y.
+    id_prefix: stop
+    params:
+      color: {kind: color, label: 差し色, default: "#f26b1d", level: item,
+              description: "The sign's mark (its look has the same colour)."}
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: item,
+               description: "Its look with lettering, in the part's frame; relative to the Catalog."}
+    shapes:
+      - {name: pole, primitive: cylinder, w: 0.08, d: 0.08, h: 2.5, x: 0, y: 0, z: 1.25, color: "#3a3d42"}
+      - {name: pole-cap, primitive: cylinder, w: 0.12, d: 0.12, h: 0.05, x: 0, y: 0, z: 2.525, color: "#3a3d42", collide: false}
+      - {name: sign, primitive: box, w: 0.62, d: 0.05, h: 0.62, x: 0, y: 0, z: 2.05, color: "#f4f4f2"}
+      - {name: sign-rim, primitive: box, w: 0.66, d: 0.04, h: 0.66, x: 0, y: -0.01, z: 2.05, collide: false}
+      - {name: bench-seat-1, primitive: box, w: 1.2, d: 0.14, h: 0.05, x: -0.9, y: 0.12, z: 0.44, color: "#c8925a"}
+      - {name: bench-seat-2, primitive: box, w: 1.2, d: 0.14, h: 0.05, x: -0.9, y: -0.03, z: 0.44, color: "#c8925a"}
+      - {name: bench-back, primitive: box, w: 1.2, d: 0.04, h: 0.22, x: -0.9, y: -0.12, z: 0.7, color: "#c8925a"}
+      - {name: bench-leg-l, primitive: box, w: 0.05, d: 0.36, h: 0.42, x: -0.38, y: 0, z: 0.21, color: "#3a3d42", collide: false}
+      - {name: bench-leg-r, primitive: box, w: 0.05, d: 0.36, h: 0.42, x: -1.42, y: 0, z: 0.21, color: "#3a3d42", collide: false}

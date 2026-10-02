@@ -44,7 +44,7 @@ class ShippedTypesTest(unittest.TestCase):
         self.assertEqual(placeable, {
             "flat_ground", "hills_terrain", "wall", "building_block", "box_obstacle", "pylon", "gate", "ramp",
             "platform", "landing_pad", "road_surface", "road_marking", "guard_rail", "road_sign", "traffic_signal",
-            "road_path", "building_footprint", "road_area", "dem_terrain", "city_layer", "food_stall", "open_space"})
+            "road_path", "building_footprint", "road_area", "dem_terrain", "city_layer", "food_stall", "open_space", "shuttle_stop"})
         self.assertTrue(self.library.types["hills_terrain"].is_terrain)
         self.assertTrue(self.library.types["landing_pad"].is_a("platform"))
 

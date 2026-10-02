@@ -718,6 +718,52 @@ def open_space(variant: str) -> Asset:
     return a
 
 
+# --- 箱庭シャトル停留所 -----------------------------------------------------------------------
+
+def shuttle_stop() -> Asset:
+    """A shuttle stop: a pole with a sign (glowing at night) and a bench, facing +y."""
+    a = Asset("shuttle_stop", OPEN_SPACE_ACCENT, "")
+    a.cylinder("pole", 0.08, 2.5, 0.0, 0.0, colour=DARK, collide=True, r=0.02, segments=16)
+    a.cylinder("pole-cap", 0.12, 0.05, 0.0, 0.0, 2.525, DARK, r=0.02, segments=16)
+    a.box("sign", 0.62, 0.05, 0.62, 0.0, 0.0, 2.05, WHITE, collide=True, r=0.04)
+    a.box("sign-rim", 0.66, 0.04, 0.66, 0.0, -0.01, 2.05, collide=False, r=0.05)
+    for normal, y in ((0.0, 0.027), (180.0, -0.027)):
+        face = Canvas(0.56, 0.56, WHITE, ppm=700)
+        face.house(0.28, 0.17, 0.2, a.accent, WHITE)
+        face.text(0.28, 0.34, "箱庭シャトル", 0.06, INK, anchor="mm")
+        face.text(0.28, 0.45, "停留所", 0.085, a.accent, anchor="mm")
+        a.panel(face, 0.56, 0.56, 0.0, y, 2.05, yaw=normal)
+    a.box("sign-light", 0.5, 0.03, 0.03, 0.0, 0.05, 2.38, BULB, r=0.01, solid=False)
+    a.light(0.0, 0.25, 2.3, intensity=6.0, range_m=6.0)
+    # A bench to wait on, beside the pole.
+    for k in range(2):
+        a.box(f"bench-seat-{k + 1}", 1.2, 0.14, 0.05, 0.9, 0.12 - 0.15 * k, 0.44, WOOD, collide=True, r=0.015)
+    a.box("bench-back", 1.2, 0.04, 0.22, 0.9, -0.12, 0.7, WOOD, collide=True, r=0.012)
+    for su in (-1, 1):
+        a.box(f"bench-leg-{'r' if su > 0 else 'l'}", 0.05, 0.36, 0.42, 0.9 + su * 0.52, 0.0, 0.21, DARK, r=0.015)
+    return a
+
+
+SHUTTLE_STOP_HEADER = '''# 箱庭シャトル停留所 (Hakoniwa shuttle stop): a pole with a sign (lit at
+# night) and a bench, facing +y. Written by catalogs/starter/build_town_assets.py
+# with its looks (the GLB the Catalog item names as its visual); edit that
+# script, not this file.
+schema: hakoniwa.environment-types/v1
+types:
+  - id: shuttle_stop
+    extends: object
+    label: 停留所
+    description: A shuttle stop with a sign and a bench, facing its y.
+    id_prefix: stop
+    params:
+      color: {kind: color, label: 差し色, default: "#f26b1d", level: item,
+              description: "The sign's mark (its look has the same colour)."}
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: item,
+               description: "Its look with lettering, in the part's frame; relative to the Catalog."}
+    shapes:
+'''
+
+
 # --- Writing ---------------------------------------------------------------------------------
 
 STALL_HEADER = '''# 箱庭屋台 (Hakoniwa Stall): a small street stall to line up for a market or
@@ -780,6 +826,9 @@ def main() -> None:
     (ROOT / "types/open-space.yaml").write_text(OPEN_SPACE_HEADER + lively.yaml_shapes() + "\n", encoding="utf-8")
     for variant in ("simple", "lively"):
         (ASSETS / f"hakoniwa-open-space-{variant}.glb").write_bytes(open_space(variant).glb())
+    stop = shuttle_stop()
+    (ROOT / "types/shuttle-stop.yaml").write_text(SHUTTLE_STOP_HEADER + stop.yaml_shapes() + "\n", encoding="utf-8")
+    (ASSETS / "hakoniwa-shuttle-stop.glb").write_bytes(stop.glb())
     for path in sorted(ASSETS.glob("*.glb")):
         print(f"{path.relative_to(ROOT)}  {path.stat().st_size // 1024} KB")
 
