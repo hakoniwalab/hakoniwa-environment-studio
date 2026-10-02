@@ -1,0 +1,16 @@
+# A stall street (30 m x 18 m): three 箱庭屋台 on the north side facing the
+# street, two 箱庭オープンスペース on the south side facing it, open ground to
+# the east (room for a delivery car). People walk here (hakoniwa-urban-mobility
+# tools/people_sim.py).
+schema: hakoniwa.environment-recipe/v1
+name: 屋台通り（30 m × 18 m）
+description: Three stalls and two small squares along a street.
+catalog: ../../catalogs/starter/catalog.yaml
+size_m: {east: 30, north: 18}
+terrain: {item: city-ground}
+objects:
+  - {id: stall-orange, item: hakoniwa-stall, pose: {x_m: -10, y_m: 5, yaw_deg: 180}}
+  - {id: stall-red, item: hakoniwa-stall-red, pose: {x_m: -6, y_m: 5, yaw_deg: 180}}
+  - {id: stall-blue, item: hakoniwa-stall-blue, pose: {x_m: -2, y_m: 5, yaw_deg: 180}}
+  - {id: square-lively, item: hakoniwa-open-space-lively, pose: {x_m: -7.5, y_m: -5, yaw_deg: 0}}
+  - {id: square-simple, item: hakoniwa-open-space, pose: {x_m: 0.5, y_m: -5, yaw_deg: 0}}
