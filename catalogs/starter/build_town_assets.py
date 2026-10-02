@@ -48,6 +48,10 @@ WOOD = "#c8925a"
 TRUNK = "#8a5a3b"
 CONCRETE = "#c9ccd0"
 INK = "#2f3237"
+BULB = "#ffe7b0"
+LIGHT = "#fff3c4"
+# Lights glow (emissive) so they show in the viewer's night mode: colour -> emission strength.
+GLOWS = {LAMP: 0.85, BULB: 1.0, LIGHT: 1.0}
 
 STALL_COLOURS = {"orange": "#f26b1d", "red": "#d8352a", "blue": "#2f6fc0"}
 OPEN_SPACE_ACCENT = "#f26b1d"
@@ -400,6 +404,8 @@ class GlbWriter:
             rgb = [srgb_to_linear(int(material[i:i + 2], 16) / 255) for i in (1, 3, 5)]
             entry = {"name": material, "pbrMetallicRoughness": {"baseColorFactor": [*rgb, 1.0],
                                                                 "metallicFactor": 0.0, "roughnessFactor": 0.85}}
+            if material in GLOWS:
+                entry["emissiveFactor"] = [round(c * GLOWS[material], 4) for c in rgb]
         self.doc["materials"].append(entry)
         return len(self.doc["materials"]) - 1
 
@@ -460,6 +466,8 @@ def stall(accent: str, variant: str) -> Asset:
     a.box("roof", roof_w, 1.62, roof_h, 0, 0.0, roof_z, WHITE, collide=True, r=0.07)
     for su, tag in ((-1, "left"), (1, "right")):
         a.box(f"roof-end-{tag}", 0.14, 1.66, roof_h + 0.03, su * (roof_w / 2 + 0.06), 0.0, roof_z, collide=True, r=0.06)
+    # A strip of bulbs under the front of the roof (they glow at night).
+    a.box("roof-light", roof_w - 0.2, 0.05, 0.03, 0, 0.74, roof_z - roof_h / 2 - 0.02, BULB, r=0.012, solid=False)
     sign = Canvas(2.0, 0.21, WHITE)
     sign.house(0.12, 0.105, 0.16, accent, WHITE)
     sign.text(0.24, 0.085, "箱庭屋台", 0.125, INK)
@@ -639,7 +647,7 @@ def open_space(variant: str) -> Asset:
     for su, tag in ((-1, "left"), (1, "right")):
         u, y = su * 2.62, 2.05
         a.box(f"lamp-{tag}", 0.14, 0.14, 0.62, u, y, floor + 0.31, DARK, collide=True, r=0.025)
-        a.box(f"lamp-{tag}-light", 0.11, 0.11, 0.16, u, y, floor + 0.70, "#fff3c4", r=0.02)
+        a.box(f"lamp-{tag}-light", 0.11, 0.11, 0.16, u, y, floor + 0.70, LIGHT, r=0.02)
         a.box(f"lamp-{tag}-cap", 0.17, 0.17, 0.05, u, y, floor + 0.805, DARK, r=0.015)
     a.box("bin", 0.46, 0.46, 0.8, 1.85, 2.0, floor + 0.4, DARK, collide=True, r=0.05)
     a.box("bin-lid", 0.5, 0.5, 0.05, 1.85, 2.0, floor + 0.825, "#2b2e33", r=0.02)
@@ -661,6 +669,8 @@ def open_space(variant: str) -> Asset:
         length = math.hypot(u1 - u0, z1 - z0)
         a.shape(lathe(cylinder_profile(0.015, length), 8), DARK, (u0 + u1) / 2, -2.25, (z0 + z1) / 2,
                 pitch=math.degrees(math.atan2(-(u1 - u0), z1 - z0)))
+        # A bulb at every joint of the line (string lights, glowing at night).
+        a.shape(lathe(ellipsoid_profile(0.045, 0.06), 12), BULB, u1, -2.25, z1 - 0.05)
         if k == 0:
             continue
         colour = a.accent if k % 2 else WHITE

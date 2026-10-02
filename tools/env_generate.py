@@ -341,10 +341,15 @@ class _GlbBuilder:
                 image = document["images"][document["textures"][texture["index"]]["source"]]
                 return self.textured_material(data(image["bufferView"]), image.get("mimeType", "image/jpeg"))
             factor = source.get("pbrMetallicRoughness", {}).get("baseColorFactor", [0.7, 0.7, 0.7, 1.0])
-            key = f"asset:{json.dumps(factor)}"
+            # A part's lights (a stall's lanterns) glow: keep their emission.
+            emissive = source.get("emissiveFactor")
+            key = f"asset:{json.dumps(factor)}:{json.dumps(emissive)}"
             if key not in self.material_ids:
-                self.gltf["materials"].append({"name": key, "doubleSided": True, "pbrMetallicRoughness": {
-                    "baseColorFactor": factor, "metallicFactor": 0.0, "roughnessFactor": 0.85}})
+                entry = {"name": key, "doubleSided": True, "pbrMetallicRoughness": {
+                    "baseColorFactor": factor, "metallicFactor": 0.0, "roughnessFactor": 0.85}}
+                if emissive:
+                    entry["emissiveFactor"] = emissive
+                self.gltf["materials"].append(entry)
                 self.material_ids[key] = len(self.gltf["materials"]) - 1
             return self.material_ids[key]
 
