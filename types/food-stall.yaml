@@ -1,0 +1,74 @@
+# 箱庭屋台 (Hakoniwa Stall): a small street stall to line up for a market or
+# a festival street. Facing +y: the counter, the noren (three cloths under the
+# roof) and the lanterns are on the customers' side. Written by
+# catalogs/starter/build_town_assets.py with its looks (the GLB that the
+# Catalog items name as their visual: rounded edges and the lettering); edit
+# that script, not this file.
+#
+# Only the frame, the roof, the counter, the shelf, the crate and the board
+# collide; the goods, the cloths and the lanterns are looks only.
+schema: hakoniwa.environment-types/v1
+types:
+  - id: food_stall
+    extends: object
+    label: 屋台
+    description: A small street stall (2.4 m wide, 2.7 m high) with a counter, noren and lanterns, facing its y.
+    id_prefix: stall
+    params:
+      color: {kind: color, label: 差し色, default: "#f26b1d", level: item,
+              description: "The roof ends, the noren and the marks (its look has the same colour)."}
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: item,
+               description: "Its look with rounded edges and lettering, in the part's frame; relative to the Catalog."}
+    shapes:
+      - {name: pole-front-left, primitive: box, w: 0.08, d: 0.08, h: 2.36, x: 1.12, y: 0.62, z: 1.18, color: "#3a3d42"}
+      - {name: pole-front-right, primitive: box, w: 0.08, d: 0.08, h: 2.36, x: -1.12, y: 0.62, z: 1.18, color: "#3a3d42"}
+      - {name: pole-rear-left, primitive: box, w: 0.08, d: 0.08, h: 2.36, x: 1.12, y: -0.62, z: 1.18, color: "#3a3d42"}
+      - {name: pole-rear-right, primitive: box, w: 0.08, d: 0.08, h: 2.36, x: -1.12, y: -0.62, z: 1.18, color: "#3a3d42"}
+      - {name: roof, primitive: box, w: 2.36, d: 1.62, h: 0.34, x: 0, y: 0, z: 2.53, color: "#f4f4f2"}
+      - {name: roof-end-left, primitive: box, w: 0.14, d: 1.66, h: 0.37, x: 1.24, y: 0, z: 2.53}
+      - {name: roof-end-right, primitive: box, w: 0.14, d: 1.66, h: 0.37, x: -1.24, y: 0, z: 2.53}
+      - {name: noren-1, primitive: box, w: 0.64, d: 0.02, h: 0.56, x: 0.68, y: 0.7, z: 2.08, collide: false}
+      - {name: noren-2, primitive: box, w: 0.64, d: 0.02, h: 0.56, x: 0, y: 0.7, z: 2.08, collide: false}
+      - {name: noren-3, primitive: box, w: 0.64, d: 0.02, h: 0.56, x: -0.68, y: 0.7, z: 2.08, collide: false}
+      - {name: lantern-left-cord, primitive: cylinder, w: 0.02, d: 0.02, h: 0.15, x: 1.34, y: 0.62, z: 2.285, color: "#3a3d42", collide: false}
+      - {name: lantern-left-top, primitive: cylinder, w: 0.2, d: 0.2, h: 0.06, x: 1.34, y: 0.62, z: 2.12, color: "#3a3d42", collide: false}
+      - {name: lantern-left, primitive: cylinder, w: 0.3, d: 0.3, h: 0.42, x: 1.34, y: 0.62, z: 1.88, color: "#fbf8ef", collide: false}
+      - {name: lantern-left-bottom, primitive: cylinder, w: 0.2, d: 0.2, h: 0.06, x: 1.34, y: 0.62, z: 1.64, color: "#3a3d42", collide: false}
+      - {name: lantern-left-arm, primitive: box, w: 0.22, d: 0.04, h: 0.04, x: 1.23, y: 0.62, z: 2.32, color: "#3a3d42", collide: false}
+      - {name: lantern-right-cord, primitive: cylinder, w: 0.02, d: 0.02, h: 0.15, x: -1.34, y: 0.62, z: 2.285, color: "#3a3d42", collide: false}
+      - {name: lantern-right-top, primitive: cylinder, w: 0.2, d: 0.2, h: 0.06, x: -1.34, y: 0.62, z: 2.12, color: "#3a3d42", collide: false}
+      - {name: lantern-right, primitive: cylinder, w: 0.3, d: 0.3, h: 0.42, x: -1.34, y: 0.62, z: 1.88, color: "#fbf8ef", collide: false}
+      - {name: lantern-right-bottom, primitive: cylinder, w: 0.2, d: 0.2, h: 0.06, x: -1.34, y: 0.62, z: 1.64, color: "#3a3d42", collide: false}
+      - {name: lantern-right-arm, primitive: box, w: 0.22, d: 0.04, h: 0.04, x: -1.23, y: 0.62, z: 2.32, color: "#3a3d42", collide: false}
+      - {name: counter, primitive: box, w: 2.2, d: 0.55, h: 0.85, x: 0, y: 0.32, z: 0.525, color: "#f4f4f2"}
+      - {name: counter-base, primitive: box, w: 2.3, d: 0.59, h: 0.1, x: 0, y: 0.32, z: 0.05, color: "#3a3d42"}
+      - {name: counter-top, primitive: box, w: 2.34, d: 0.63, h: 0.05, x: 0, y: 0.33, z: 0.975, color: "#4a4e54"}
+      - {name: counter-post-left, primitive: box, w: 0.06, d: 0.59, h: 0.85, x: 1.13, y: 0.32, z: 0.525, color: "#3a3d42", collide: false}
+      - {name: counter-post-right, primitive: box, w: 0.06, d: 0.59, h: 0.85, x: -1.13, y: 0.32, z: 0.525, color: "#3a3d42", collide: false}
+      - {name: register, primitive: box, w: 0.3, d: 0.26, h: 0.14, x: 0.78, y: 0.26, z: 1.07, color: "#3a3d42", collide: false}
+      - {name: register-screen, primitive: box, w: 0.24, d: 0.03, h: 0.16, x: 0.78, y: 0.16, z: 1.2, roll: -20, color: "#2b2e33", collide: false}
+      - {name: menu-board, primitive: box, w: 0.34, d: 0.04, h: 0.44, x: 0.32, y: 0.44, z: 1.22, color: "#3a3d42", collide: false}
+      - {name: cup-stack-1, primitive: cylinder, w: 0.1, d: 0.1, h: 0.24, x: 0.02, y: 0.24, z: 1.12, color: "#5d6168", collide: false}
+      - {name: cup-stack-2, primitive: cylinder, w: 0.1, d: 0.1, h: 0.18, x: -0.1, y: 0.24, z: 1.09, color: "#5d6168", collide: false}
+      - {name: cup-stack-3, primitive: cylinder, w: 0.1, d: 0.1, h: 0.3, x: -0.04, y: 0.12, z: 1.15, color: "#5d6168", collide: false}
+      - {name: pot, primitive: box, w: 0.18, d: 0.18, h: 0.15, x: -0.36, y: 0.4, z: 1.075, color: "#f4f4f2", collide: false}
+      - {name: plant, primitive: box, w: 0.26, d: 0.26, h: 0.22, x: -0.36, y: 0.4, z: 1.26, yaw: 20, color: "#5aa83c", collide: false}
+      - {name: plant-top, primitive: box, w: 0.17, d: 0.17, h: 0.14, x: -0.38, y: 0.38, z: 1.43, yaw: 50, color: "#6dbd4a", collide: false}
+      - {name: tray-1, primitive: box, w: 0.34, d: 0.24, h: 0.14, x: -0.68, y: 0.22, z: 1.07, color: "#3d6fb6", collide: false}
+      - {name: tray-2, primitive: box, w: 0.3, d: 0.22, h: 0.12, x: -0.94, y: 0.42, z: 1.06, color: "#e6e7e9", collide: false}
+      - {name: shelf-bottom, primitive: box, w: 2.1, d: 0.42, h: 0.04, x: 0, y: -0.36, z: 0.04, color: "#3a3d42"}
+      - {name: shelf-middle, primitive: box, w: 2.1, d: 0.42, h: 0.04, x: 0, y: -0.36, z: 0.46, color: "#3a3d42"}
+      - {name: shelf-top, primitive: box, w: 2.1, d: 0.42, h: 0.04, x: 0, y: -0.36, z: 0.88, color: "#3a3d42"}
+      - {name: shelf-side-left, primitive: box, w: 0.04, d: 0.42, h: 0.86, x: 1.03, y: -0.36, z: 0.47, color: "#3a3d42"}
+      - {name: shelf-side-centre, primitive: box, w: 0.04, d: 0.42, h: 0.86, x: 0, y: -0.36, z: 0.47, color: "#3a3d42"}
+      - {name: shelf-side-right, primitive: box, w: 0.04, d: 0.42, h: 0.86, x: -1.03, y: -0.36, z: 0.47, color: "#3a3d42"}
+      - {name: bin-1, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: 0.52, y: -0.36, z: 0.64, color: "#b8bcc2", collide: false}
+      - {name: bin-2, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: -0.52, y: -0.36, z: 0.64, color: "#3d6fb6", collide: false}
+      - {name: bin-3, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: 0.52, y: -0.36, z: 0.22, color: "#3d6fb6", collide: false}
+      - {name: bin-4, primitive: box, w: 0.8, d: 0.34, h: 0.3, x: -0.52, y: -0.36, z: 0.22, color: "#b8bcc2", collide: false}
+      - {name: stock-1, primitive: box, w: 0.26, d: 0.26, h: 0.16, x: 0.6, y: -0.36, z: 0.98, color: "#b8bcc2", collide: false}
+      - {name: stock-2, primitive: box, w: 0.26, d: 0.26, h: 0.16, x: 0.25, y: -0.36, z: 0.98, color: "#3a3d42", collide: false}
+      - {name: stock-3, primitive: box, w: 0.26, d: 0.26, h: 0.16, x: -0.15, y: -0.36, z: 0.98, color: "#3d6fb6", collide: false}
+      - {name: crate, primitive: box, w: 0.55, d: 0.5, h: 0.55, x: -1.46, y: -0.12, z: 0.275, color: "#3a3d42"}
+      - {name: sign-front, primitive: box, w: 0.56, d: 0.03, h: 0.9, x: 1.62, y: 1.21, z: 0.45, roll: 12, color: "#2f3237"}
+      - {name: sign-back, primitive: box, w: 0.56, d: 0.03, h: 0.9, x: 1.62, y: 1.03, z: 0.45, roll: -12, color: "#2f3237"}

@@ -50,7 +50,7 @@ class CatalogTest(unittest.TestCase):
         types = {item.type.id for item in catalog.items.values()}
         self.assertLessEqual({"flat_ground", "hills_terrain", "wall", "building_block", "box_obstacle", "pylon", "gate",
                               "ramp", "platform", "landing_pad", "road_surface", "road_marking", "guard_rail",
-                              "road_sign", "traffic_signal"}, types)
+                              "road_sign", "traffic_signal", "food_stall", "open_space"}, types)
 
     def test_catalog_problems_are_all_reported(self):
         data = {"schema": env_schema.CATALOG_SCHEMA, "items": [

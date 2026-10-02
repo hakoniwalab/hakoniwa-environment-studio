@@ -162,6 +162,13 @@ Car / Drone の実験場をすぐ作れる最小 Catalog から始めます。
 道路標識や信号は、まず外観・配置・collision を扱います。
 信号制御や交通ルールは Scenario 側の責務とします。
 
+### Town
+
+- 箱庭屋台（オレンジ・レッド・ブルー）
+- 箱庭オープンスペース（シンプル・にぎやか）
+
+角の丸みや日本語の文字は、部品の見た目の GLB（`catalogs/starter/assets/`）が持ちます。当たり判定と上面図は型の箱・円柱です。どちらも `catalogs/starter/build_town_assets.py` が書くので、形を直すときはこのスクリプトを直して実行し直します（文字は Noto Sans CJK JP で描きます。GLB に入るのは描いた文字だけで、フォントは入りません）。
+
 ## Relationship with Hakoniwa Urban Mobility
 
 Environment Studio の生成物は、最終的に Environment Asset として

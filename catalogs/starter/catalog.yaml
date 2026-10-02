@@ -113,3 +113,31 @@ items:
   - id: traffic-signal
     type: traffic_signal
     name: 信号機
+
+  # --- Town (looks: assets/*.glb, from build_town_assets.py) -------------------------
+  - id: hakoniwa-stall
+    type: food_stall
+    name: 箱庭屋台
+    description: A small street stall to line up for a market or a festival street.
+    params: {visual: assets/hakoniwa-stall-orange.glb}
+
+  - id: hakoniwa-stall-red
+    extends: hakoniwa-stall
+    name: 箱庭屋台（レッド）
+    params: {color: "#d8352a", visual: assets/hakoniwa-stall-red.glb}
+
+  - id: hakoniwa-stall-blue
+    extends: hakoniwa-stall
+    name: 箱庭屋台（ブルー）
+    params: {color: "#2f6fc0", visual: assets/hakoniwa-stall-blue.glb}
+
+  - id: hakoniwa-open-space
+    type: open_space
+    name: 箱庭オープンスペース（シンプル）
+    description: A small square with parasols, a bench, planters and trees; next to a stall.
+    params: {visual: assets/hakoniwa-open-space-simple.glb}
+
+  - id: hakoniwa-open-space-lively
+    extends: hakoniwa-open-space
+    name: 箱庭オープンスペース（にぎやか）
+    params: {layout: lively, visual: assets/hakoniwa-open-space-lively.glb}

@@ -1,0 +1,87 @@
+# 箱庭オープンスペース (Hakoniwa Open Space): a small square on a deck with
+# parasols, tables and stools, a bench, planters and trees; にぎやか adds
+# light poles with a line of flags, a banner and a board. Facing +y (the
+# lettering on the kerb). Written by catalogs/starter/build_town_assets.py
+# with its looks (the GLB that the Catalog items name as their visual); edit
+# that script, not this file.
+schema: hakoniwa.environment-types/v1
+types:
+  - id: open_space
+    extends: object
+    label: 広場
+    description: A small square (6 m x 5 m) on a low deck with parasols, a bench, planters and trees, facing its y.
+    id_prefix: square
+    params:
+      color: {kind: color, label: 差し色, default: "#f26b1d", level: item,
+              description: "The parasols, the stools and the flags (its look has the same colour)."}
+      layout: {kind: enum, label: 並べ方, values: [simple, lively], default: simple, level: item,
+               description: "simple: two parasols, a bench, planters and trees. lively: also light poles with flags, a banner and a board."}
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: item,
+               description: "Its look with rounded edges and lettering, in the part's frame; relative to the Catalog."}
+    shapes:
+      - {name: deck, primitive: box, w: 6, d: 5, h: 0.3, x: 0, y: 0, z: 0.15, color: "#3a3d42"}
+      - {name: floor, primitive: box, w: 5.7, d: 4.7, h: 0.02, x: 0, y: 0, z: 0.31, color: "#e9eaec"}
+      - {name: corner-lb, primitive: box, w: 0.42, d: 0.42, h: 0.38, x: 2.79, y: -2.29, z: 0.19, color: "#3a3d42"}
+      - {name: corner-lf, primitive: box, w: 0.42, d: 0.42, h: 0.38, x: 2.79, y: 2.29, z: 0.19, color: "#3a3d42"}
+      - {name: corner-rb, primitive: box, w: 0.42, d: 0.42, h: 0.38, x: -2.79, y: -2.29, z: 0.19, color: "#3a3d42"}
+      - {name: corner-rf, primitive: box, w: 0.42, d: 0.42, h: 0.38, x: -2.79, y: 2.29, z: 0.19, color: "#3a3d42"}
+      - {name: front-panel, primitive: box, w: 3.1, d: 0.02, h: 0.23, x: 0.2, y: 2.505, z: 0.15, color: "#f4f4f2", collide: false}
+      - {name: table-1-foot, primitive: cylinder, w: 0.46, d: 0.46, h: 0.04, x: 0.9, y: 0.35, z: 0.32, color: "#3a3d42"}
+      - {name: table-1-post, primitive: cylinder, w: 0.08, d: 0.08, h: 0.68, x: 0.9, y: 0.35, z: 0.68, color: "#3a3d42"}
+      - {name: table-1-top, primitive: cylinder, w: 0.9, d: 0.9, h: 0.05, x: 0.9, y: 0.35, z: 1.045, color: "#c8925a"}
+      - {name: table-1-pole, primitive: cylinder, w: 0.05, d: 0.05, h: 1.6, x: 0.9, y: 0.35, z: 1.87, color: "#3a3d42", collide: false}
+      - {name: table-1-canopy, primitive: cylinder, w: 2.1, d: 2.1, h: 0.3, x: 0.9, y: 0.35, z: 2.55, color: "#f4f4f2"}
+      - {name: table-1-stool-1, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: 0.3909, y: 0.8591, z: 0.48, color: "#3a3d42"}
+      - {name: table-1-stool-1-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: 0.3909, y: 0.8591, z: 0.7}
+      - {name: table-1-stool-2, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: 1.4091, y: 0.8591, z: 0.48, color: "#3a3d42"}
+      - {name: table-1-stool-2-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: 1.4091, y: 0.8591, z: 0.7}
+      - {name: table-1-stool-3, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: 1.4091, y: -0.1591, z: 0.48, color: "#3a3d42"}
+      - {name: table-1-stool-3-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: 1.4091, y: -0.1591, z: 0.7}
+      - {name: table-1-stool-4, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: 0.3909, y: -0.1591, z: 0.48, color: "#3a3d42"}
+      - {name: table-1-stool-4-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: 0.3909, y: -0.1591, z: 0.7}
+      - {name: table-2-foot, primitive: cylinder, w: 0.46, d: 0.46, h: 0.04, x: -1.25, y: -0.45, z: 0.32, color: "#3a3d42"}
+      - {name: table-2-post, primitive: cylinder, w: 0.08, d: 0.08, h: 0.68, x: -1.25, y: -0.45, z: 0.68, color: "#3a3d42"}
+      - {name: table-2-top, primitive: cylinder, w: 0.9, d: 0.9, h: 0.05, x: -1.25, y: -0.45, z: 1.045, color: "#c8925a"}
+      - {name: table-2-pole, primitive: cylinder, w: 0.05, d: 0.05, h: 1.6, x: -1.25, y: -0.45, z: 1.87, color: "#3a3d42", collide: false}
+      - {name: table-2-canopy, primitive: cylinder, w: 1.9, d: 1.9, h: 0.3, x: -1.25, y: -0.45, z: 2.55, color: "#f4f4f2"}
+      - {name: table-2-stool-1, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: -1.7591, y: 0.0591, z: 0.48, color: "#3a3d42"}
+      - {name: table-2-stool-1-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: -1.7591, y: 0.0591, z: 0.7}
+      - {name: table-2-stool-2, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: -0.7409, y: 0.0591, z: 0.48, color: "#3a3d42"}
+      - {name: table-2-stool-2-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: -0.7409, y: 0.0591, z: 0.7}
+      - {name: table-2-stool-3, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: -0.7409, y: -0.9591, z: 0.48, color: "#3a3d42"}
+      - {name: table-2-stool-3-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: -0.7409, y: -0.9591, z: 0.7}
+      - {name: table-2-stool-4, primitive: box, w: 0.32, d: 0.32, h: 0.36, x: -1.7591, y: -0.9591, z: 0.48, color: "#3a3d42"}
+      - {name: table-2-stool-4-seat, primitive: box, w: 0.36, d: 0.36, h: 0.08, x: -1.7591, y: -0.9591, z: 0.7}
+      - {name: bench-seat-1, primitive: box, w: 1.5, d: 0.12, h: 0.05, x: 1.4, y: -1.81, z: 0.74, color: "#c8925a"}
+      - {name: bench-seat-2, primitive: box, w: 1.5, d: 0.12, h: 0.05, x: 1.4, y: -1.94, z: 0.74, color: "#c8925a"}
+      - {name: bench-seat-3, primitive: box, w: 1.5, d: 0.12, h: 0.05, x: 1.4, y: -2.07, z: 0.74, color: "#c8925a"}
+      - {name: bench-back-1, primitive: box, w: 1.5, d: 0.04, h: 0.11, x: 1.4, y: -2.19, z: 0.92, color: "#c8925a"}
+      - {name: bench-back-2, primitive: box, w: 1.5, d: 0.04, h: 0.11, x: 1.4, y: -2.19, z: 1.06, color: "#c8925a"}
+      - {name: bench-leg-l, primitive: box, w: 0.06, d: 0.5, h: 0.42, x: 2.05, y: -1.97, z: 0.51, color: "#3a3d42"}
+      - {name: bench-arm-l, primitive: box, w: 0.06, d: 0.06, h: 0.88, x: 2.05, y: -2.19, z: 0.74, color: "#3a3d42", collide: false}
+      - {name: bench-leg-r, primitive: box, w: 0.06, d: 0.5, h: 0.42, x: 0.75, y: -1.97, z: 0.51, color: "#3a3d42"}
+      - {name: bench-arm-r, primitive: box, w: 0.06, d: 0.06, h: 0.88, x: 0.75, y: -2.19, z: 0.74, color: "#3a3d42", collide: false}
+      - {name: planter-1, primitive: box, w: 1, d: 0.5, h: 0.45, x: -0.6, y: -2, z: 0.525, color: "#c9ccd0"}
+      - {name: planter-2, primitive: box, w: 0.5, d: 0.9, h: 0.45, x: -2.35, y: 1.55, z: 0.525, color: "#c9ccd0"}
+      - {name: planter-3, primitive: box, w: 0.5, d: 0.9, h: 0.45, x: 2.45, y: 0.85, z: 0.525, color: "#c9ccd0", when: '$layout == "lively"'}
+      - {name: planter-4, primitive: box, w: 0.5, d: 0.9, h: 0.45, x: -2.4, y: -0.2, z: 0.525, color: "#c9ccd0", when: '$layout == "lively"'}
+      - {name: tree-left-trunk, primitive: cylinder, w: 0.18, d: 0.18, h: 1.7, x: 2.45, y: -1.95, z: 0.85, color: "#8a5a3b"}
+      - {name: tree-left-crown, primitive: box, w: 1.4, d: 1.4, h: 1.3, x: 2.45, y: -1.95, z: 2.25, color: "#5aa83c"}
+      - {name: tree-right-trunk, primitive: cylinder, w: 0.18, d: 0.18, h: 1.7, x: -2.45, y: -1.95, z: 0.85, color: "#8a5a3b"}
+      - {name: tree-right-crown, primitive: box, w: 1.4, d: 1.4, h: 1.3, x: -2.45, y: -1.95, z: 2.25, color: "#5aa83c"}
+      - {name: lamp-left, primitive: box, w: 0.14, d: 0.14, h: 0.62, x: 2.62, y: 2.05, z: 0.61, color: "#3a3d42"}
+      - {name: lamp-left-light, primitive: box, w: 0.11, d: 0.11, h: 0.16, x: 2.62, y: 2.05, z: 1, color: "#fff3c4", collide: false}
+      - {name: lamp-left-cap, primitive: box, w: 0.17, d: 0.17, h: 0.05, x: 2.62, y: 2.05, z: 1.105, color: "#3a3d42", collide: false}
+      - {name: lamp-right, primitive: box, w: 0.14, d: 0.14, h: 0.62, x: -2.62, y: 2.05, z: 0.61, color: "#3a3d42"}
+      - {name: lamp-right-light, primitive: box, w: 0.11, d: 0.11, h: 0.16, x: -2.62, y: 2.05, z: 1, color: "#fff3c4", collide: false}
+      - {name: lamp-right-cap, primitive: box, w: 0.17, d: 0.17, h: 0.05, x: -2.62, y: 2.05, z: 1.105, color: "#3a3d42", collide: false}
+      - {name: bin, primitive: box, w: 0.46, d: 0.46, h: 0.8, x: -1.85, y: 2, z: 0.7, color: "#3a3d42"}
+      - {name: bin-lid, primitive: box, w: 0.5, d: 0.5, h: 0.05, x: -1.85, y: 2, z: 1.125, color: "#2b2e33", collide: false}
+      - {name: light-pole-left, primitive: box, w: 0.14, d: 0.14, h: 3.3, x: 1.9, y: -2.25, z: 1.95, color: "#3a3d42", when: '$layout == "lively"'}
+      - {name: light-pole-left-cap, primitive: box, w: 0.2, d: 0.2, h: 0.08, x: 1.9, y: -2.25, z: 3.64, color: "#3a3d42", collide: false, when: '$layout == "lively"'}
+      - {name: light-pole-right, primitive: box, w: 0.14, d: 0.14, h: 3.3, x: -1.9, y: -2.25, z: 1.95, color: "#3a3d42", when: '$layout == "lively"'}
+      - {name: light-pole-right-cap, primitive: box, w: 0.2, d: 0.2, h: 0.08, x: -1.9, y: -2.25, z: 3.64, color: "#3a3d42", collide: false, when: '$layout == "lively"'}
+      - {name: banner-arm, primitive: box, w: 0.5, d: 0.04, h: 0.04, x: -1.65, y: -2.25, z: 2.9, color: "#3a3d42", collide: false, when: '$layout == "lively"'}
+      - {name: banner, primitive: box, w: 0.42, d: 0.02, h: 0.6, x: -1.6, y: -2.25, z: 2.57, collide: false, when: '$layout == "lively"'}
+      - {name: sign-front, primitive: box, w: 0.56, d: 0.03, h: 0.9, x: 2.3, y: 1.69, z: 0.45, roll: 12, color: "#2f3237", when: '$layout == "lively"'}
+      - {name: sign-back, primitive: box, w: 0.56, d: 0.03, h: 0.9, x: 2.3, y: 1.51, z: 0.45, roll: -12, color: "#2f3237", when: '$layout == "lively"'}
