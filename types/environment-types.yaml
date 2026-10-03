@@ -166,6 +166,70 @@ types:
     shapes:
       - {name: body, primitive: wedge, w: $width_m, d: $length_m, h: $height_m}
 
+  # Stairs (a deck's end PLATEAU leaves in mid-air, #stairs): 24 solid steps
+  # rising along its y from the ground to its height, each a box down to the
+  # ground (so it stands as a block, and collides as one).
+  - id: stairs
+    extends: object
+    label: 階段
+    description: Stairs of 24 steps rising along its y from the ground to its height, solid underneath.
+    id_prefix: stairs
+    params:
+      width_m: {kind: length, label: 幅, default: 3.0, min: 0.5, max: 50, level: placement}
+      length_m: {kind: length, label: 長さ, default: 12.0, min: 0.5, max: 100, level: placement,
+                  description: "The run, along its y (about twice the height for a comfortable stair)."}
+      height_m: {kind: length, label: 高さ, default: 6.0, min: 0.2, max: 30, level: placement,
+                  description: "The top step's height above the ground (a deck's floor)."}
+    shapes:
+      - {name: step-01, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 1 / 24,
+         y: -$length_m / 2 + $length_m * 1 / 48, z: $height_m * 1 / 48}
+      - {name: step-02, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 2 / 24,
+         y: -$length_m / 2 + $length_m * 3 / 48, z: $height_m * 2 / 48}
+      - {name: step-03, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 3 / 24,
+         y: -$length_m / 2 + $length_m * 5 / 48, z: $height_m * 3 / 48}
+      - {name: step-04, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 4 / 24,
+         y: -$length_m / 2 + $length_m * 7 / 48, z: $height_m * 4 / 48}
+      - {name: step-05, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 5 / 24,
+         y: -$length_m / 2 + $length_m * 9 / 48, z: $height_m * 5 / 48}
+      - {name: step-06, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 6 / 24,
+         y: -$length_m / 2 + $length_m * 11 / 48, z: $height_m * 6 / 48}
+      - {name: step-07, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 7 / 24,
+         y: -$length_m / 2 + $length_m * 13 / 48, z: $height_m * 7 / 48}
+      - {name: step-08, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 8 / 24,
+         y: -$length_m / 2 + $length_m * 15 / 48, z: $height_m * 8 / 48}
+      - {name: step-09, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 9 / 24,
+         y: -$length_m / 2 + $length_m * 17 / 48, z: $height_m * 9 / 48}
+      - {name: step-10, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 10 / 24,
+         y: -$length_m / 2 + $length_m * 19 / 48, z: $height_m * 10 / 48}
+      - {name: step-11, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 11 / 24,
+         y: -$length_m / 2 + $length_m * 21 / 48, z: $height_m * 11 / 48}
+      - {name: step-12, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 12 / 24,
+         y: -$length_m / 2 + $length_m * 23 / 48, z: $height_m * 12 / 48}
+      - {name: step-13, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 13 / 24,
+         y: -$length_m / 2 + $length_m * 25 / 48, z: $height_m * 13 / 48}
+      - {name: step-14, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 14 / 24,
+         y: -$length_m / 2 + $length_m * 27 / 48, z: $height_m * 14 / 48}
+      - {name: step-15, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 15 / 24,
+         y: -$length_m / 2 + $length_m * 29 / 48, z: $height_m * 15 / 48}
+      - {name: step-16, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 16 / 24,
+         y: -$length_m / 2 + $length_m * 31 / 48, z: $height_m * 16 / 48}
+      - {name: step-17, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 17 / 24,
+         y: -$length_m / 2 + $length_m * 33 / 48, z: $height_m * 17 / 48}
+      - {name: step-18, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 18 / 24,
+         y: -$length_m / 2 + $length_m * 35 / 48, z: $height_m * 18 / 48}
+      - {name: step-19, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 19 / 24,
+         y: -$length_m / 2 + $length_m * 37 / 48, z: $height_m * 19 / 48}
+      - {name: step-20, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 20 / 24,
+         y: -$length_m / 2 + $length_m * 39 / 48, z: $height_m * 20 / 48}
+      - {name: step-21, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 21 / 24,
+         y: -$length_m / 2 + $length_m * 41 / 48, z: $height_m * 21 / 48}
+      - {name: step-22, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 22 / 24,
+         y: -$length_m / 2 + $length_m * 43 / 48, z: $height_m * 22 / 48}
+      - {name: step-23, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 23 / 24,
+         y: -$length_m / 2 + $length_m * 45 / 48, z: $height_m * 23 / 48}
+      - {name: step-24, primitive: box, w: $width_m, d: $length_m / 24, h: $height_m * 24 / 24,
+         y: -$length_m / 2 + $length_m * 47 / 48, z: $height_m * 24 / 48}
+
   - id: platform
     extends: block
     label: 台
@@ -287,11 +351,17 @@ types:
       footprint: {kind: polygon, label: 外形, default: [[-5, -4], [5, -4], [5, 4], [-5, 4]], level: placement,
                   description: "The outline, [[x, y], ...] in metres in the object's frame (any turning order)."}
       height_m: {kind: length, label: 高さ, default: 9.0, min: 1, max: 500, level: placement,
-                 description: "Height of its top above the ground (the extruded footprint's; a building with its own look and colliders keeps theirs)."}
+                 description: "Height of its top above the ground (the extruded footprint's; a building with its own look and colliders is sized by the scales)."}
       min_height_m: {kind: length, label: 下端の高さ, default: 0.0, min: 0, max: 499, level: placement,
                      description: "Where it starts above the ground: > 0 for a canopy (a roof on posts) or a bridge between buildings (the extruded footprint's, as height_m)."}
       lift_m: {kind: length, label: 持ち上げ, default: 0.0, min: 0, max: 100, level: placement,
                description: "Raise the whole building, its look and colliders included (a building PLATEAU records solid to the ground over a road)."}
+      scale_x: {kind: number, label: 横幅の倍率, default: 1.0, min: 0.1, max: 10, level: placement,
+                description: "Stretch the whole building along its x (look, colliders and footprint), about its position."}
+      scale_y: {kind: number, label: 縦幅の倍率, default: 1.0, min: 0.1, max: 10, level: placement,
+                description: "Stretch the whole building along its y, about its position."}
+      scale_z: {kind: number, label: 高さの倍率, default: 1.0, min: 0.1, max: 10, level: placement,
+                description: "Stretch the whole building upwards from its base."}
       visual: {kind: text, label: 見た目（GLB）, default: "", level: placement,
                description: "A GLB shown instead of the extruded footprint (its CityGML LOD2 look, textures included), in the part's frame; absolute or relative to the Recipe."}
       holes: {kind: polygons, label: 穴（中庭）, default: [], level: placement,
@@ -299,37 +369,14 @@ types:
       collision: {kind: text, label: 当たり判定（MJCF）, default: "", level: placement,
                   description: "The building's own colliders (Envsim's P0-P3 geoms, as Envsim wrote them) used in the generated MuJoCo world instead of the extruded footprint; needs the object's anchor. The footprint still places it and checks overlaps."}
     shapes:
-      - {name: body, primitive: prism, points: $footprint, holes: $holes, h: $height_m - $min_height_m,
-         z: ($height_m + $min_height_m) / 2 + $lift_m}
+      - {name: body, primitive: prism, points: "scaled($footprint, $scale_x, $scale_y)",
+         holes: "scaled_all($holes, $scale_x, $scale_y)", h: ($height_m - $min_height_m) * $scale_z,
+         z: ($height_m + $min_height_m) / 2 * $scale_z + $lift_m}
 
   # A layer of a City World as Envsim built it (its road network, road
   # markings, bridges): its GLB (and colliders, when Envsim made some) passed
   # through unchanged. The outlines only draw it on the plan; it collides with
   # nothing of its own (Envsim's roads are the terrain).
-  - id: passage
-    extends: object
-    label: くり抜き（通り抜け）
-    description: >-
-      A box that is cut out of the colliders and the look of the parts it
-      overlaps (a City's buildings): a road through a building that PLATEAU
-      records solid to the ground. It stands on the ground, cutting from a
-      little below it up to its height; the editor shows it, a generated
-      environment does not.
-    id_prefix: passage
-    params:
-      color: {kind: color, label: 色, default: "#f26b1d", level: placement}
-      width_m: {kind: length, label: 幅, default: 10.0, min: 0.5, max: 200, level: placement,
-                description: "Across the way, along its x."}
-      depth_m: {kind: length, label: 奥行き, default: 30.0, min: 0.5, max: 500, level: placement,
-                description: "Along the way through the part, along its y."}
-      height_m: {kind: length, label: 高さ, default: 4.5, min: 0.5, max: 50, level: placement,
-                 description: "Clear height above the ground (4.5 m is the 建築限界)."}
-      below_m: {kind: length, label: 地面より下へ, default: 0.5, min: 0, max: 20, level: placement,
-                description: "How far below the ground the cut reaches (a part's floor over the way)."}
-    shapes:
-      - {name: cut, primitive: box, w: $width_m, d: $depth_m, h: $height_m, x: 0, y: 0, z: $height_m / 2, collide: false}
-    behavior: {surface: ground}
-
   - id: city_layer
     extends: object
     label: 街の層（envsim）

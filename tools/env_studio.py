@@ -302,7 +302,7 @@ def preview_glb(body: object) -> bytes:
         recipe = _recipe_from_body(body, USER_RECIPES.resolve() / "preview.yaml")
     except DiagnosticError as exc:
         raise StudioError(f"3D を作れません: {exc}") from exc
-    return env_generate.environment_glb(recipe, editor=True)
+    return env_generate.environment_glb(recipe)
 
 
 def preview_poses(body: object) -> dict:

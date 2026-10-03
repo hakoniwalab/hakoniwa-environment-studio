@@ -108,8 +108,7 @@ class BuildConditionsTest(unittest.TestCase):
         # Physics Level 3, every collider reduction off, stop where the DEM does not cover.
         self.assertEqual(env_cityworld.build_options(None), {
             "building_physics_level": 3, "building_collider_reduction": "safe",
-            "terrain_uncovered_policy": "error", "terrain_bridge_carve": False, "building_road_passage": False,
-            "terrain_bridge_blend": False})
+            "terrain_uncovered_policy": "error", "terrain_bridge_carve": False, "terrain_bridge_blend": False})
 
     def test_chosen_conditions_go_into_the_envsim_build(self):
         config = env_cityworld.build_config(Path("/job"), (43.0, 141.3), (100.0, 100.0), Path("/cache"), {
@@ -121,10 +120,6 @@ class BuildConditionsTest(unittest.TestCase):
         carved = env_cityworld.build_config(Path("/job"), (43.0, 141.3), (100.0, 100.0), Path("/cache"),
                                             {"terrain_bridge_carve": True})
         self.assertIn("terrain_bridge_carve: true", carved)
-        self.assertIn("building_road_passage: false", config)
-        passage = env_cityworld.build_config(Path("/job"), (43.0, 141.3), (100.0, 100.0), Path("/cache"),
-                                             {"building_road_passage": True})
-        self.assertIn("building_road_passage: true", passage)
         self.assertIn("terrain_bridge_blend: false", config)
         blend = env_cityworld.build_config(Path("/job"), (43.0, 141.3), (100.0, 100.0), Path("/cache"),
                                            {"terrain_bridge_blend": True})

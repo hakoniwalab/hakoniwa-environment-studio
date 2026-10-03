@@ -66,6 +66,12 @@ items:
     name: スロープ（幅 2 m・長さ 4 m・高さ 0.5 m）
     params: {color: "#8d9096"}
 
+  - id: stairs
+    type: stairs
+    name: 階段（幅 3 m・長さ 12 m・高さ 6 m）
+    description: Stairs down from a deck to the ground (24 steps, solid underneath); set its height to the deck's floor.
+    params: {color: "#c9c6bf"}
+
   - id: platform-1m
     type: platform
     name: 台（1 m）
@@ -141,11 +147,6 @@ items:
     extends: hakoniwa-open-space
     name: 箱庭オープンスペース（にぎやか）
     params: {layout: lively, visual: assets/hakoniwa-open-space-lively.glb}
-
-  - id: passage
-    type: passage
-    name: くり抜き（通り抜け）
-    description: Cut a way for cars through a City's building (its colliders and its look); 10 m wide, 30 m deep, 4.5 m high.
 
   - id: hakoniwa-shuttle-stop
     type: shuttle_stop

@@ -79,6 +79,9 @@ _FUNCTIONS = {
     # Trigonometry in degrees, as the rest of the contract.
     "sin": lambda deg: math.sin(math.radians(deg)), "cos": lambda deg: math.cos(math.radians(deg)),
     "tan": lambda deg: math.tan(math.radians(deg)),
+    # An outline (or several) stretched about the object's origin.
+    "scaled": lambda points, sx, sy: [[x * sx, y * sy] for x, y in points],
+    "scaled_all": lambda polygons, sx, sy: [[[x * sx, y * sy] for x, y in points] for points in polygons],
 }
 _ALLOWED_NODES = (
     ast.Expression, ast.BinOp, ast.UnaryOp, ast.Compare, ast.BoolOp, ast.Constant, ast.Load,
