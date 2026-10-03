@@ -638,11 +638,18 @@ def list_built_city_worlds() -> dict:
             "export_dir": str(EXPORT_DIR) if EXPORT_DIR else None}
 
 
-def delete_built_city_world(job_id: str) -> dict:
+def delete_built_city_world(job_id: str, remove_export: bool = False) -> dict:
     """Delete a City World this Studio built. One in the export folder stays
-    until its export is removed: the export names this build's files."""
+    until its export is removed (the export names this build's files), unless
+    remove_export also deletes that export first (to delete and build again)."""
     written = env_urban.exported(EXPORT_DIR) if EXPORT_DIR else {}
     found = written.get(str((env_cityworld.WORK / job_id / "build").resolve()))
+    if found and remove_export:
+        try:
+            env_urban.remove_export(_export_dir(), found["id"])
+        except env_urban.ExportError as exc:
+            raise StudioError(str(exc), HTTPStatus.NOT_FOUND) from exc
+        found = None
     if found:
         raise StudioError(f"{job_id} は書き出し先に {found['id']} として書き出してあります。先に「書き出しを消す」を"
                           "押してください（書き出したものがこの City World のファイルを使っています）。", HTTPStatus.CONFLICT)
@@ -952,7 +959,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("GET", ("city-worlds", "jobs", "*", "*"), lambda self, parts: self._file(
             _built(lambda: env_cityworld.job_file(_check_id(parts[2]), parts[3])))),
         ("POST", ("city-worlds", "jobs", "*", "delete"), lambda self, parts: self._json(
-            delete_built_city_world(_check_id(parts[2])))),
+            delete_built_city_world(_check_id(parts[2]), bool((self._body() or {}).get("remove_export"))))),
         ("POST", ("city-worlds", "import"), lambda self, _: self._json(import_city_world(self._body()))),
         ("POST", ("city-worlds", "export"), lambda self, _: self._json(export_city_world(self._body()))),
         ("POST", ("exports", "*", "delete"), lambda self, parts: self._json(remove_export(parts[1]))),

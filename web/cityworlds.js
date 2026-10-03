@@ -601,12 +601,15 @@ export function cityWorlds(page) {
   async function deleteSelectedArtifact() {
     const job = selectedGeneratedJob();
     if (job === null) return;
+    // A written City World is deleted together with its export (to build it again).
+    const written = job.exported || selectedEntry()?.exported || null;
+    const exported = written ? `\n書き出し先の ${written.id} も消します（それを使う側からは見えなくなります）。` : "";
     if (!window.confirm(`生成結果 ${job.job_id} を削除しますか？\n`
       + "その City World のフォルダ（ZIP・見た目・当たり判定・途中のファイル）を削除します。\n"
-      + "共有CityGMLキャッシュは削除しません。")) return;
+      + "共有CityGMLキャッシュは削除しません。" + exported)) return;
     elements["delete-artifact"].disabled = true;
     try {
-      await call("POST", `city-worlds/jobs/${encodeURIComponent(job.job_id)}/delete`, {});
+      await call("POST", `city-worlds/jobs/${encodeURIComponent(job.job_id)}/delete`, { remove_export: Boolean(written) });
       closeViewerForJob(job.job_id);
       generatedRectangle.setStyle({ opacity: 0 });
       elements["artifact-status"].className = "generation ready";

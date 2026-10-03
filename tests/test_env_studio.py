@@ -73,6 +73,22 @@ class StudioServerTest(unittest.TestCase):
         self.assertFalse(job.exists())
         self.assertEqual(self.call("GET", "/api/city-worlds/jobs/sapporo/city-world.glb")[0], 404)
 
+    def test_a_built_city_world_is_deleted_with_its_export_when_asked(self):
+        # To delete and build again: the page asks, then removes both.
+        job = self.user.parent / "city-worlds/sapporo"
+        (job / "build/world").mkdir(parents=True)
+        (job / "job.json").write_text("{}", encoding="utf-8")
+        exports = self.user.parent / "exports"
+        (exports / "sapporo").mkdir(parents=True)
+        (exports / "sapporo" / env_studio.env_urban.JOB_INFO).write_text("{}", encoding="utf-8")
+        exported = {str((job / "build").resolve()): {"id": "sapporo", "title": "sapporo"}}
+        with mock.patch.object(env_studio, "EXPORT_DIR", exports), \
+                mock.patch.object(env_studio.env_urban, "exported", lambda _: exported):
+            status, _answer = self.call("POST", "/api/city-worlds/jobs/sapporo/delete", {"remove_export": True})
+        self.assertEqual(status, 200)
+        self.assertFalse(job.exists())
+        self.assertFalse((exports / "sapporo").exists())
+
     def test_health_says_when_the_checkout_moved_after_the_start(self):
         started = {"version": "0.1.0", "commit": "a" * 40, "build_date": None, "platform": "source"}
         with mock.patch.object(env_studio, "STARTED_BUILD", started):
