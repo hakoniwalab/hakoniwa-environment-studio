@@ -525,20 +525,22 @@ def asset_frame(recipe: env_schema.Recipe, obj: env_schema.EnvObject) -> tuple[f
     (Envsim's height of that frame). Moved, they turn and move with it and
     rise or sink by how much the ground under its outline differs between
     the anchor and the new place. On another terrain (a flat ground chosen
-    instead), the frame stands on the ground under the object."""
+    instead), the frame stands on the ground under the object. A building's
+    lift_m raises it all."""
     pose, anchor = obj.pose, obj.anchor
+    lift = float(obj.params.get("lift_m", 0.0))
     if anchor is None:
-        return pose.x_m, pose.y_m, pose.z_m, pose.yaw_deg
+        return pose.x_m, pose.y_m, pose.z_m + lift, pose.yaw_deg
     yaw = pose.yaw_deg - anchor["yaw_deg"]
     hfield = recipe.terrain.hfield
     if not (anchor.get("terrain") and hfield and hfield["sha256"] == anchor["terrain"]):
-        return pose.x_m, pose.y_m, pose.z_m, yaw
+        return pose.x_m, pose.y_m, pose.z_m + lift, yaw
     if _unmoved(obj):
-        return anchor["x_m"], anchor["y_m"], anchor["z_m"], 0.0
+        return anchor["x_m"], anchor["y_m"], anchor["z_m"] + lift, 0.0
     at_anchor = env_schema.replace(obj, pose=env_schema.Pose(anchor["x_m"], anchor["y_m"], 0.0, anchor["yaw_deg"]))
     rise = (recipe.terrain.highest_under(env_schema.footprint(obj))
             - recipe.terrain.highest_under(env_schema.footprint(at_anchor)))
-    return pose.x_m, pose.y_m, anchor["z_m"] + rise, yaw
+    return pose.x_m, pose.y_m, anchor["z_m"] + rise + lift, yaw
 
 
 def environment_glb(recipe: env_schema.Recipe, *, editor: bool = False) -> bytes:
@@ -564,7 +566,8 @@ def environment_glb(recipe: env_schema.Recipe, *, editor: bool = False) -> bytes
         if obj.visual is not None:  # its own look (LOD2 with textures, an Envsim layer) instead of the solids
             x, y, z, yaw = asset_frame(recipe, obj)
             visual = obj.visual.read_bytes()
-            cutter = _cut_look(cuts, (x, y, z), yaw) if cuts and obj.collision is not None else None
+            touching = _cuts_over(cuts, obj) if obj.collision is not None else []
+            cutter = _cut_look(touching, (x, y, z), yaw) if touching else None
             index = builder.node(obj.id, None, (x, z, -y), yaw, {**extras, "visual": obj.visual.name},
                                  primitives=builder.asset_primitives(visual, cut=cutter))
             builder.add_lights(index, builder.asset_lights(visual))  # a part's own lights (a stall's lamp)
@@ -635,6 +638,23 @@ def _lowest_under(terrain, pose, rotation, width_m: float, depth_m: float) -> fl
             turned = _apply(rotation, local)
             lowest = min(lowest, terrain.height_at(pose.x_m + turned[0], pose.y_m + turned[1]))
     return lowest if math.isfinite(lowest) else pose.z_m
+
+
+def _cuts_over(cuts: list[dict], obj: env_schema.EnvObject) -> list[dict]:
+    """The cuts whose box meets the object's outline on the plan (by bounds):
+    only those objects are cut, the others are copied as they are."""
+    outline = env_schema.footprint(obj)
+    if not cuts or not outline:
+        return []
+    x0, x1 = min(p[0] for p in outline), max(p[0] for p in outline)
+    y0, y1 = min(p[1] for p in outline), max(p[1] for p in outline)
+    found = []
+    for cut in cuts:
+        cx = [c[0] for c in cut["corners"]]
+        cy = [c[1] for c in cut["corners"]]
+        if min(cx) <= x1 and max(cx) >= x0 and min(cy) <= y1 and max(cy) >= y0:
+            found.append(cut)
+    return found
 
 
 def _cut_corners_in_frame(cut: dict, origin, yaw_deg: float, shift=(0.0, 0.0, 0.0), envsim_axes: bool = False):
@@ -895,7 +915,7 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
         if obj.type == PASSAGE_TYPE:
             continue  # what it cuts out is gone from the others; it is nothing itself
         if obj.collision is not None and not validation:
-            _add_collision(asset, world, recipe, obj, cuts)
+            _add_collision(asset, world, recipe, obj, _cuts_over(cuts, obj))
             continue
         body = ET.SubElement(world, "body", {
             "name": BODY_PREFIX + obj.id, "pos": _numbers((obj.pose.x_m, obj.pose.y_m, obj.pose.z_m)),

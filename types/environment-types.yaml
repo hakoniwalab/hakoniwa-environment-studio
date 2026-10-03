@@ -287,9 +287,11 @@ types:
       footprint: {kind: polygon, label: 外形, default: [[-5, -4], [5, -4], [5, 4], [-5, 4]], level: placement,
                   description: "The outline, [[x, y], ...] in metres in the object's frame (any turning order)."}
       height_m: {kind: length, label: 高さ, default: 9.0, min: 1, max: 500, level: placement,
-                 description: Height of its top above the ground.}
+                 description: "Height of its top above the ground (the extruded footprint's; a building with its own look and colliders keeps theirs)."}
       min_height_m: {kind: length, label: 下端の高さ, default: 0.0, min: 0, max: 499, level: placement,
-                     description: "Where it starts above the ground: > 0 for a canopy (a roof on posts) or a bridge between buildings."}
+                     description: "Where it starts above the ground: > 0 for a canopy (a roof on posts) or a bridge between buildings (the extruded footprint's, as height_m)."}
+      lift_m: {kind: length, label: 持ち上げ, default: 0.0, min: 0, max: 100, level: placement,
+               description: "Raise the whole building, its look and colliders included (a building PLATEAU records solid to the ground over a road)."}
       visual: {kind: text, label: 見た目（GLB）, default: "", level: placement,
                description: "A GLB shown instead of the extruded footprint (its CityGML LOD2 look, textures included), in the part's frame; absolute or relative to the Recipe."}
       holes: {kind: polygons, label: 穴（中庭）, default: [], level: placement,
@@ -298,7 +300,7 @@ types:
                   description: "The building's own colliders (Envsim's P0-P3 geoms, as Envsim wrote them) used in the generated MuJoCo world instead of the extruded footprint; needs the object's anchor. The footprint still places it and checks overlaps."}
     shapes:
       - {name: body, primitive: prism, points: $footprint, holes: $holes, h: $height_m - $min_height_m,
-         z: ($height_m + $min_height_m) / 2}
+         z: ($height_m + $min_height_m) / 2 + $lift_m}
 
   # A layer of a City World as Envsim built it (its road network, road
   # markings, bridges): its GLB (and colliders, when Envsim made some) passed

@@ -101,6 +101,27 @@ class PassageTest(unittest.TestCase):
         editor, _ = env_generate.read_glb(env_generate.environment_glb(recipe, editor=True))
         self.assertIn("way", [node["name"] for node in editor["nodes"]])
 
+    def test_a_building_away_from_the_passage_is_copied_as_it_is(self):
+        far = self.passage.replace("x_m: 0", "x_m: 40")
+        recipe = env_schema.load_recipe(self.write("f.yaml", recipe_text(self.building + far)))
+        alone = env_schema.load_recipe(self.write("a.yaml", recipe_text(self.building)))
+        self.assertEqual(positions_of(env_generate.environment_glb(recipe), "bldg"),
+                         positions_of(env_generate.environment_glb(alone), "bldg"))
+        self.assertIn("bldg/wall", [g.get("name") for g in ET.fromstring(env_generate.environment_mjcf(recipe)).iter("geom")])
+
+    def test_lift_raises_a_buildings_look_and_colliders(self):
+        lifted = self.building.replace("height_m: 10, ", "height_m: 10, lift_m: 5, ")
+        recipe = env_schema.load_recipe(self.write("l.yaml", recipe_text(lifted)))
+        alone = env_schema.load_recipe(self.write("a.yaml", recipe_text(self.building)))
+        document, _ = env_generate.read_glb(env_generate.environment_glb(recipe))
+        node = next(node for node in document["nodes"] if node["name"] == "bldg")
+        base, _ = env_generate.read_glb(env_generate.environment_glb(alone))
+        node0 = next(node for node in base["nodes"] if node["name"] == "bldg")
+        self.assertAlmostEqual(node["translation"][1] - node0["translation"][1], 5.0, places=6)
+        body = next(b for b in ET.fromstring(env_generate.environment_mjcf(recipe)).iter("body") if b.get("name") == "object:bldg")
+        body0 = next(b for b in ET.fromstring(env_generate.environment_mjcf(alone)).iter("body") if b.get("name") == "object:bldg")
+        self.assertAlmostEqual(float(body.get("pos").split()[2]) - float(body0.get("pos").split()[2]), 5.0, places=6)
+
     @unittest.skipIf(mujoco is None, "needs MuJoCo")
     def test_a_car_passes_where_the_wall_was_cut(self):
         def first_hit(text: str):
