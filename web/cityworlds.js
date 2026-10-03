@@ -128,7 +128,7 @@ function disposeObject(root) {
 export function cityWorlds(page) {
   const { map } = page;
   const elements = Object.fromEntries([
-    "physics-level", "terrain-uncovered-policy", "coplanar-union", "convex-decompose", "tolerant-planar", "bridge-carve",
+    "physics-level", "terrain-uncovered-policy", "coplanar-union", "convex-decompose", "tolerant-planar", "bridge-carve", "road-passage",
     "inspect", "generate", "cancel", "mesh-summary", "overall", "municipality", "capabilities", "generation",
     "to-osm", "osm-generate", "osm-cancel", "osm-generation", "artifact-status",
     "world-entries", "world-root", "world-search", "made-count", "entry-detail", "entry-title", "artifact-path", "artifact-detail", "cache-info", "download", "view3d", "delete-artifact",
@@ -185,6 +185,7 @@ export function cityWorlds(page) {
       building_collider_reduction: colliderReduction(),
       terrain_uncovered_policy: elements["terrain-uncovered-policy"].value,
       terrain_bridge_carve: elements["bridge-carve"].checked,
+      building_road_passage: elements["road-passage"].checked,
     };
   }
 
@@ -206,7 +207,7 @@ export function cityWorlds(page) {
     }
   }
 
-  for (const id of ["physics-level", "terrain-uncovered-policy", "bridge-carve"]) {
+  for (const id of ["physics-level", "terrain-uncovered-policy", "bridge-carve", "road-passage"]) {
     elements[id].addEventListener("input", () => { invalidateInspection(); refresh(); });
   }
   elements["coplanar-union"].addEventListener("change", () => {

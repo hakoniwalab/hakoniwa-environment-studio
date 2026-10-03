@@ -75,6 +75,9 @@ BUILD_OPTIONS = {
     "terrain_uncovered_policy": ("error", ("error", "constant")),
     # Lower the DEM under bridges to the low ground around them (Envsim, inferred).
     "terrain_bridge_carve": (False, (False, True)),
+    # Open passages through building colliders where a LOD3 carriageway runs
+    # through them (Envsim: PLATEAU models such buildings solid to the ground).
+    "building_road_passage": (False, (False, True)),
 }
 
 
@@ -156,6 +159,7 @@ mjcf:
   floor: false
   building_physics_level: {options["building_physics_level"]}
   building_collider_reduction: {options["building_collider_reduction"]}
+  building_road_passage: {"true" if options["building_road_passage"] else "false"}
 
 glb:
   enabled: true
