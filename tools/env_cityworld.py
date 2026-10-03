@@ -73,6 +73,8 @@ BUILD_OPTIONS = {
     "building_physics_level": (3, (0, 1, 2, 3)),
     "building_collider_reduction": ("safe", ("safe", "coplanar-union", "convex-decompose", "tolerant-planar")),
     "terrain_uncovered_policy": ("error", ("error", "constant")),
+    # Lower the DEM under bridges to the low ground around them (Envsim, inferred).
+    "terrain_bridge_carve": (False, (False, True)),
 }
 
 
@@ -168,6 +170,7 @@ city_world:
   terrain_spacing_m: 2
   terrain_uncovered_policy: {options["terrain_uncovered_policy"]}
   terrain_uncovered_elevation_m: 0
+  terrain_bridge_carve: {"true" if options["terrain_bridge_carve"] else "false"}
   marking_vertical_offset_m: 0.055
   bridge_collision_thickness_m: 0.02
   bridge_max_surface_slope_deg: 60

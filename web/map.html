@@ -86,6 +86,10 @@
               <input id="tolerant-planar" type="checkbox">
               <span>壁面を最大 5 cm の近似でまとめる（箱は保つ・近似あり）</span>
             </label>
+            <label class="checkbox-option" title="橋の床の下で、地形（DEM）が床まで盛り上がって橋の下を塞いでいる所を、橋の周りの低い地面の高さまで下げます。橋の下の地面は測られていないので推定です。">
+              <input id="bridge-carve" type="checkbox">
+              <span>橋の下の地形（DEM）を、周りの低い地面まで下げる（推定・実験的）</span>
+            </label>
           </div>
           <p class="hint">海・川を含む範囲では、地形（DEM）の無い所を標高 0 m で埋められます。DEM がまったく無い範囲も、「標高 0 m で埋める」にすると平らな地面で生成できます。</p>
           <div id="mesh-summary" class="mono"></div>

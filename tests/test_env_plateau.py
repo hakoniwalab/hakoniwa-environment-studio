@@ -108,7 +108,7 @@ class BuildConditionsTest(unittest.TestCase):
         # Physics Level 3, every collider reduction off, stop where the DEM does not cover.
         self.assertEqual(env_cityworld.build_options(None), {
             "building_physics_level": 3, "building_collider_reduction": "safe",
-            "terrain_uncovered_policy": "error"})
+            "terrain_uncovered_policy": "error", "terrain_bridge_carve": False})
 
     def test_chosen_conditions_go_into_the_envsim_build(self):
         config = env_cityworld.build_config(Path("/job"), (43.0, 141.3), (100.0, 100.0), Path("/cache"), {
@@ -116,6 +116,10 @@ class BuildConditionsTest(unittest.TestCase):
         self.assertIn("building_physics_level: 0", config)
         self.assertIn("building_collider_reduction: safe", config)
         self.assertIn("terrain_uncovered_policy: constant", config)
+        self.assertIn("terrain_bridge_carve: false", config)  # off unless chosen (an inference)
+        carved = env_cityworld.build_config(Path("/job"), (43.0, 141.3), (100.0, 100.0), Path("/cache"),
+                                            {"terrain_bridge_carve": True})
+        self.assertIn("terrain_bridge_carve: true", carved)
 
     def test_a_condition_outside_envsims_values_is_refused(self):
         with self.assertRaisesRegex(env_cityworld.BuildError, "building_physics_level"):
