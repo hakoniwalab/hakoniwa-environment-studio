@@ -73,6 +73,22 @@ class PlateauInspectionTest(unittest.TestCase):
                                      FakeClient({"bldg": [file("bldg", 1)], "tran": [file("tran", 1)]}))
         self.assertEqual((result["status"], result["flat_ground_possible"]), ("unavailable", True))
 
+    def test_bridges_at_lod2_are_built_road_markings_at_lod2_are_not(self):
+        # Many cities publish bridges at LOD2 only; the generator draws them
+        # (and their floor surfaces collide). Road markings exist only at LOD3.
+        client = FakeClient({"bldg": [file("bldg", 2)], "dem": [file("dem", 1)], "tran": [file("tran", 2)],
+                             "frn": [file("frn", 2)], "brid": [file("brid", 2, code="64414278002")]})
+        capabilities = env_plateau.inspect((43.0, 141.3), (100, 100), client)["capabilities"]
+        self.assertEqual((capabilities["bridge"]["generation_status"], capabilities["bridge"]["reason"]),
+                         ("candidate", None))
+        self.assertEqual(capabilities["road_markings"]["generation_status"], "scoped_out")
+        self.assertIn("LOD3", capabilities["road_markings"]["reason"])
+        lod1 = FakeClient({"bldg": [file("bldg", 2)], "dem": [file("dem", 1)], "tran": [file("tran", 2)],
+                           "brid": [file("brid", 1, code="64414278002")]})
+        bridge = env_plateau.inspect((43.0, 141.3), (100, 100), lod1)["capabilities"]["bridge"]
+        self.assertEqual(bridge["generation_status"], "scoped_out")
+        self.assertIn("LOD2", bridge["reason"])
+
     def test_bridges_outside_the_area_are_left_out(self):
         client = FakeClient({"bldg": [file("bldg", 1)], "dem": [file("dem", 1)], "tran": [file("tran", 1)],
                              "brid": [file("brid", 3, code="64414278002"), file("brid", 3, code="64414279001")]})

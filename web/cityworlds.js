@@ -19,6 +19,7 @@ const capabilityLabels = {
 const capabilityReasons = {
   "dataset is not available in the selected bbox": "この範囲にはデータがありません",
   "LOD3 geometry required by the current generator is not available": "LOD3 が無いので使いません（LOD3 だけを使います）",
+  "LOD2 geometry required by the current generator is not available": "LOD2 以上が無いので使いません（LOD2 以上を使います）",
 };
 const progressPhaseLabels = {
   source_download: "データの取得",

@@ -31,7 +31,10 @@ FEATURES = {
     "bridge": ("brid", 1),
 }
 REQUIRED = ("building", "terrain", "road")
-LOD3_ONLY = ("road_markings", "bridge")
+# The lowest LOD the generator reads: road markings exist only at LOD3;
+# bridges are drawn from LOD3 where a bridge has it, else from LOD2 (envsim
+# bridge2glb/bridge2mjcf), as many cities publish them at LOD2 only.
+MIN_LOD = {"road_markings": 3, "bridge": 2}
 
 
 class InspectionError(RuntimeError):
@@ -43,10 +46,11 @@ def _capability(name: str, files: list[dict]) -> dict:
         return {"dataset_status": "not_available", "generation_status": "scoped_out", "max_lod": None,
                 "source_file_count": 0, "reason": "dataset is not available in the selected bbox"}
     max_lod = max(int(item.get("max_lod", 0)) for item in files)
-    candidate = not (name in LOD3_ONLY and max_lod < 3)
+    needed = MIN_LOD.get(name, 1)
+    candidate = max_lod >= needed
     return {"dataset_status": "available", "generation_status": "candidate" if candidate else "scoped_out",
             "max_lod": max_lod, "source_file_count": len(files),
-            "reason": None if candidate else "LOD3 geometry required by the current generator is not available"}
+            "reason": None if candidate else f"LOD{needed} geometry required by the current generator is not available"}
 
 
 def inspect(center: tuple[float, float], half: tuple[float, float], client=None) -> dict:
