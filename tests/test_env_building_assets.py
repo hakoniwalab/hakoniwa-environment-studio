@@ -113,5 +113,36 @@ class BuildingAssetTest(unittest.TestCase):
         self.assertEqual(sorted(tops), tops)  # rising along y
 
 
+    def test_roll_and_pitch_tilt_the_part(self):
+        recipe = env_schema.load_recipe(self.write("t.yaml", recipe_text(
+            "- {id: up, item: stairs, pose: {x_m: 0, y_m: 0, yaw_deg: 90, pitch_deg: 10, roll_deg: -5}, "
+            "params: {height_m: 6, length_m: 12, width_m: 3}}")))
+        pose = recipe.objects[0].pose
+        self.assertEqual((pose.roll_deg, pose.pitch_deg), (-5.0, 10.0))
+        expected = env_generate.quaternion(-5, 10, 90)
+        body = next(b for b in ET.fromstring(env_generate.environment_mjcf(recipe)).iter("body") if b.get("name") == "object:up")
+        for got, want in zip(map(float, body.get("quat").split()), expected):
+            self.assertAlmostEqual(got, want, places=6)
+        document, _ = env_generate.read_glb(env_generate.environment_glb(recipe))
+        node = next(node for node in document["nodes"] if node["name"] == "up")
+        w, x, y, z = expected
+        for got, want in zip(node["rotation"], [x, z, -y, w]):
+            self.assertAlmostEqual(got, want, places=6)
+
+    def test_a_tilt_beyond_90_degrees_is_refused(self):
+        with self.assertRaises(env_schema.DiagnosticError if hasattr(env_schema, "DiagnosticError") else Exception):
+            env_schema.load_recipe(self.write("bad.yaml", recipe_text(
+                "- {id: up, item: stairs, pose: {x_m: 0, y_m: 0, roll_deg: 120}}")))
+
+    def test_a_level_part_keeps_its_yaw_only_rotation(self):
+        recipe = env_schema.load_recipe(self.write("y.yaml", recipe_text(
+            "- {id: up, item: stairs, pose: {x_m: 0, y_m: 0, yaw_deg: 90}}")))
+        document, _ = env_generate.read_glb(env_generate.environment_glb(recipe))
+        node = next(node for node in document["nodes"] if node["name"] == "up")
+        half = 3.141592653589793 / 4
+        for got, want in zip(node["rotation"], [0.0, __import__("math").sin(half), 0.0, __import__("math").cos(half)]):
+            self.assertAlmostEqual(got, want, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

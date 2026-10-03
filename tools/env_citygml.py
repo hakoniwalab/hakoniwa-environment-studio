@@ -55,6 +55,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "catalogs/starter/catalog.yaml"
 CONVERTER_VERSION = "1"
 ITEMS = {"building": "building-footprint", "road": "road-area", "layer": "city-layer"}
+# The plan colour of a City World layer (city-layer's default is the roads'
+# asphalt): bridges and markings drawn over the roads stay in sight.
+LAYER_COLORS = {"bridges": "#b8bcc4", "markings": "#e6e1cc"}
 # Footprint points closer than this are merged (as osm2citygml): no other point
 # moves, so walls neighbours share stay shared.
 MIN_STEP_M = 0.001
@@ -841,7 +844,8 @@ def pass_through(objects: list[dict], passthrough: dict, road_outlines: list, us
         glb = asset_dir / f"layer-{name}.glb"
         shutil.copyfile(layer["glb"], glb)
         outlines = road_outlines if name == "roads" and road_outlines else _glb_outlines(layer["glb"])
-        params = {"outlines": outlines, "visual": relative(glb)}
+        params = {"outlines": outlines, "visual": relative(glb),
+                  **({"color": LAYER_COLORS[name]} if name in LAYER_COLORS else {})}
         if layer["xml"] is not None:
             xml = asset_dir / f"layer-{name}.xml"
             shutil.copyfile(layer["xml"], xml)

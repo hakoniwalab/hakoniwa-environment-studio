@@ -82,6 +82,13 @@ def _numbers(values) -> str:
     return " ".join(f"{round(value, 9) + 0.0:.9g}" for value in values)
 
 
+def gltf_rotation(roll_deg: float, pitch_deg: float, yaw_deg: float) -> list[float]:
+    """quaternion() as a glTF node rotation [x, y, z, w]: this frame's (x east,
+    y north, z up) axes are glTF's x, -z and y (yaw about up is about glTF +Y)."""
+    w, x, y, z = quaternion(roll_deg, pitch_deg, yaw_deg)
+    return [x, z, -y, w]
+
+
 def quaternion(roll_deg: float, pitch_deg: float, yaw_deg: float) -> tuple[float, float, float, float]:
     """(w, x, y, z) of yaw about z, then pitch about y, then roll about x."""
     cr, sr = math.cos(math.radians(roll_deg) / 2), math.sin(math.radians(roll_deg) / 2)
@@ -417,17 +424,15 @@ class _GlbBuilder:
             children.append(len(self.gltf["nodes"]) - 1)
 
     def node(self, name: str, pieces, translation, yaw_deg: float, extras: dict, primitives=None,
-             scale=(1.0, 1.0, 1.0)) -> int:
+             scale=(1.0, 1.0, 1.0), tilt=(0.0, 0.0)) -> int:
         """One node per object, its mesh one primitive per (mesh, colour) piece
         (or the given `primitives`, such as a visual asset's)."""
         if primitives is None:
             primitives = [self._primitive(to_gltf(mesh), color) for mesh, color in pieces]
         self.gltf["meshes"].append({"name": name, "primitives": primitives})
-        half = math.radians(yaw_deg) / 2.0
         self.gltf["nodes"].append({
             "name": name, "mesh": len(self.gltf["meshes"]) - 1, "translation": list(translation),
-            # Yaw counter-clockwise about up is the same angle about glTF +Y.
-            "rotation": [0.0, math.sin(half), 0.0, math.cos(half)], "extras": extras,
+            "rotation": gltf_rotation(tilt[0], tilt[1], yaw_deg), "extras": extras,
         })
         if any(abs(value - 1.0) > 1e-12 for value in scale):
             self.gltf["nodes"][-1]["scale"] = list(scale)
@@ -516,16 +521,17 @@ def environment_glb(recipe: env_schema.Recipe) -> bytes:
     for obj in recipe.objects:
         extras = {"object": obj.id, "item": obj.item, "type": obj.type}
         placement = ((obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m), obj.pose.yaw_deg)
+        tilt = (obj.pose.roll_deg, obj.pose.pitch_deg)
         if obj.visual is not None:  # its own look (LOD2 with textures, an Envsim layer) instead of the solids
             x, y, z, yaw = asset_frame(recipe, obj)
             visual = obj.visual.read_bytes()
             sx, sy, sz = asset_scale(obj)
-            index = builder.node(obj.id, None, (x, z, -y), yaw, {**extras, "visual": obj.visual.name},
+            index = builder.node(obj.id, None, (x, z, -y), yaw, {**extras, "visual": obj.visual.name}, tilt=tilt,
                                  primitives=builder.asset_primitives(visual), scale=(sx, sz, sy))
             builder.add_lights(index, builder.asset_lights(visual))  # a part's own lights (a stall's lamp)
             continue
         pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
-        builder.node(obj.id, pieces, *placement, extras)
+        builder.node(obj.id, pieces, *placement, extras, tilt=tilt)
     return builder.glb()
 
 
@@ -659,7 +665,7 @@ def _add_collision(asset: ET.Element, world: ET.Element, recipe: env_schema.Reci
     x, y, z, yaw = asset_frame(recipe, obj)
     anchor = obj.anchor or {"x_m": 0.0, "y_m": 0.0, "z_m": 0.0}
     body = ET.SubElement(world, "body", {"name": BODY_PREFIX + obj.id, "pos": _numbers((x, y, z)),
-                                         "quat": _numbers(quaternion(0, 0, yaw))})
+                                         "quat": _numbers(quaternion(obj.pose.roll_deg, obj.pose.pitch_deg, yaw))})
     frame = ET.SubElement(body, "body", {"name": f"{obj.id}/envsim-frame",
                                          "pos": _numbers((-anchor["x_m"], -anchor["y_m"], -anchor["z_m"])),
                                          "quat": _numbers(ENVSIM_FRAME_QUAT)})
@@ -763,7 +769,7 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
             continue
         body = ET.SubElement(world, "body", {
             "name": BODY_PREFIX + obj.id, "pos": _numbers((obj.pose.x_m, obj.pose.y_m, obj.pose.z_m)),
-            "quat": _numbers(quaternion(0, 0, obj.pose.yaw_deg)),
+            "quat": _numbers(quaternion(obj.pose.roll_deg, obj.pose.pitch_deg, obj.pose.yaw_deg)),
         })
         if validation:
             ET.SubElement(body, "freejoint", {"name": f"joint:{obj.id}"})

@@ -270,7 +270,8 @@ export class View3D {
       if (!node) { all = false; continue; }
       const [x, y, z] = pose.translation;
       node.position.set(x, y ?? node.position.y, z);
-      node.rotation.set(0, (pose.yaw_deg * Math.PI) / 180, 0);
+      if (pose.rotation) node.quaternion.set(...pose.rotation); // [x, y, z, w], roll and pitch included
+      else node.rotation.set(0, (pose.yaw_deg * Math.PI) / 180, 0);
     }
     return all;
   }

@@ -49,7 +49,7 @@ ANCHOR_KEYS = {"x_m", "y_m", "z_m", "yaw_deg", "terrain"}
 GEO_KEYS = {"provider", "origin", "bbox_deg", "projection", "attribution", "license", "data_timestamp", "query"}
 # Provenance of one object (the map feature it was made from).
 SOURCE_KEYS = {"provider", "kind", "id", "tags", "note", "attribution", "license"}
-POSE_KEYS = {"x_m", "y_m", "yaw_deg"}
+POSE_KEYS = {"x_m", "y_m", "yaw_deg", "roll_deg", "pitch_deg"}
 
 
 @dataclass(frozen=True)
@@ -94,6 +94,9 @@ class Pose:
     y_m: float
     z_m: float  # the object's base above the datum: the terrain under it (+ z_m when elevated)
     yaw_deg: float
+    # Tilts about the object's own x (roll) and y (pitch), at its base; applied before the yaw.
+    roll_deg: float = 0.0
+    pitch_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -489,6 +492,13 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
     if isinstance(yaw, bool) or not isinstance(yaw, (int, float)) or not math.isfinite(yaw):
         problems.add(f"{path}.pose.yaw_deg", "wrong_type", "must be a number of degrees", expected="number", actual=yaw)
         yaw = 0
+    tilts = {}
+    for key in ("roll_deg", "pitch_deg"):
+        tilt = pose.get(key, 0)
+        if isinstance(tilt, bool) or not isinstance(tilt, (int, float)) or not math.isfinite(tilt) or abs(tilt) > 90:
+            problems.add(f"{path}.pose.{key}", "wrong_type", "must be degrees within -90..90", expected="-90..90", actual=tilt)
+            tilt = 0
+        tilts[key] = float(tilt)
     resolved = problems.check(resolve_placement, item, value.get("params", {}), f"{path}.params")
     source = problems.check(_source, value["source"], f"{path}.source") if "source" in value else None
     anchor = problems.check(_anchor, value["anchor"], f"{path}.anchor") if "anchor" in value else None
@@ -501,7 +511,7 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
     if collision is not None and anchor is None and params.get("collision") != item.params.get("collision"):
         raise fail(f"{path}.params.collision", "missing_field",
                    "colliders are placed from the object's anchor (where they were made for)", expected="anchor")
-    obj = EnvObject(id=object_id, item=item.id, type=item.type.id, pose=Pose(x, y, 0.0, float(yaw) % 360.0),
+    obj = EnvObject(id=object_id, item=item.id, type=item.type.id, pose=Pose(x, y, 0.0, float(yaw) % 360.0, **tilts),
                     params=params, shape=shape, source=source, visual=visual, visual_sha256=visual_sha,
                     collision=collision, collision_sha256=collision_sha, anchor=anchor)
     # Set on the terrain: its base at the highest ground under its outline
@@ -664,7 +674,8 @@ def resolved_json(recipe: Recipe) -> dict:
         "terrain": {"item": recipe.terrain_item, **recipe.terrain.as_json(with_heights=False)},
         "objects": [{
             "id": obj.id, "item": obj.item, "type": obj.type,
-            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
+            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg,
+                     **{key: getattr(obj.pose, key) for key in ("roll_deg", "pitch_deg") if getattr(obj.pose, key)}},
             "params": obj.params, **obj.shape.as_json(), **({"source": obj.source} if obj.source else {}),
             **({"visual_sha256": obj.visual_sha256} if obj.visual_sha256 else {}),
             **({"collision_sha256": obj.collision_sha256} if obj.collision_sha256 else {}),

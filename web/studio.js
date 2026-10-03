@@ -299,12 +299,24 @@ function shapeKey() {
   return JSON.stringify({ catalog: state.catalogId, size, terrain, objects: objects.map(({ pose, ...rest }) => rest) });
 }
 
+// env_generate.gltf_rotation: roll about x, pitch about y, then yaw about up,
+// as a glTF [x, y, z, w] (this frame's x, y, z are glTF's x, -z, y).
+function gltfRotation(rollDeg, pitchDeg, yawDeg) {
+  const half = (deg) => (deg * Math.PI) / 360;
+  const [cr, sr, cp, sp, cy, sy] = [Math.cos(half(rollDeg)), Math.sin(half(rollDeg)), Math.cos(half(pitchDeg)),
+    Math.sin(half(pitchDeg)), Math.cos(half(yawDeg)), Math.sin(half(yawDeg))];
+  const w = cr * cp * cy + sr * sp * sy, x = sr * cp * cy - cr * sp * sy;
+  const y = cr * sp * cy + sr * cp * sy, z = cr * cp * sy - sr * sp * cy;
+  return [x, z, -y, w];
+}
+
 // Show moves at once (a drag follows the pointer); the heights (terrain, roads
 // under an object) stay as shown until the server's answer.
 function followPoses() {
   if (!state.view3d || !state.current || viewMode() === "plan" || state.previewShape !== shapeKey()) return;
   state.view3d.setPoses(Object.fromEntries(recipe().objects.map((obj) => [obj.id, {
     translation: [obj.pose.x_m, undefined, -obj.pose.y_m], yaw_deg: obj.pose.yaw_deg || 0,
+    rotation: gltfRotation(obj.pose.roll_deg || 0, obj.pose.pitch_deg || 0, obj.pose.yaw_deg || 0),
   }])));
 }
 

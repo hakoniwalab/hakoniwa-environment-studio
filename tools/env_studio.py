@@ -318,7 +318,8 @@ def preview_poses(body: object) -> dict:
         # A node showing an asset stands where the GLB puts it (env_generate.asset_frame).
         x, y, z, yaw = (env_generate.asset_frame(recipe, obj) if obj.visual is not None
                         else (obj.pose.x_m, obj.pose.y_m, obj.pose.z_m, obj.pose.yaw_deg))
-        poses[obj.id] = {"translation": [x, z, -y], "yaw_deg": yaw}
+        poses[obj.id] = {"translation": [x, z, -y], "yaw_deg": yaw,
+                         "rotation": env_generate.gltf_rotation(obj.pose.roll_deg, obj.pose.pitch_deg, yaw)}
     return {"poses": poses}
 
 

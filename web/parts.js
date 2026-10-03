@@ -137,6 +137,21 @@ export class Parts {
     return this.lastShapes.get(part.id) || item;
   }
 
+  // The solids in the placement's colour: a shape is resolved without it (a
+  // colour is a plan parameter), so the solids that take the object's colour
+  // carry the item's; repaint those.
+  recoloured(part, solids) {
+    const base = this.items.get(part.item)?.params?.color;
+    const colour = part.params?.color;
+    if (!base || !colour || colour === base) return solids;
+    const key = `${colour}|${base}`;
+    if (solids.recolouredKey === key) return solids.recoloured;
+    const result = solids.map((solid) => (solid.color === base ? { ...solid, color: colour } : solid));
+    solids.recolouredKey = key;
+    solids.recoloured = result;
+    return result;
+  }
+
   // An object in plan units (metres): position, envelope, solids, height of
   // its base above the ground under it (its z_m when elevated), behaviour.
   resolved(part) {
@@ -153,7 +168,7 @@ export class Parts {
       width: shape.envelope.width_m,
       depth: shape.envelope.depth_m,
       height: shape.height_m,
-      solids: shape.solids,
+      solids: this.recoloured(part, shape.solids),
       z: surface === "elevated" ? this.paramValue(part, "z_m") ?? 0 : 0,
       surface,
       layer: shape.layer || "object",

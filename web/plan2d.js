@@ -219,7 +219,18 @@ export class PlanView {
     // under them shows through.
     // Roads and markings (the surface layer) lie under everything, selected
     // too (a City World's markings would cover the city).
-    const areas = new Map(this.parts.map((part) => [part, part.width * part.depth])); // the envelope's area, once
+    // The area a part covers, once: its solids' (a City World layer's pieces:
+    // its bridges cover far less than its road network, though their envelopes
+    // may be as large), else its envelope's.
+    const shoelace = (points) => Math.abs(points.reduce((sum, [x, y], i) => {
+      const [nx, ny] = points[(i + 1) % points.length];
+      return sum + x * ny - nx * y;
+    }, 0)) / 2;
+    const covered = (part) => (part.solids?.length
+      ? part.solids.reduce((sum, solid) => sum + (solid.points?.length ? shoelace(solid.points)
+        : (solid.width_m || 0) * (solid.depth_m || 0)), 0)
+      : part.width * part.depth);
+    const areas = new Map(this.parts.map((part) => [part, covered(part)]));
     const ordered = [...this.parts].sort((a, b) =>
       Number(b.layer === "surface") - Number(a.layer === "surface")
       || Number(this.selection.has(a.id)) - Number(this.selection.has(b.id))

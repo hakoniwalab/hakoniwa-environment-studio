@@ -85,6 +85,8 @@ export function createInspector(host, app) {
         numberField("x (m)・東", part.pose.x_m, (value) => { part.pose.x_m = roundMm(value); }),
         numberField("y (m)・北", part.pose.y_m, (value) => { part.pose.y_m = roundMm(value); }),
         sliderField("角度 (°)", Math.round(part.pose.yaw_deg ?? 0), (value) => { part.pose.yaw_deg = normalizeYaw(value); }, { min: 0, max: 359 }),
+        sliderField("ロール (°)・x 軸", Math.round(part.pose.roll_deg ?? 0), (value) => { setTilt(part, "roll_deg", value); }, { min: -90, max: 90 }),
+        sliderField("ピッチ (°)・y 軸", Math.round(part.pose.pitch_deg ?? 0), (value) => { setTilt(part, "pitch_deg", value); }, { min: -90, max: 90 }),
       ),
       el("p", { class: "meta" }, view.surface === "elevated"
         ? `地面から ${view.z} m 上に置きます` : "地面の上に立ちます（丘の上では足元の高さに合わせます）"),
@@ -336,4 +338,11 @@ export function createInspector(host, app) {
       renderInspector();
     },
   };
+}
+
+// A tilt (roll or pitch, degrees) on a pose; 0 is left out of the Recipe.
+function setTilt(part, key, value) {
+  const degrees = Math.max(-90, Math.min(90, Number(value) || 0));
+  if (degrees === 0) delete part.pose[key];
+  else part.pose[key] = degrees;
 }

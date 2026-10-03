@@ -208,7 +208,8 @@ def cmd_inspect(args) -> dict:
                       for other in parsed.objects if other.id != obj.id)
         objects.append({
             "id": obj.id, "item": obj.item, "type": obj.type,
-            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg},
+            "pose": {"x_m": obj.pose.x_m, "y_m": obj.pose.y_m, "z_m": obj.pose.z_m, "yaw_deg": obj.pose.yaw_deg,
+                     **{key: getattr(obj.pose, key) for key in ("roll_deg", "pitch_deg") if getattr(obj.pose, key)}},
             "bounds_m": {"x": [round_mm(min(xs)), round_mm(max(xs))], "y": [round_mm(min(ys)), round_mm(max(ys))],
                          "z": [round_mm(obj.pose.z_m + obj.shape.bottom_m), round_mm(obj.pose.z_m + obj.shape.height_m)]},
             "ground_m": round_mm(parsed.terrain.highest_under(env_schema.footprint(obj))),
