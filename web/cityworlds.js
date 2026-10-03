@@ -385,9 +385,18 @@ export function cityWorlds(page) {
     const ui = controls[mode];
     ui.status.className = "generation running";
     ui.status.textContent = mode === "osm" ? "OpenStreetMap から地図データを取得しています…" : "生成を始めています…";
+    // The same place generated again replaces it; one in the export folder goes with its export.
+    const known = await api("GET", "city-worlds/jobs").catch(() => ({ jobs: [] }));
+    const written = (known.jobs || []).find((job) => job.job_id === id)?.exported || null;
+    if (written && !window.confirm(`${id} は書き出し先に ${written.id} として書き出してあります。\n`
+      + "書き出しも消して作り直しますか？（それを使う側からは、作り直しが終わるまで見えなくなります）")) {
+      ui.status.className = "generation failed";
+      ui.status.textContent = "作り直しをやめました";
+      return;
+    }
     ui.generate.disabled = true;
     try {
-      await call("POST", "city-worlds/build", { id, name: id, ...body, overwrite: true });
+      await call("POST", "city-worlds/build", { id, name: id, ...body, overwrite: true, remove_export: Boolean(written) });
     } catch (error) {
       ui.status.className = "generation failed";
       ui.status.textContent = `生成できませんでした — ${error.message}`;

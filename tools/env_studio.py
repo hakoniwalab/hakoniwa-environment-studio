@@ -603,6 +603,12 @@ def start_city_world_build(body: object) -> dict:
     if isinstance(body, dict) and body.get("overwrite") and EXPORT_DIR:
         # Replacing a City World in the export folder would change the files its export names.
         found = env_urban.exported(EXPORT_DIR).get(str((env_cityworld.WORK / str(body.get("id")) / "build").resolve()))
+        if found and body.get("remove_export"):  # build again: the page asked to remove the export too
+            try:
+                env_urban.remove_export(EXPORT_DIR, found["id"])
+            except env_urban.ExportError as exc:
+                raise StudioError(str(exc), HTTPStatus.NOT_FOUND) from exc
+            found = None
         if found:
             raise StudioError(f"{body.get('id')} は書き出し先に {found['id']} として書き出してあります。作り直すには、"
                               "生成結果で「書き出しを消す」を押してから生成してください。", HTTPStatus.CONFLICT)

@@ -89,6 +89,24 @@ class StudioServerTest(unittest.TestCase):
         self.assertFalse(job.exists())
         self.assertFalse((exports / "sapporo").exists())
 
+    def test_building_again_removes_the_export_when_asked(self):
+        job = self.user.parent / "city-worlds/sapporo"
+        (job / "build/world").mkdir(parents=True)
+        exports = self.user.parent / "exports"
+        (exports / "sapporo").mkdir(parents=True)
+        (exports / "sapporo" / env_studio.env_urban.JOB_INFO).write_text("{}", encoding="utf-8")
+        exported = {str((job / "build").resolve()): {"id": "sapporo", "title": "sapporo"}}
+        started = []
+        with mock.patch.object(env_studio, "EXPORT_DIR", exports), \
+                mock.patch.object(env_studio.env_urban, "exported", lambda _: exported), \
+                mock.patch.object(env_studio.env_cityworld.BUILDS, "start",
+                                  lambda body, roots: started.append(body) or {"id": body["id"]}):
+            status, _answer = self.call("POST", "/api/city-worlds/build",
+                                        {"id": "sapporo", "overwrite": True, "remove_export": True})
+        self.assertEqual(status, 200)
+        self.assertFalse((exports / "sapporo").exists())
+        self.assertEqual([body["id"] for body in started], ["sapporo"])
+
     def test_health_says_when_the_checkout_moved_after_the_start(self):
         started = {"version": "0.1.0", "commit": "a" * 40, "build_date": None, "platform": "source"}
         with mock.patch.object(env_studio, "STARTED_BUILD", started):
