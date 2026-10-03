@@ -78,6 +78,8 @@ BUILD_OPTIONS = {
     # Open passages through building colliders where a LOD3 carriageway runs
     # through them (Envsim: PLATEAU models such buildings solid to the ground).
     "building_road_passage": (False, (False, True)),
+    # Ease the DEM outside the bridges' floor edges to the edges' heights (Envsim).
+    "terrain_bridge_blend": (False, (False, True)),
 }
 
 
@@ -175,6 +177,7 @@ city_world:
   terrain_uncovered_policy: {options["terrain_uncovered_policy"]}
   terrain_uncovered_elevation_m: 0
   terrain_bridge_carve: {"true" if options["terrain_bridge_carve"] else "false"}
+  terrain_bridge_blend: {"true" if options["terrain_bridge_blend"] else "false"}
   marking_vertical_offset_m: 0.055
   bridge_collision_thickness_m: 0.02
   bridge_max_surface_slope_deg: 60

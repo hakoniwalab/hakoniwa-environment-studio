@@ -90,6 +90,10 @@
               <input id="bridge-carve" type="checkbox">
               <span>橋の下の地形（DEM）を、周りの低い地面まで下げる（推定・実験的）</span>
             </label>
+            <label class="checkbox-option" title="橋の床が地面とつながる所（橋の端）で、地形（DEM）が段差になっているとき、床の縁の高さを地形に写して、外へ 6 m かけて元の地形へなだらかにつなぎます。縁の真下 2 m は床のすぐ下まで埋めて、端の下のすき間をなくします。縁の地面が床から 2.5 m 以上離れている所（下の道路の上の側面）と、掘り下げた道路は変えません。">
+              <input id="bridge-blend" type="checkbox">
+              <span>橋の床の縁と地形（DEM）の段差を、なめらかにつなぐ（実験的）</span>
+            </label>
             <label class="checkbox-option" title="PLATEAU は道路をまたぐ建物（都庁の議事堂など）を地面まで詰まった形で記録していて、当たり判定が道路を塞ぎます。LOD3 の車道が建物の中を通っている所は、車道の上を建築限界の 4.5 m まで当たり判定からくり抜きます。見た目は変わりません。">
               <input id="road-passage" type="checkbox">
               <span>建物の中を通る車道の上を、当たり判定からくり抜く（4.5 m・実験的）</span>
