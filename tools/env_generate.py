@@ -261,15 +261,17 @@ class _GlbBuilder:
         self.gltf["accessors"].append({"bufferView": view, "componentType": component, "count": count, "type": kind, **extra})
         return len(self.gltf["accessors"]) - 1
 
-    def material(self, color: str) -> int:
-        if color not in self.material_ids:
+    def material(self, color: str, alpha: float = 1.0) -> int:
+        key = color if alpha >= 1.0 else f"{color}@{alpha:g}"
+        if key not in self.material_ids:
             r, g, b = (srgb_to_linear(value) for value in hex_rgb(color))
-            self.gltf["materials"].append({
-                "name": color,
-                "pbrMetallicRoughness": {"baseColorFactor": [r, g, b, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.85},
-            })
-            self.material_ids[color] = len(self.gltf["materials"]) - 1
-        return self.material_ids[color]
+            entry = {"name": key, "pbrMetallicRoughness": {"baseColorFactor": [r, g, b, alpha], "metallicFactor": 0.0,
+                                                           "roughnessFactor": 0.85}}
+            if alpha < 1.0:
+                entry.update(alphaMode="BLEND", doubleSided=True)
+            self.gltf["materials"].append(entry)
+            self.material_ids[key] = len(self.gltf["materials"]) - 1
+        return self.material_ids[key]
 
     def textured_material(self, image: bytes, mime: str) -> int:
         """A material showing an image (a JPEG or PNG embedded in the GLB), one per distinct image."""
@@ -309,12 +311,53 @@ class _GlbBuilder:
                                5125 if big else 5123, len(indices), "SCALAR")
         return {"attributes": attributes, "indices": index, "material": material}
 
-    def asset_primitives(self, glb: bytes) -> list[dict]:
+    def asset_primitives(self, glb: bytes, cut=None) -> list[dict]:
         """The primitives of a GLB this builder wrote (a part's visual asset),
         copied in with their data, textures and materials; the asset's own
-        node transforms are not used (its geometry is in its part's frame)."""
+        node transforms are not used (its geometry is in its part's frame).
+        With `cut` (positions, attributes, indices -> the same), each triangle
+        primitive's geometry goes through it (a passage cut out of a look)."""
         document, binary = read_glb(glb)
         views = document.get("bufferViews", [])
+        dtypes = {5126: ("f", 4), 5125: ("I", 4), 5123: ("H", 2), 5121: ("B", 1), 5122: ("h", 2), 5120: ("b", 1)}
+        widths = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
+
+        def decoded(index: int):
+            source = document["accessors"][index]
+            view = views[source["bufferView"]]
+            code, size = dtypes[source["componentType"]]
+            width = widths[source["type"]]
+            start = view.get("byteOffset", 0) + source.get("byteOffset", 0)
+            values = struct.unpack_from(f"<{source['count'] * width}{code}", binary, start)
+            array = _np().array(values, dtype=float).reshape(source["count"], width)
+            if source.get("normalized") and code != "f":
+                array = array / {"B": 255.0, "H": 65535.0, "b": 127.0, "h": 32767.0}[code]
+            return array
+
+        def written(array, kind: str, target: int, **extra) -> int:
+            flat = array.reshape(-1).tolist()
+            if kind == "SCALAR":
+                return self._accessor(self._view(struct.pack(f"<{len(flat)}I", *flat), target), 5125, len(array), kind, **extra)
+            return self._accessor(self._view(struct.pack(f"<{len(flat)}f", *flat), target), 5126, len(array), kind, **extra)
+
+        def cut_primitive(primitive: dict) -> dict | None:
+            """The primitive's geometry through `cut`, as new accessors; None to copy it as it is."""
+            if cut is None or primitive.get("mode", 4) != 4 or "POSITION" not in primitive["attributes"]:
+                return None
+            attributes = {name: decoded(index) for name, index in sorted(primitive["attributes"].items())}
+            positions = attributes.pop("POSITION")
+            indices = (decoded(primitive["indices"]).reshape(-1).astype(int) if "indices" in primitive
+                       else _np().arange(len(positions)))
+            positions, attributes, indices = cut(positions, attributes, indices)
+            if len(indices) == 0:
+                return {}
+            kinds = {name: document["accessors"][index]["type"] for name, index in primitive["attributes"].items()}
+            copied = {"attributes": {"POSITION": written(
+                positions, "VEC3", 34962, min=positions.min(axis=0).tolist(), max=positions.max(axis=0).tolist())}}
+            for name, array in attributes.items():
+                copied["attributes"][name] = written(array, kinds[name], 34962)
+            copied["indices"] = written(indices, "SCALAR", 34963)
+            return copied
 
         def data(view_index: int) -> bytes:
             view = views[view_index]
@@ -362,18 +405,21 @@ class _GlbBuilder:
         primitives = []
         for mesh in document.get("meshes", []):
             for primitive in mesh["primitives"]:
-                copied = {
+                through = cut_primitive(primitive)
+                if through == {}:
+                    continue  # nothing of it is left
+                copied = through if through is not None else {
                     "attributes": {name: accessor(index) for name, index in sorted(primitive["attributes"].items())},
-                    "material": material(primitive.get("material"), "COLOR_0" in primitive["attributes"]),
                 }
-                if "indices" in primitive:
+                copied["material"] = material(primitive.get("material"), "COLOR_0" in primitive["attributes"])
+                if through is None and "indices" in primitive:
                     copied["indices"] = accessor(primitive["indices"])
                 if "mode" in primitive:
                     copied["mode"] = primitive["mode"]
                 primitives.append(copied)
         return primitives
 
-    def _primitive(self, mesh, color: str) -> dict:
+    def _primitive(self, mesh, color: str, alpha: float = 1.0) -> dict:
         positions, normals, indices = mesh
         flat = [value for point in positions for value in point]
         position = self._accessor(
@@ -387,7 +433,8 @@ class _GlbBuilder:
         index = self._accessor(
             self._view(struct.pack(f"<{len(indices)}{'I' if big else 'H'}", *indices), 34963),
             5125 if big else 5123, len(indices), "SCALAR")
-        return {"attributes": {"POSITION": position, "NORMAL": normal}, "indices": index, "material": self.material(color)}
+        return {"attributes": {"POSITION": position, "NORMAL": normal}, "indices": index,
+                "material": self.material(color, alpha)}
 
     def asset_lights(self, glb: bytes) -> list[tuple[list, dict]]:
         """The punctual lights of a part's visual GLB (KHR_lights_punctual): each
@@ -494,8 +541,11 @@ def asset_frame(recipe: env_schema.Recipe, obj: env_schema.EnvObject) -> tuple[f
     return pose.x_m, pose.y_m, anchor["z_m"] + rise, yaw
 
 
-def environment_glb(recipe: env_schema.Recipe) -> bytes:
+def environment_glb(recipe: env_schema.Recipe, *, editor: bool = False) -> bytes:
+    """The GLB of the environment; `editor` also draws the passages (translucent
+    boxes), which a generated environment leaves out."""
     builder = _GlbBuilder()
+    cuts = passage_cuts(recipe)
     terrain = recipe.terrain
     extras = {"terrain": recipe.terrain_item, "kind": terrain.kind}
     if terrain.visual is not None:  # Envsim's own terrain GLB, as it is
@@ -506,16 +556,178 @@ def environment_glb(recipe: env_schema.Recipe) -> bytes:
     for obj in recipe.objects:
         extras = {"object": obj.id, "item": obj.item, "type": obj.type}
         placement = ((obj.pose.x_m, obj.pose.z_m, -obj.pose.y_m), obj.pose.yaw_deg)
+        if obj.type == PASSAGE_TYPE:
+            if editor:
+                pieces = [builder._primitive(to_gltf(solid_mesh(solid)), solid.color, PASSAGE_ALPHA) for solid in obj.solids]
+                builder.node(obj.id, None, *placement, extras, primitives=pieces)
+            continue
         if obj.visual is not None:  # its own look (LOD2 with textures, an Envsim layer) instead of the solids
             x, y, z, yaw = asset_frame(recipe, obj)
             visual = obj.visual.read_bytes()
+            cutter = _cut_look(cuts, (x, y, z), yaw) if cuts and obj.collision is not None else None
             index = builder.node(obj.id, None, (x, z, -y), yaw, {**extras, "visual": obj.visual.name},
-                                 primitives=builder.asset_primitives(visual))
+                                 primitives=builder.asset_primitives(visual, cut=cutter))
             builder.add_lights(index, builder.asset_lights(visual))  # a part's own lights (a stall's lamp)
             continue
         pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
         builder.node(obj.id, pieces, *placement, extras)
     return builder.glb()
+
+
+# --- くり抜き (passages) ---------------------------------------------------------------
+#
+# A passage object (type passage) is a box cut out of the colliders and the
+# look of the objects it overlaps: a way for cars through a City's building
+# that PLATEAU records solid to the ground. The box stands on the ground where
+# the passage is placed, from below_m under it up to its height; the editor
+# shows it (translucent), a generated environment does not. The cutting is
+# Envsim's convex clipper (building_road_passages.py, through env_envsim).
+
+PASSAGE_TYPE = "passage"
+PASSAGE_ALPHA = 0.35
+
+
+def _yaw_matrix(yaw_deg: float):
+    c, s = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
+    return [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
+
+
+def _apply(matrix, point):
+    return tuple(sum(matrix[i][j] * point[j] for j in range(3)) for i in range(3))
+
+
+def _transposed(matrix):
+    return [[matrix[j][i] for j in range(3)] for i in range(3)]
+
+
+def passage_cuts(recipe: env_schema.Recipe) -> list[dict]:
+    """Each passage's box in the environment frame: its 8 corners (in Envsim's
+    BOX_FACES order) and its id."""
+    cuts = []
+    for obj in recipe.objects:
+        if obj.type != PASSAGE_TYPE or not obj.solids:
+            continue
+        solid = obj.solids[0]
+        below = float(obj.params.get("below_m", 0.0))
+        rotation = _yaw_matrix(obj.pose.yaw_deg)
+        # From the lowest ground under the box (the road through the part;
+        # the object itself stands on the highest) less below_m, up to the
+        # clear height above that ground.
+        ground = _lowest_under(recipe.terrain, obj.pose, rotation, solid.width_m, solid.depth_m)
+        bottom, top = ground - below, ground + solid.height_m
+        corners = []
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                for z in (bottom, top):
+                    turned = _apply(rotation, (sx * solid.width_m / 2, sy * solid.depth_m / 2, 0.0))
+                    corners.append((obj.pose.x_m + turned[0], obj.pose.y_m + turned[1], z))
+        cuts.append({"id": obj.id, "corners": corners, "ground_m": ground})
+    return cuts
+
+
+def _lowest_under(terrain, pose, rotation, width_m: float, depth_m: float) -> float:
+    """The lowest ground under a box (its outline sampled about every metre)."""
+    lowest = math.inf
+    steps_x, steps_y = max(2, math.ceil(width_m)) + 1, max(2, math.ceil(depth_m)) + 1
+    for i in range(steps_x):
+        for j in range(steps_y):
+            local = (-width_m / 2 + width_m * i / (steps_x - 1), -depth_m / 2 + depth_m * j / (steps_y - 1), 0.0)
+            turned = _apply(rotation, local)
+            lowest = min(lowest, terrain.height_at(pose.x_m + turned[0], pose.y_m + turned[1]))
+    return lowest if math.isfinite(lowest) else pose.z_m
+
+
+def _cut_corners_in_frame(cut: dict, origin, yaw_deg: float, shift=(0.0, 0.0, 0.0), envsim_axes: bool = False):
+    """A cut's corners in a frame at `origin` turned by yaw (the asset frame),
+    moved by `shift`, in this environment's axes or Envsim's (x north, y west)."""
+    back = _transposed(_yaw_matrix(yaw_deg))
+    corners = []
+    for corner in cut["corners"]:
+        local = _apply(back, tuple(corner[i] - origin[i] for i in range(3)))
+        local = tuple(local[i] + shift[i] for i in range(3))
+        corners.append((local[1], -local[0], local[2]) if envsim_axes else local)
+    return corners
+
+
+def _cut_collision(asset: ET.Element, frame: ET.Element, obj: env_schema.EnvObject, cuts: list[dict],
+                   origin, yaw_deg: float, anchor: dict) -> int:
+    """Cut the passages out of an object's colliders (Envsim's geoms under
+    `frame`, in Envsim's axes); the geoms cut are replaced by convex mesh
+    pieces outside the passages. Returns how many geoms were cut."""
+    import env_envsim
+
+    clipper = env_envsim.passages()
+    boxes = []
+    for cut in cuts:
+        corners = _cut_corners_in_frame(cut, origin, yaw_deg, (anchor["x_m"], anchor["y_m"], anchor["z_m"]), True)
+        box = clipper.box_polyhedron(corners)
+        boxes.append((box.bounds, clipper.polyhedron_planes(box)))
+    meshes = {}
+    for element in asset.findall("mesh"):
+        if element.get("name", "").startswith(f"{obj.id}/"):
+            vertices = [float(v) for v in element.attrib["vertex"].split()]
+            faces = [int(v) for v in element.attrib.get("face", "").split()]
+            meshes[element.get("name")] = (
+                _np().array(vertices).reshape(-1, 3),
+                _np().array(faces).reshape(-1, 3) if faces else None)
+    cut_count = 0
+    for geom in list(frame.findall("geom")):
+        polyhedron = clipper.geom_polyhedron(geom, meshes)
+        if polyhedron is None or len(polyhedron.vertices) < 4:
+            continue
+        low, high = polyhedron.bounds
+        pieces, removed = [polyhedron], 0.0
+        for (box_low, box_high), planes in boxes:
+            if any(high[i] <= box_low[i] or low[i] >= box_high[i] for i in range(3)):
+                continue
+            next_pieces = []
+            for piece in pieces:
+                outside, gone = clipper.subtract_halfspaces(piece, planes)
+                removed += gone
+                next_pieces.extend(outside)
+            pieces = next_pieces
+        if removed <= 1e-6:
+            continue
+        name = geom.get("name", "geom")
+        attributes = {k: v for k, v in geom.attrib.items()
+                      if k not in {"name", "type", "mesh", "pos", "size", "quat", "xyaxes", "euler", "axisangle"}}
+        if geom.get("type") == "mesh":
+            old = asset.find(f"mesh[@name='{geom.get('mesh')}']")
+            if old is not None:
+                asset.remove(old)
+        frame.remove(geom)
+        for number, piece in enumerate(pieces):
+            piece_name = f"{name}/cut{number}"
+            ET.SubElement(asset, "mesh", {"name": piece_name, "vertex": _numbers(piece.vertices.reshape(-1).tolist()),
+                                          "face": " ".join(str(int(v)) for v in piece.triangles().reshape(-1))})
+            ET.SubElement(frame, "geom", {"name": piece_name, "type": "mesh", "mesh": piece_name, **attributes})
+        cut_count += 1
+    return cut_count
+
+
+def _np():
+    import numpy
+
+    return numpy
+
+
+def _cut_look(cuts: list[dict], origin, yaw_deg: float):
+    """A cutter for a visual asset's primitives (glTF axes of the asset frame):
+    (positions, attributes, indices) -> the same with the passages cut away."""
+    import env_envsim
+
+    clipper = env_envsim.passages()
+    planes = []
+    for cut in cuts:
+        corners = [(x, z, -y) for x, y, z in _cut_corners_in_frame(cut, origin, yaw_deg)]
+        planes.append(clipper.polyhedron_planes(clipper.box_polyhedron(corners)))
+
+    def cutter(positions, attributes, indices):
+        for box_planes in planes:
+            positions, attributes, indices = clipper.clip_triangles(positions, attributes, indices, box_planes)
+        return positions, attributes, indices
+
+    return cutter
 
 
 # --- MuJoCo -------------------------------------------------------------------------
@@ -641,7 +853,8 @@ def _copied(element: ET.Element, prefix: str) -> ET.Element:
     return copy
 
 
-def _add_collision(asset: ET.Element, world: ET.Element, recipe: env_schema.Recipe, obj: env_schema.EnvObject) -> None:
+def _add_collision(asset: ET.Element, world: ET.Element, recipe: env_schema.Recipe, obj: env_schema.EnvObject,
+                   cuts: list[dict] = ()) -> None:
     """An object's own colliders: Envsim's geoms as written (in Envsim's frame),
     carried from the anchor's frame to asset_frame(). Without an anchor (a
     Catalog's building) they are in the object's own frame, in Envsim's axes."""
@@ -657,6 +870,8 @@ def _add_collision(asset: ET.Element, world: ET.Element, recipe: env_schema.Reci
         asset.append(_copied(element, obj.id))
     for element in bodies:
         frame.append(_copied(element, obj.id))
+    if cuts:
+        _cut_collision(asset, frame, obj, cuts, (x, y, z), yaw, anchor)
 
 
 def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfield_file: str | None = None) -> str:
@@ -675,9 +890,12 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
     if validation:
         top = max([recipe.terrain.max_height_m] + [obj.pose.z_m + obj.shape.height_m for obj in recipe.objects])
         _add_boundaries(world, recipe.terrain.half_east, recipe.terrain.half_north, top)
+    cuts = passage_cuts(recipe)
     for obj in recipe.objects:
+        if obj.type == PASSAGE_TYPE:
+            continue  # what it cuts out is gone from the others; it is nothing itself
         if obj.collision is not None and not validation:
-            _add_collision(asset, world, recipe, obj)
+            _add_collision(asset, world, recipe, obj, cuts)
             continue
         body = ET.SubElement(world, "body", {
             "name": BODY_PREFIX + obj.id, "pos": _numbers((obj.pose.x_m, obj.pose.y_m, obj.pose.z_m)),

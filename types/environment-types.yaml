@@ -304,6 +304,30 @@ types:
   # markings, bridges): its GLB (and colliders, when Envsim made some) passed
   # through unchanged. The outlines only draw it on the plan; it collides with
   # nothing of its own (Envsim's roads are the terrain).
+  - id: passage
+    extends: object
+    label: くり抜き（通り抜け）
+    description: >-
+      A box that is cut out of the colliders and the look of the parts it
+      overlaps (a City's buildings): a road through a building that PLATEAU
+      records solid to the ground. It stands on the ground, cutting from a
+      little below it up to its height; the editor shows it, a generated
+      environment does not.
+    id_prefix: passage
+    params:
+      color: {kind: color, label: 色, default: "#f26b1d", level: placement}
+      width_m: {kind: length, label: 幅, default: 10.0, min: 0.5, max: 200, level: placement,
+                description: "Across the way, along its x."}
+      depth_m: {kind: length, label: 奥行き, default: 30.0, min: 0.5, max: 500, level: placement,
+                description: "Along the way through the part, along its y."}
+      height_m: {kind: length, label: 高さ, default: 4.5, min: 0.5, max: 50, level: placement,
+                 description: "Clear height above the ground (4.5 m is the 建築限界)."}
+      below_m: {kind: length, label: 地面より下へ, default: 0.5, min: 0, max: 20, level: placement,
+                description: "How far below the ground the cut reaches (a part's floor over the way)."}
+    shapes:
+      - {name: cut, primitive: box, w: $width_m, d: $depth_m, h: $height_m, x: 0, y: 0, z: $height_m / 2, collide: false}
+    behavior: {surface: ground}
+
   - id: city_layer
     extends: object
     label: 街の層（envsim）

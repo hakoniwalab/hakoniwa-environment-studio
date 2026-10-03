@@ -142,6 +142,11 @@ items:
     name: 箱庭オープンスペース（にぎやか）
     params: {layout: lively, visual: assets/hakoniwa-open-space-lively.glb}
 
+  - id: passage
+    type: passage
+    name: くり抜き（通り抜け）
+    description: Cut a way for cars through a City's building (its colliders and its look); 10 m wide, 30 m deep, 4.5 m high.
+
   - id: hakoniwa-shuttle-stop
     type: shuttle_stop
     name: 箱庭シャトル停留所

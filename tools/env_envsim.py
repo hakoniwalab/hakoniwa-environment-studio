@@ -60,6 +60,14 @@ def pipeline():
     return geodesy, gml_lod1_extract, road_terrain_probe
 
 
+def passages():
+    """Envsim's convex clipper (building_road_passages.py): what a くり抜き part cuts with."""
+    _on_path(root() / "src/city_pipeline")
+    import building_road_passages
+
+    return building_road_passages
+
+
 def osm2citygml():
     """Envsim's OpenStreetMap / GeoJSON -> CityGML LOD1 converter."""
     pipeline()
