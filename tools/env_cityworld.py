@@ -430,7 +430,7 @@ class Builds:
                 stream.write(f"$ {' '.join(command)}\n")
                 stream.flush()
                 process = subprocess.Popen(command, cwd=envsim, stdout=stream, stderr=subprocess.STDOUT,
-                                           stdin=subprocess.DEVNULL, start_new_session=True,
+                                           stdin=subprocess.DEVNULL, **group_options(),
                                            env={**os.environ, "PYTHONUNBUFFERED": "1"})
             self.jobs[job_id] = {"process": process, "log": log, "job": job, "started": time.time(),
                                  "cache": str(cache)}
@@ -470,16 +470,54 @@ class Builds:
         process = job["process"]
         if process.poll() is None:
             job["canceled"] = True
-            # The build runs in its own session (Envsim's hako.py and its workers under it): stop them all.
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            except ProcessLookupError:
-                pass
+            stop_group(process)
         return self.status(job_id)
+
+
+def windows() -> bool:
+    """Running on Windows (no process groups to signal, console windows to avoid)."""
+    return os.name == "nt"
+
+
+def no_window() -> dict:
+    """Popen options so a console child opens no console window on Windows
+    (the Studio runs detached, without a console); nothing elsewhere."""
+    return {"creationflags": subprocess.CREATE_NO_WINDOW} if windows() else {}
+
+
+def group_options() -> dict:
+    """Popen options that start a build in its own process group: its own
+    session on POSIX, a new process group without a console window on Windows."""
+    if windows():
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
+
+
+def stop_group(process: subprocess.Popen) -> None:
+    """Stop a build started with group_options() and everything under it
+    (Envsim's hako.py and its workers)."""
+    if windows():
+        # No process groups to signal: end the process tree.
+        try:
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=30,
+                           **no_window())
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    except ProcessLookupError:
+        pass
 
 
 BUILDS = Builds()
@@ -494,7 +532,7 @@ def collider_view(job: Path, mjcf: Path, envsim: Path | None = None) -> None:
     subprocess.run([sys.executable, str(envsim / "src" / "city_pipeline" / "mjcf_colliders2glb.py"),
                     "--in", str(mjcf), "--out", str(viewer / "city-world-colliders.glb"),
                     "--receipt", str(viewer / "city-world-colliders-receipt.json")],
-                   cwd=envsim, check=True, stdin=subprocess.DEVNULL)
+                   cwd=envsim, check=True, stdin=subprocess.DEVNULL, **no_window())
 
 
 def build_job(job: Path, offline: bool = False, envsim: Path | None = None) -> int:
@@ -504,7 +542,7 @@ def build_job(job: Path, offline: bool = False, envsim: Path | None = None) -> i
     command = [sys.executable, str(envsim / "tools" / "hako.py"), "--config",
                str(job / "hakoniwa-envsim-build.yaml"), *(["--offline"] if offline else []), "build"]
     print(f"$ {' '.join(command)}", flush=True)
-    code = subprocess.call(command, cwd=envsim, stdin=subprocess.DEVNULL)
+    code = subprocess.call(command, cwd=envsim, stdin=subprocess.DEVNULL, **no_window())
     if code != 0:
         return code
     world = job / "build" / "world"

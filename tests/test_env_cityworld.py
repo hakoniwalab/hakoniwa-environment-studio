@@ -124,6 +124,26 @@ class CityWorldBuildTest(unittest.TestCase):
         status = self.builds.cancel("slow")
         self.assertEqual((status["state"], status["build"]), ("canceled", None))
 
+    def test_on_windows_a_build_starts_in_a_new_group_and_is_cancelled_by_taskkill(self):
+        patches = [mock.patch.object(env_cityworld, "windows", lambda: True),
+                   mock.patch.object(env_cityworld.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200, create=True),
+                   mock.patch.object(env_cityworld.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True)]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        process = mock.Mock(pid=4321)
+        process.poll.return_value = None
+        with mock.patch.object(env_cityworld.subprocess, "Popen", return_value=process) as popen:
+            self.builds.start({"id": "win", "selection": SELECTION}, [])
+        options = popen.call_args.kwargs
+        self.assertNotIn("start_new_session", options)
+        self.assertEqual(options["creationflags"], 0x200 | 0x08000000)
+        with mock.patch.object(env_cityworld.subprocess, "run") as run:
+            process.wait.side_effect = lambda timeout=None: process.poll.configure_mock(return_value=1)
+            status = self.builds.cancel("win")
+        self.assertEqual(run.call_args.args[0], ["taskkill", "/PID", "4321", "/T", "/F"])
+        self.assertEqual(status["state"], "canceled")
+
     def test_a_failed_build_says_why(self):
         self.builds.start({"id": "fail", "selection": SELECTION}, [])
         status = self.wait("fail")
@@ -295,6 +315,76 @@ class CityWorldBuildTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {"HAKONIWA_PLATEAU_CACHE": str(self.dir / "mine")}):
             self.assertEqual(env_cityworld.plateau_cache([]), (self.dir / "mine").resolve())
 
+
+class ProcessGroupTest(unittest.TestCase):
+    """Starting and cancelling a build: its own session on POSIX, a new process
+    group without a console window and taskkill of the tree on Windows
+    (hakoniwalab/hakoniwa-urban-mobility#82). Windows is mocked here."""
+
+    NEW_GROUP, NO_WINDOW = 0x200, 0x08000000
+
+    def windows(self):
+        patches = [mock.patch.object(env_cityworld, "windows", lambda: True),
+                   mock.patch.object(env_cityworld.subprocess, "CREATE_NEW_PROCESS_GROUP", self.NEW_GROUP, create=True),
+                   mock.patch.object(env_cityworld.subprocess, "CREATE_NO_WINDOW", self.NO_WINDOW, create=True)]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_windows_is_os_name_nt(self):
+        for name, expected in (("nt", True), ("posix", False)):
+            with mock.patch.object(env_cityworld.os, "name", name):
+                self.assertIs(env_cityworld.windows(), expected)
+
+    def test_posix_options_are_unchanged(self):
+        with mock.patch.object(env_cityworld, "windows", lambda: False):
+            self.assertEqual(env_cityworld.group_options(), {"start_new_session": True})
+            self.assertEqual(env_cityworld.no_window(), {})
+
+    def test_windows_options(self):
+        self.windows()
+        self.assertEqual(env_cityworld.group_options(), {"creationflags": self.NEW_GROUP | self.NO_WINDOW})
+        self.assertEqual(env_cityworld.no_window(), {"creationflags": self.NO_WINDOW})
+
+    def test_windows_cancel_kills_the_tree(self):
+        self.windows()
+        process = mock.Mock(pid=4321)
+        with mock.patch.object(env_cityworld.subprocess, "run") as run, \
+                mock.patch.object(env_cityworld.os, "killpg", create=True) as killpg:
+            env_cityworld.stop_group(process)
+        command = run.call_args.args[0]
+        self.assertEqual(command, ["taskkill", "/PID", "4321", "/T", "/F"])
+        self.assertEqual(run.call_args.kwargs["creationflags"], self.NO_WINDOW)
+        killpg.assert_not_called()
+        process.wait.assert_called_once_with(timeout=10)
+        process.kill.assert_not_called()
+
+    def test_windows_cancel_falls_back_to_kill(self):
+        self.windows()
+        process = mock.Mock(pid=4321)
+        process.wait.side_effect = [env_cityworld.subprocess.TimeoutExpired("x", 10), 1]
+        with mock.patch.object(env_cityworld.subprocess, "run", side_effect=OSError("no taskkill")):
+            env_cityworld.stop_group(process)
+        process.kill.assert_called_once_with()
+
+    def test_posix_cancel_signals_the_group(self):
+        process = mock.Mock(pid=4321)
+        process.wait.side_effect = [env_cityworld.subprocess.TimeoutExpired("x", 10), 0]
+        with mock.patch.object(env_cityworld, "windows", lambda: False), \
+                mock.patch.object(env_cityworld.os, "killpg", create=True) as killpg, \
+                mock.patch.object(env_cityworld.subprocess, "run") as run:
+            env_cityworld.stop_group(process)
+        self.assertEqual(killpg.call_args_list, [mock.call(4321, env_cityworld.signal.SIGTERM),
+                                                 mock.call(4321, env_cityworld.signal.SIGKILL)])
+        run.assert_not_called()
+
+    def test_windows_build_job_children_open_no_window(self):
+        self.windows()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        with mock.patch.object(env_cityworld.subprocess, "call", return_value=3) as call:
+            self.assertEqual(env_cityworld.build_job(Path(directory.name), envsim=Path(directory.name)), 3)
+        self.assertEqual(call.call_args.kwargs["creationflags"], self.NO_WINDOW)
 
 if __name__ == "__main__":
     unittest.main()
