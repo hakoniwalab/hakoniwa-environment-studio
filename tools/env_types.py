@@ -389,6 +389,9 @@ class Solid:
     visible: bool = True
     # A prism's convex outline about its centre (x, y), counter-clockwise.
     points: tuple[tuple[float, float], ...] = ()
+    # A generic convex polyhedron. Faces are polygons indexing vertices.
+    vertices: tuple[tuple[float, float, float], ...] = ()
+    faces: tuple[tuple[int, ...], ...] = ()
 
     def as_json(self) -> dict:
         data = {key: getattr(self, key) for key in (
@@ -425,6 +428,8 @@ class Solid:
                 + [(sx * hw, hd, hh) for sx in (-1, 1)]
         elif self.primitive == "prism":
             local = [(x, y, z) for x, y in self.points for z in (-hh, hh)]
+        elif self.primitive == "convex":
+            local = list(self.vertices)
         else:
             local = [(sx * hw, sy * hd, sz * hh) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
         r = self.rotation()

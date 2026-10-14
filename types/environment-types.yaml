@@ -310,6 +310,22 @@ types:
       - {name: lane-7-dash, primitive: box, w: 0.12, d: 8, h: 0.004, x: "-$width_m / 2 + $shoulder_left_m + 7 * ($width_m - $shoulder_left_m - $shoulder_right_m) / $lanes", y: -$length_m / 2 + 4,
          z: 0.022, color: $line_color, collide: false, when: "$lanes >= 8 and $lane_line == 'dashed'", repeat: {count: "floor(($length_m - 8) / 20) + 1", step_y: 20}}
 
+  # A 3-D road made from cross-sections in a separate hakoniwa.road-ribbon/v1 JSON file.
+  # The placeholder is replaced by the file's shared-vertex convex columns when a Recipe is read.
+  - id: road_ribbon
+    extends: object
+    label: 連続道路
+    description: A curved and graded road made from shared 3-D cross-sections.
+    id_prefix: ribbon
+    behavior: {layer: surface, snap: false, locked: true}
+    params:
+      ribbon_file: {kind: text, label: 断面データ, default: "", level: placement}
+      color: {kind: color, label: 路面の色, default: "#4a4d52", level: placement}
+      line_color: {kind: color, label: 線の色, default: "#f4f4f4", level: placement}
+      thickness_m: {kind: length, label: 厚さ, default: 0.02, min: 0.005, max: 1, level: placement}
+    shapes:
+      - {name: placeholder, primitive: box, w: 0.01, d: 0.01, h: 0.01}
+
   - id: road_marking
     extends: object
     label: 路面の標示

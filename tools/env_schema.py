@@ -23,6 +23,7 @@ import re
 import yaml
 
 import env_polygon
+import env_road_ribbon
 import env_rules
 import env_types
 from env_diagnostics import Collector, DiagnosticError, fail, mapping, only, load_yaml_text
@@ -505,6 +506,15 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
     anchor = problems.check(_anchor, value["anchor"], f"{path}.anchor") if "anchor" in value else None
     problems.raise_if_errors()
     params, shape = resolved
+    if item.type.id == "road_ribbon":
+        reference = str(params.get("ribbon_file") or "").strip()
+        ribbon = Path(reference).expanduser()
+        if not ribbon.is_absolute() and base_dir is not None:
+            ribbon = (base_dir / ribbon).resolve()
+        shape = problems.check(env_road_ribbon.load, ribbon,
+                               thickness_m=float(params["thickness_m"]), color=str(params["color"]),
+                               line_color=str(params["line_color"]))
+        problems.raise_if_errors()
     visual, visual_sha = _asset(params, "visual", path, base_dir, "GLB")
     collision, collision_sha = _asset(params, "collision", path, base_dir, "MJCF")
     # Colliders a placement names are placed from its anchor (where they were made
