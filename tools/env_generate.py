@@ -786,8 +786,11 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
             ET.SubElement(body, "inertial", {"pos": "0 0 0", "mass": "1", "diaginertia": "1 1 1"})
         friction = _numbers((obj.shape.friction, 0.005, 0.0001))
         for solid in obj.solids:
-            if (validation or obj.visual is not None) and not solid.collide:
-                continue  # its GLB is its look (a layer's outlines only draw it on the plan)
+            if (validation or obj.visual is not None or obj.type == "road_ribbon") and not solid.collide:
+                # Its GLB is its look (a layer's outlines only draw it on the plan). A road_ribbon's
+                # paint and lane-kind faces are drawn by the GLB too: as MuJoCo geoms they only made
+                # large road networks slow to compile (CARLA Town04: a 528 MB MJCF).
+                continue
             attributes = {"name": geom_name(obj.id, solid.name), "rgba": _numbers((*hex_rgb(solid.color), 1.0)),
                           "pos": _numbers((solid.x_m, solid.y_m, solid.z_m)),
                           "quat": _numbers(quaternion(solid.roll_deg, solid.pitch_deg, solid.yaw_deg)),

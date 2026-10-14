@@ -163,9 +163,16 @@ class MjcfTest(unittest.TestCase):
             ribbon.write_text(json.dumps({
                 "schema": "hakoniwa.road-ribbon/v1",
                 "sections": [
-                    {"s_m": 0, "points_m": [[-2, 0, 0], [2, 0, 0]]},
-                    {"s_m": 5, "points_m": [[-2, 5, 0], [2, 5, 0]]},
+                    {"s_m": 0, "points_m": [[-2, 0, 0], [0, 0, 0], [2, 0, 0]]},
+                    {"s_m": 5, "points_m": [[-2, 5, 0], [0, 5, 0], [2, 5, 0]]},
                 ],
+                "lanes": [
+                    {"id": 1, "kind": "driving", "left_boundary": 0, "right_boundary": 1, "speed_limit_kmh": 50},
+                    {"id": -1, "kind": "sidewalk", "left_boundary": 1, "right_boundary": 2, "speed_limit_kmh": 0},
+                ],
+                "markings": [{"boundary": 1, "start_s_m": 0, "end_s_m": 5, "color": "white",
+                              "lines": [{"pattern": "solid", "t_offset_m": 0, "width_m": 0.12,
+                                         "length_m": 0, "space_m": 0, "s_offset_m": 0}]}],
             }), encoding="utf-8")
             recipe_path = root / "ribbon.yaml"
             recipe_path.write_text(
@@ -187,6 +194,10 @@ class MjcfTest(unittest.TestCase):
                 env_generate.environment_mjcf(env_schema.load_recipe(recipe_path))
             )
             self.assertIsNotNone(model.find("./option/flag[@multiccd='enable']"))
+            # Its road marks are drawn by the GLB only: no collision-free geoms in the MJCF.
+            road_geoms = [geom for geom in model.iter("geom") if geom.get("name", "").startswith("geom:road/")]
+            self.assertTrue(road_geoms)
+            self.assertFalse([geom.get("name") for geom in road_geoms if geom.get("contype") == "0"])
 
     def test_geoms_are_where_the_solids_are(self):
         # Boxes, cylinders, tilted discs and a wedge (a mesh MuJoCo recentres).
