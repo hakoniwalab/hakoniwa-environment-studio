@@ -174,7 +174,9 @@ def _cylinder_mesh(diameter, height, segments=CIRCLE_SEGMENTS):
 
 def solid_mesh(solid: Solid):
     """The solid's mesh in its object's ENU frame: tilted about its centre, at its centre."""
-    if solid.primitive == "box":
+    if solid.primitive == "convex":
+        mesh = _faces_mesh(solid.vertices, solid.faces)
+    elif solid.primitive == "box":
         mesh = _box_mesh(solid.width_m, solid.depth_m, solid.height_m)
     elif solid.primitive == "cylinder":
         mesh = _cylinder_mesh(solid.width_m, solid.height_m)
@@ -753,7 +755,14 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
     file (by default its absolute path)."""
     root = ET.Element("mujoco", {"model": f"environment-{recipe.path.stem}"})
     ET.SubElement(root, "compiler", {"angle": "radian"})  # every rotation is written as a quaternion
-    ET.SubElement(root, "option", {"gravity": "0 0 0" if validation else "0 0 -9.81"})
+    option = ET.SubElement(root, "option", {"gravity": "0 0 0" if validation else "0 0 -9.81"})
+    # A road_ribbon is represented by adjacent convex columns.  MuJoCo's
+    # multiple-contact convex collision is required to keep a cylindrical
+    # tyre supported continuously while it crosses the column boundaries.
+    # The flag is model-global, so emit it only for worlds which actually
+    # contain this representation; legacy environment output stays unchanged.
+    if any(obj.type == "road_ribbon" for obj in recipe.objects):
+        ET.SubElement(option, "flag", {"multiccd": "enable"})
     visual = ET.SubElement(root, "visual")
     ET.SubElement(visual, "global", {"offwidth": "1280", "offheight": "720"})
     asset = ET.SubElement(root, "asset")
@@ -789,8 +798,15 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
                 attributes.update(type="cylinder", size=_numbers((solid.width_m / 2, solid.height_m / 2)))
             else:
                 mesh = f"mesh:{obj.id}/{solid.name}"
-                vertices = prism_vertices(solid) if solid.primitive == "prism" else wedge_vertices(solid)
-                ET.SubElement(asset, "mesh", {"name": mesh, "vertex": _numbers([v for p in vertices for v in p])})
+                vertices = (solid.vertices if solid.primitive == "convex" else
+                            prism_vertices(solid) if solid.primitive == "prism" else wedge_vertices(solid))
+                attributes_mesh = {"name": mesh, "vertex": _numbers([v for p in vertices for v in p])}
+                if solid.primitive == "convex":
+                    triangles = [(face[0], face[i], face[i + 1]) for face in solid.faces
+                                 for i in range(1, len(face) - 1)]
+                    attributes_mesh["face"] = " ".join(str(index) for triangle in triangles for index in triangle)
+                    attributes_mesh["inertia"] = "shell"
+                ET.SubElement(asset, "mesh", attributes_mesh)
                 attributes.update(type="mesh", mesh=mesh)
             if not solid.collide:
                 attributes.update(contype="0", conaffinity="0", group=str(VISUAL_GROUP))

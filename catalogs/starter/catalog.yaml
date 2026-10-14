@@ -94,6 +94,10 @@ items:
              shoulder_right_m: 0.75, direction: one_way_plus_y, lane_kinds: "driving,driving,passing",
              speed_limit_kmh: 100}
 
+  - id: road-ribbon
+    type: road_ribbon
+    name: 道路（3次元断面）
+
   - id: road-path
     type: road_path
     name: 道路（中心線・地図から）

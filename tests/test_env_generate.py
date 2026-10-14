@@ -5,6 +5,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -119,6 +120,41 @@ class MjcfTest(unittest.TestCase):
         height, geom = self.ray_height(model, data, 5.0, -10.0)
         self.assertEqual(geom, "terrain")
         self.assertAlmostEqual(height, 0.0, places=6)
+
+    def test_road_ribbon_enables_multiccd_only_for_that_representation(self):
+        ordinary = ET.fromstring(env_generate.environment_mjcf(load("car-test-course")))
+        self.assertIsNone(ordinary.find("./option/flag[@multiccd='enable']"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ribbon = root / "road.json"
+            ribbon.write_text(json.dumps({
+                "schema": "hakoniwa.road-ribbon/v1",
+                "sections": [
+                    {"s_m": 0, "points_m": [[-2, 0, 0], [2, 0, 0]]},
+                    {"s_m": 5, "points_m": [[-2, 5, 0], [2, 5, 0]]},
+                ],
+            }), encoding="utf-8")
+            recipe_path = root / "ribbon.yaml"
+            recipe_path.write_text(
+                "\n".join((
+                    "schema: hakoniwa.environment-recipe/v1",
+                    "name: ribbon",
+                    f"catalog: {(ROOT / 'catalogs/starter/catalog.yaml').as_posix()}",
+                    "size_m: {east: 10, north: 10}",
+                    "terrain: {item: asphalt-ground}",
+                    "objects:",
+                    "  - id: road",
+                    "    item: road-ribbon",
+                    "    pose: {x_m: 0, y_m: 0}",
+                    "    params: {ribbon_file: road.json}",
+                )) + "\n",
+                encoding="utf-8",
+            )
+            model = ET.fromstring(
+                env_generate.environment_mjcf(env_schema.load_recipe(recipe_path))
+            )
+            self.assertIsNotNone(model.find("./option/flag[@multiccd='enable']"))
 
     def test_geoms_are_where_the_solids_are(self):
         # Boxes, cylinders, tilted discs and a wedge (a mesh MuJoCo recentres).
