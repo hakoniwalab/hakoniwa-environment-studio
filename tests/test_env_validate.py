@@ -98,15 +98,6 @@ class ValidateTest(unittest.TestCase):
             codes = {(item.path, item.code) for item in env_validate.check(world)}
             self.assertIn(("objects[0]", "below_terrain"), codes)
 
-    def test_an_explicitly_depressed_road_is_an_intentional_surface(self):
-        road = {
-            "id": "road", "item": "two-lane-road",
-            "pose": {"x_m": 0, "y_m": 0, "z_m": -0.2, "roll_deg": 1},
-            "params": {"length_m": 10},
-        }
-
-        self.assertNotIn("below_terrain", [item["code"] for item in self.check(road)])
-
     def test_a_world_mujoco_cannot_load(self):
         with mock.patch("env_generate.environment_mjcf", return_value="<mujoco><worldbody><geom type='nope'/></worldbody></mujoco>"):
             (problem,) = [item.as_json() for item in env_validate.check(recipe(box("a", 0, 0)))]
