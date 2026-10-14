@@ -49,7 +49,7 @@ ANCHOR_KEYS = {"x_m", "y_m", "z_m", "yaw_deg", "terrain"}
 GEO_KEYS = {"provider", "origin", "bbox_deg", "projection", "attribution", "license", "data_timestamp", "query"}
 # Provenance of one object (the map feature it was made from).
 SOURCE_KEYS = {"provider", "kind", "id", "tags", "note", "attribution", "license"}
-POSE_KEYS = {"x_m", "y_m", "yaw_deg", "roll_deg", "pitch_deg"}
+POSE_KEYS = {"x_m", "y_m", "z_m", "yaw_deg", "roll_deg", "pitch_deg"}
 
 
 @dataclass(frozen=True)
@@ -488,6 +488,7 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
     problems.check(only, pose, POSE_KEYS, f"{path}.pose")
     x = problems.check(_metres, pose.get("x_m"), f"{path}.pose.x_m")
     y = problems.check(_metres, pose.get("y_m"), f"{path}.pose.y_m")
+    explicit_z = problems.check(_metres, pose.get("z_m"), f"{path}.pose.z_m") if "z_m" in pose else None
     yaw = pose.get("yaw_deg", 0)
     if isinstance(yaw, bool) or not isinstance(yaw, (int, float)) or not math.isfinite(yaw):
         problems.add(f"{path}.pose.yaw_deg", "wrong_type", "must be a number of degrees", expected="number", actual=yaw)
@@ -521,7 +522,8 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
     ground = terrain.highest_under(footprint(obj))
     if terrain.kind == "hfield":
         ground += HFIELD_CLEARANCE_M
-    z = ground + (params["z_m"] if shape.surface == "elevated" else 0.0)
+    z = (explicit_z if explicit_z is not None else
+         ground + (params["z_m"] if shape.surface == "elevated" else 0.0))
     return replace(obj, pose=replace(obj.pose, z_m=round(z, 6)))
 
 

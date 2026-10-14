@@ -112,7 +112,6 @@ class RecipeTest(unittest.TestCase):
         self.assertEqual([(item["path"], item["code"]) for item in found], [
             ("objects[0].params.opening_width_m", "out_of_range"),
             ("objects[1].item", "unknown_reference"),
-            ("objects[2].pose.z_m", "unknown_field"),
             ("objects[2].pose.x_m", "wrong_type"),
         ])
         self.assertIn("race-gate", found[1]["expected"])  # the right name is offered
@@ -121,6 +120,15 @@ class RecipeTest(unittest.TestCase):
         found = problems(recipe_data(terrain={"item": "race-gate"}))
         self.assertEqual(found[0]["path"], "terrain.item")
         self.assertIn("grass-ground", found[0]["expected"])
+
+    def test_an_explicit_pose_height_is_kept_for_a_tilted_road(self):
+        road = parse(recipe_data({
+            "id": "road", "item": "two-lane-road",
+            "pose": {"x_m": 0, "y_m": 0, "z_m": 2.75, "roll_deg": 3},
+        })).objects[0]
+
+        self.assertEqual(road.pose.z_m, 2.75)
+        self.assertEqual(road.pose.roll_deg, 3.0)
 
     def test_invalid_recipes(self):
         cases = {

@@ -59,6 +59,7 @@ def check(recipe: env_schema.Recipe, tolerance_m: float = TOLERANCE_M) -> list:
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     index = {obj.id: position for position, obj in enumerate(recipe.objects)}
+    objects_by_id = {obj.id: obj for obj in recipe.objects}
     names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom) or "" for geom in range(model.ngeom)]
     overlaps: dict[tuple[str, str], float] = {}
     outside: dict[tuple[str, str], float] = {}
@@ -78,7 +79,12 @@ def check(recipe: env_schema.Recipe, tolerance_m: float = TOLERANCE_M) -> list:
             key = (objects[0], others[0].removeprefix(env_generate.BOUNDARY_PREFIX))
             outside[key] = max(outside.get(key, 0.0), depth)
         elif len(objects) == 1 and others[0] == env_generate.TERRAIN_GEOM:
-            sunk[objects[0]] = max(sunk.get(objects[0], 0.0), depth)
+            # An explicitly elevated/depressed road is an intentional surface,
+            # not an object accidentally sunk into the terrain.  The terrain
+            # remains flat outside it; OpenDRIVE import records the road's
+            # absolute z and keeps that geometry instead of silently flattening.
+            if objects_by_id[objects[0]].type != "road_surface":
+                sunk[objects[0]] = max(sunk.get(objects[0], 0.0), depth)
     # An object wholly beyond an edge touches no boundary box: its outline tells.
     half_east, half_north = recipe.terrain.half_east, recipe.terrain.half_north
     for obj in recipe.objects:
