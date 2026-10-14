@@ -34,6 +34,7 @@
         <div class="row between">
           <h2>環境</h2>
           <span class="row"><a href="map.html" class="secondary button-link" title="OpenStreetMap などの地図データから建物と道路を取り込む">地図から</a>
+          <button id="import-recipe" class="secondary">取り込む</button>
           <button id="new-recipe" class="secondary">新規</button></span>
         </div>
         <input id="recipe-search" class="search" type="search" placeholder="環境を探す（名前・ID）" autocomplete="off">
@@ -131,6 +132,23 @@
       <div id="inspector"><p class="hint">部品をクリックすると、ここで位置やパラメータを編集できます。</p></div>
     </aside>
   </main>
+
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <form method="dialog" class="import-dialog-body">
+      <div class="row between">
+        <h2 id="import-title">Workspace から環境を取り込む</h2>
+        <button value="cancel" class="secondary" aria-label="閉じる">閉じる</button>
+      </div>
+      <p class="hint">Environment Studio と同じ Workspace にあるリポジトリの environments/ から、編集できるコピーを作ります。</p>
+      <label class="field">取り込み元<select id="import-source"></select></label>
+      <div id="import-message" class="hint" role="status"></div>
+      <ul id="import-environments" class="list import-list"></ul>
+      <label class="field">取り込み後の ID<input id="import-target-id" autocomplete="off"></label>
+      <div class="row import-actions">
+        <button id="import-selected" type="button" disabled>選んだ環境を取り込む</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="studio.js"></script>
 </body>

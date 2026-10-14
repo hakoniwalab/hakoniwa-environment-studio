@@ -151,6 +151,22 @@ objects:
   - {id: landing-pad, item: landing-pad, pose: {x_m: 7, y_m: 12, yaw_deg: 0}, params: {color: "#2f6fb0"}}
 ```
 
+Studio の画面で開く Recipe は、Catalog をパスの代わりに Studio の Catalog ID で指定できます。隣のリポジトリが提供する Recipe では、配置場所に依存しないこちらを推奨します。
+
+```yaml
+catalog: starter        # catalogs/starter/catalog.yaml
+```
+
+### 6.1 Workspace からの取り込み
+
+環境の提供側は、Business Pack Workspace に並ぶ自分のリポジトリの `environments/` 以下（最大4階層）へ通常の Environment Recipe を置くだけです。manifest は不要です。Studio はこれらを通常の環境一覧へ自動追加しません。利用者が「取り込む」を開いたときだけ候補を探し、リポジトリと Recipe を選びます。
+
+取り込みは `<ws>/recipes/<id>.yaml` へのコピーです。Recipe が参照する GLB、MJCF、DEM なども `<id>.assets/` へコピーし、パスを書き換えます。`catalog:` は `starter` のような Catalog ID と相対・絶対パスの両方を入力として認め、保存先から見たパスに直します。コピー後は元と切り離され、通常の保存済み環境と同じく編集・保存・削除・書き出しができます。
+
+同じ ID がある場合は黙って上書きせず、上書きまたは別 ID を選びます。参照ファイルがない Recipe は取り込めません。出典は `<ws>/recipes/.imports/<id>.json` に、リポジトリ名、元の Recipe、元の絶対パス、UTC の取り込み日時として残します。
+
+サーバは Workspace 直下のリポジトリと、その `environments/` 以下で発見した Recipe だけを候補にします。クライアントが任意のファイルパスを指定することはできず、`environments/` 外の Recipe や参照資産は拒否します。壊れた YAML はその1件だけ理由つきで選択不可になり、同じリポジトリのほかの環境は利用できます。
+
 地図や CityGML から作った Recipe（#10、変換の規則は [citygml-parts.md](citygml-parts.md)）は、出典を持ちます。どちらも世界の形は変えず、そのまま保存・出力（`resolve`、`environment.json`）されます。
 
 - `geo`：`provider`、`origin {lat_deg, lon_deg}`（原点 = 環境の中心）、`bbox_deg {south, west, north, east}`、`projection`、`attribution`、`license`、`data_timestamp`、`query`

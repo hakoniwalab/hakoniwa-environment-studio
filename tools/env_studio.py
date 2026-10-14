@@ -24,6 +24,9 @@ API (all JSON):
   GET  /api/recipes            example and saved Recipes
   GET  /api/recipes/<id>       one Recipe (as its YAML mapping)
   PUT  /api/recipes/<id>       check (tools/env_schema.py) and save a Recipe
+  GET  /api/imports/sources    Workspace repositories that offer Recipes
+  GET  /api/imports/sources/id the Recipes found under one environments/
+  POST /api/imports            copy one candidate Recipe and its assets
   POST /api/resolve            an item's shape with a placement's parameters
   POST /api/terrain            the terrain (and its height grid) of {catalog_id, terrain, size_m}
   POST /api/glb                the GLB of an unsaved Recipe (tools/env_generate.py), for the 3D view
@@ -80,6 +83,7 @@ import env_workspace  # noqa: E402
 from env_diagnostics import DiagnosticError, load_yaml_text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ROOT = ROOT.parent
 WEB_ROOT = ROOT / "web"
 CATALOGS = ROOT / "catalogs"
 DEFAULT_CATALOG_ID = "starter"
@@ -221,13 +225,240 @@ def terrain_json(body: object) -> dict:
     return {"item": recipe.terrain_item, **recipe.terrain.as_json()}
 
 
-def _recipe_files() -> dict[str, tuple[Path, bool]]:
-    found: dict[str, tuple[Path, bool]] = {}
-    for directory, editable in ((EXAMPLE_RECIPES, False), (USER_RECIPES, True)):
-        if directory.is_dir():
-            for path in sorted(directory.glob("*.yaml")):
-                found[path.stem] = (path, editable)  # a saved Recipe hides the example of the same id
+IMPORT_MAX_DEPTH = 4
+IMPORT_MAX_YAML_FILES = 500
+IMPORT_FILE_KEYS = {"visual", "collision", "dem", "heightmap", "texture", "model"}
+
+
+def _import_repository(name: str) -> tuple[Path, Path]:
+    """Resolve a direct Workspace child and its environments/ directory."""
+    if not ID_PATTERN.match(name):
+        raise StudioError("取り込み元の名前が正しくありません", HTTPStatus.BAD_REQUEST)
+    repository = (WORKSPACE_ROOT / name).resolve()
+    workspace = WORKSPACE_ROOT.resolve()
+    environments = (repository / "environments").resolve()
+    if (repository == ROOT.resolve() or not repository.is_dir()
+            or not repository.is_relative_to(workspace)
+            or repository.parent != workspace or not environments.is_dir()
+            or not environments.is_relative_to(repository)):
+        raise StudioError(f"取り込み元 {name} は候補にありません", HTTPStatus.NOT_FOUND)
+    return repository, environments
+
+
+def _import_recipe_paths(environments: Path) -> list[Path]:
+    """YAML files below environments/, bounded in both depth and count."""
+    paths: list[Path] = []
+    for directory, folders, files in os.walk(environments, followlinks=False):
+        current = Path(directory)
+        depth = len(current.relative_to(environments).parts)
+        folders[:] = [] if depth >= IMPORT_MAX_DEPTH else sorted(
+            name for name in folders if not (current / name).is_symlink())
+        for name in sorted(files):
+            if Path(name).suffix.lower() not in (".yaml", ".yml"):
+                continue
+            paths.append(current / name)
+            if len(paths) >= IMPORT_MAX_YAML_FILES:
+                return paths
+    return paths
+
+
+def _import_file_references(value: object, key: str = "") -> list[str]:
+    """File-valued Recipe fields supported by Environment Studio Catalogs."""
+    if isinstance(value, dict):
+        return [item for name, child in value.items()
+                for item in _import_file_references(child, str(name))]
+    if isinstance(value, list):
+        return [item for child in value for item in _import_file_references(child, key)]
+    if not isinstance(value, str) or not value.strip():
+        return []
+    suffix = Path(value).suffix.lower()
+    is_path_key = key in IMPORT_FILE_KEYS or key.endswith(("_path", "_file"))
+    return [value] if is_path_key or suffix in (".glb", ".xml", ".png", ".jpg", ".jpeg", ".npy", ".bin") else []
+
+
+def _inspect_import_recipe(path: Path, environments: Path) -> dict:
+    relative = path.relative_to(environments).as_posix()
+    entry = {"recipe": relative, "id": path.stem}
+    try:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(environments.resolve()):
+            raise ValueError("Workspace の environments/ 外を指しています")
+        data = load_yaml_text(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("schema") != env_schema.RECIPE_SCHEMA:
+            # Valid non-Recipe YAML belongs to the provider and is not a candidate.
+            return {**entry, "ignored": True}
+        if not ID_PATTERN.match(path.stem):
+            raise ValueError("ファイル名を環境 ID に使えません")
+        size = data.get("size_m") or {}
+        if not isinstance(size, dict) or not all(isinstance(size.get(axis), (int, float)) for axis in ("east", "north")):
+            raise ValueError("size_m.east / north がありません")
+        objects = data.get("objects") or []
+        if not isinstance(objects, list):
+            raise ValueError("objects は配列である必要があります")
+        missing = []
+        for text in _import_file_references(data):
+            source = Path(text).expanduser()
+            source = (source if source.is_absolute() else path.parent / source).resolve()
+            if not source.is_relative_to(environments.resolve()) or not source.is_file():
+                missing.append(text)
+        return {**entry, "name": str(data.get("name") or path.stem),
+                "description": str(data.get("description") or ""),
+                "size_m": {"east": size["east"], "north": size["north"]},
+                "objects": len(objects), "missing_files": sorted(set(missing))}
+    except (OSError, yaml.YAMLError, DiagnosticError, ValueError, TypeError) as exc:
+        return {**entry, "error": str(exc)}
+
+
+def _import_environments(name: str) -> list[dict]:
+    _repository, environments = _import_repository(name)
+    return [entry for path in _import_recipe_paths(environments)
+            if not (entry := _inspect_import_recipe(path, environments)).get("ignored")]
+
+
+def list_import_sources() -> list[dict]:
+    """Workspace siblings with at least one valid Environment Recipe."""
+    result = []
+    if not WORKSPACE_ROOT.is_dir():
+        return result
+    for repository in sorted(WORKSPACE_ROOT.iterdir()):
+        if not repository.is_dir() or repository.resolve() == ROOT.resolve():
+            continue
+        try:
+            entries = _import_environments(repository.name)
+        except StudioError:
+            continue
+        valid = [entry for entry in entries if not entry.get("error")]
+        if valid:
+            result.append({"repository": repository.name, "environments": len(valid),
+                           "unreadable": len(entries) - len(valid)})
+    return result
+
+
+def list_import_environments(name: str) -> dict:
+    entries = _import_environments(name)
+    if not any(not entry.get("error") for entry in entries):
+        raise StudioError(f"取り込める環境が {name} にありません", HTTPStatus.NOT_FOUND)
+    return {"repository": name, "environments": entries}
+
+
+def _rewrite_import_assets(value: object, *, source_recipe: Path, environments: Path,
+                           target_assets: Path, target_id: str, copied: dict[Path, Path], key: str = "") -> object:
+    if isinstance(value, dict):
+        return {name: _rewrite_import_assets(child, source_recipe=source_recipe, environments=environments,
+                                             target_assets=target_assets, target_id=target_id,
+                                             copied=copied, key=str(name))
+                for name, child in value.items()}
+    if isinstance(value, list):
+        return [_rewrite_import_assets(child, source_recipe=source_recipe, environments=environments,
+                                       target_assets=target_assets, target_id=target_id,
+                                       copied=copied, key=key) for child in value]
+    if not isinstance(value, str) or value not in _import_file_references({key: value}):
+        return value
+    source = Path(value).expanduser()
+    source = (source if source.is_absolute() else source_recipe.parent / source).resolve()
+    if not source.is_relative_to(environments.resolve()) or not source.is_file():
+        raise StudioError(f"参照ファイルがありません、または environments/ の外です: {value}")
+    if source not in copied:
+        asset_parent = next((parent for parent in source.parents
+                             if parent.name.endswith(".assets") and parent.is_relative_to(environments)), None)
+        inner = source.relative_to(asset_parent) if asset_parent else Path(source.name)
+        target = target_assets / inner
+        if target in copied.values() and next(item for item, result in copied.items() if result == target) != source:
+            target = target.with_name(f"{source.parent.name}-{target.name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        copied[source] = target
+    return f"{target_id}.assets/{copied[source].relative_to(target_assets).as_posix()}"
+
+
+def import_environment(body: object) -> dict:
+    if not isinstance(body, dict):
+        raise StudioError("the request body must be {repository, recipe, id, overwrite}")
+    repository_name = str(body.get("repository") or "")
+    recipe_reference = str(body.get("recipe") or "")
+    target_id = _check_id(str(body.get("id") or Path(recipe_reference).stem))
+    repository, environments = _import_repository(repository_name)
+    entries = {entry["recipe"]: entry for entry in _import_environments(repository_name)}
+    entry = entries.get(recipe_reference)
+    if entry is None or entry.get("error"):
+        raise StudioError("その環境は現在の取り込み候補にありません", HTTPStatus.NOT_FOUND)
+    if entry.get("missing_files"):
+        raise StudioError("参照ファイルがありません: " + ", ".join(entry["missing_files"]))
+    target_directory = USER_RECIPES.resolve()
+    target = target_directory / f"{target_id}.yaml"
+    if (target.exists() or target_id in _recipe_files()) and not body.get("overwrite"):
+        raise StudioError(f"Recipe {target_id} はもうあります（上書きするか別の ID にしてください）",
+                          HTTPStatus.CONFLICT)
+    source_recipe = (environments / recipe_reference).resolve()
+    data = load_yaml_text(source_recipe.read_text(encoding="utf-8"))
+    catalog_path = _recipe_catalog_path(source_recipe, data)
+    target_assets = target_directory / f"{target_id}.assets"
+    if target_assets.exists() and not body.get("overwrite"):
+        raise StudioError(f"資産 {target_assets.name} はもうあります（上書きするか別の ID にしてください）",
+                          HTTPStatus.CONFLICT)
+    staged_assets = target_directory / f".{target_id}.import-{secrets.token_hex(4)}"
+    copied: dict[Path, Path] = {}
+    try:
+        rewritten = _rewrite_import_assets(data, source_recipe=source_recipe, environments=environments,
+                                           target_assets=staged_assets, target_id=target_id, copied=copied)
+        rewritten["catalog"] = _catalog_reference(catalog_path, target_directory)
+
+        # Validate against the staged copies without exposing temporary paths
+        # in the saved Recipe. Both folders have the same parent and contents.
+        def staged(value: object) -> object:
+            if isinstance(value, dict):
+                return {name: staged(child) for name, child in value.items()}
+            if isinstance(value, list):
+                return [staged(child) for child in value]
+            if isinstance(value, str) and value.startswith(f"{target_id}.assets/"):
+                return f"{staged_assets.name}/{value.split('/', 1)[1]}"
+            return value
+
+        env_schema.parse_recipe(staged(rewritten), target)
+    except StudioError:
+        shutil.rmtree(staged_assets, ignore_errors=True)
+        raise
+    except DiagnosticError as exc:
+        shutil.rmtree(staged_assets, ignore_errors=True)
+        raise StudioError(f"環境を取り込めません: {exc}") from exc
+    except OSError as exc:
+        shutil.rmtree(staged_assets, ignore_errors=True)
+        raise StudioError(f"環境の資産をコピーできません: {exc}") from exc
+    target_directory.mkdir(parents=True, exist_ok=True)
+    if target_assets.exists():
+        shutil.rmtree(target_assets)
+    if staged_assets.exists():
+        staged_assets.replace(target_assets)
+    env_schema.save_yaml(rewritten, target)
+    record = {
+        "schema": "hakoniwa.environment-import/v1", "repository": repository.name,
+        "source": recipe_reference, "source_path": str(source_recipe),
+        "imported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    records = target_directory / ".imports"
+    records.mkdir(parents=True, exist_ok=True)
+    (records / f"{target_id}.json").write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+                                                encoding="utf-8")
+    return {"id": target_id, "path": str(target), "copied_files": len(copied), "source": record}
+
+
+def _recipe_files() -> dict[str, tuple[Path, bool, dict | None]]:
+    found: dict[str, tuple[Path, bool, dict | None]] = {}
+    if EXAMPLE_RECIPES.is_dir():
+        for path in sorted(EXAMPLE_RECIPES.glob("*.yaml")):
+            found[path.stem] = (path, False, {"kind": "example", "title": "Environment Studio"})
+    if USER_RECIPES.is_dir():
+        for path in sorted(USER_RECIPES.glob("*.yaml")):
+            found[path.stem] = (path, True, None)  # a saved Recipe hides a read-only source of the same id
     return found
+
+
+def _recipe_catalog_path(path: Path, data: dict) -> Path:
+    reference = data.get("catalog")
+    if not isinstance(reference, str) or not reference:
+        raise StudioError("Recipe catalog must be a Catalog name or path")
+    named = _catalog_paths().get(reference)
+    return named if named is not None else (path.parent / reference).resolve()
 
 
 def list_recipes() -> list[dict]:
@@ -235,14 +466,14 @@ def list_recipes() -> list[dict]:
     YAML without resolving it (a city Recipe with a DEM takes seconds to
     resolve; opening it reports its problems)."""
     entries = []
-    for recipe_id, (path, editable) in sorted(_recipe_files().items()):
-        entry = {"id": recipe_id, "editable": editable, "path": str(path)}
+    for recipe_id, (path, editable, source) in sorted(_recipe_files().items()):
+        entry = {"id": recipe_id, "editable": editable, "path": str(path), "source": source}
         try:
             if not ID_PATTERN.match(recipe_id):
                 raise StudioError(f"ファイル名 {path.name} は Recipe の ID に使えません（小文字・数字・- _、64 文字まで）")
             data = load_yaml_text(path.read_text(encoding="utf-8"))
             size = data["size_m"]
-            catalog_path = (path.parent / data["catalog"]).resolve()
+            catalog_path = _recipe_catalog_path(path, data)
             catalog = env_schema.load_catalog(catalog_path)
             terrain_item = catalog.items.get((data.get("terrain") or {}).get("item"))
             entry.update(name=data.get("name") or recipe_id, size_m={"east": size["east"], "north": size["north"]},
@@ -259,11 +490,11 @@ def read_recipe(recipe_id: str) -> dict:
     found = _recipe_files().get(_check_id(recipe_id))
     if found is None:
         raise StudioError(f"Recipe {recipe_id} not found", HTTPStatus.NOT_FOUND)
-    path, editable = found
+    path, editable, source = found
     data = load_yaml_text(path.read_text(encoding="utf-8"))
     reference = data.get("catalog") if isinstance(data, dict) else None
-    catalog_id = _catalog_id_of(path.parent / reference) if isinstance(reference, str) else None
-    return {"id": recipe_id, "editable": editable, "recipe": data, "catalog_id": catalog_id}
+    catalog_id = _catalog_id_of(_recipe_catalog_path(path, data)) if isinstance(reference, str) else None
+    return {"id": recipe_id, "editable": editable, "recipe": data, "catalog_id": catalog_id, "source": source}
 
 
 def _catalog_reference(catalog: Path, directory: Path) -> str:
@@ -738,7 +969,7 @@ def _asset_users(path: Path) -> list[str]:
     (a Recipe saved before copies were made, or written by hand)."""
     marker = f"{path.stem}.assets/"
     users = []
-    for other_id, (other, editable) in sorted(_recipe_files().items()):
+    for other_id, (other, editable, _source) in sorted(_recipe_files().items()):
         if other != path and editable:
             try:
                 if marker in other.read_text(encoding="utf-8"):
@@ -825,7 +1056,7 @@ def delete_recipe(recipe_id: str) -> dict:
     found = _recipe_files().get(recipe_id)  # only a listed Recipe (also one whose name is no valid id)
     if found is None:
         raise StudioError(f"Recipe {recipe_id} not found", HTTPStatus.NOT_FOUND)
-    path, editable = found
+    path, editable, _source = found
     if not editable:
         raise StudioError(f"{recipe_id} は例の環境なので削除できません", HTTPStatus.FORBIDDEN)
     users = _asset_users(path)
@@ -970,6 +1201,10 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("POST", ("city-worlds", "import"), lambda self, _: self._json(import_city_world(self._body()))),
         ("POST", ("city-worlds", "export"), lambda self, _: self._json(export_city_world(self._body()))),
         ("POST", ("exports", "*", "delete"), lambda self, parts: self._json(remove_export(parts[1]))),
+        ("GET", ("imports", "sources"), lambda self, _: self._json(list_import_sources())),
+        ("GET", ("imports", "sources", "*"), lambda self, parts: self._json(
+            list_import_environments(parts[2]))),
+        ("POST", ("imports",), lambda self, _: self._json(import_environment(self._body()))),
         ("GET", ("recipes",), lambda self, _: self._json(list_recipes())),
         ("GET", ("recipes", "*"), lambda self, parts: self._json(read_recipe(parts[1]))),
         ("PUT", ("recipes", "*"), lambda self, parts: self._json(save_recipe(parts[1], self._body()))),

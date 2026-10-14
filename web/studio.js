@@ -623,6 +623,104 @@ function renderRecipeList() {
     }, "×") : null)));
 }
 
+// --- Import a provider Recipe as an independent saved copy ------------------------
+
+let importChoices = [];
+
+function renderImportChoices() {
+  const host = $("#import-environments");
+  if (!importChoices.length) {
+    host.replaceChildren(el("li", { class: "hint" }, "環境がありません"));
+    return;
+  }
+  host.replaceChildren(...importChoices.map((item) => {
+    const unavailable = item.error || item.missing_files?.length;
+    const reason = item.error || (item.missing_files?.length
+      ? `参照ファイルがありません: ${item.missing_files.join(", ")}` : "");
+    return el("li", {}, el("label", {},
+      el("input", {
+        type: "radio", name: "import-environment", value: item.recipe, disabled: Boolean(unavailable),
+        onchange: () => {
+          $("#import-target-id").value = item.id;
+          $("#import-selected").disabled = false;
+          $("#import-message").textContent = "";
+        },
+      }),
+      el("span", {},
+        el("span", { class: "import-name" }, item.name || item.id),
+        el("span", { class: "meta" }, `${item.id}・${item.size_m?.east ?? "?"}×${item.size_m?.north ?? "?"} m・${item.objects ?? "?"} 部品`),
+        item.description ? el("span", { class: "meta" }, item.description) : null,
+        reason ? el("span", { class: "meta error" }, `読めません（${reason}）`) : null)));
+  }));
+}
+
+async function loadImportSource(repository) {
+  $("#import-message").textContent = `${repository} を調べています…`;
+  $("#import-selected").disabled = true;
+  $("#import-target-id").value = "";
+  try {
+    const answer = await api("GET", `imports/sources/${encodeURIComponent(repository)}`);
+    importChoices = answer.environments;
+    renderImportChoices();
+    $("#import-message").textContent = `${importChoices.filter((item) => !item.error).length} 件見つかりました`;
+  } catch (error) {
+    importChoices = [];
+    renderImportChoices();
+    $("#import-message").textContent = error.message;
+  }
+}
+
+async function openImportDialog() {
+  const dialog = $("#import-dialog");
+  $("#import-message").textContent = "取り込み元を調べています…";
+  $("#import-environments").replaceChildren();
+  $("#import-selected").disabled = true;
+  dialog.showModal();
+  try {
+    const sources = await api("GET", "imports/sources");
+    $("#import-source").replaceChildren(...sources.map((source) => el("option", { value: source.repository },
+      `${source.repository}（${source.environments}）`)));
+    if (!sources.length) {
+      $("#import-message").textContent = "Workspace に取り込める環境がありません";
+      return;
+    }
+    await loadImportSource(sources[0].repository);
+  } catch (error) {
+    $("#import-message").textContent = error.message;
+  }
+}
+
+async function importSelected() {
+  const chosen = document.querySelector("input[name='import-environment']:checked");
+  if (!chosen) return;
+  if (!confirmDiscard()) return;
+  let id = $("#import-target-id").value.trim();
+  if (!id) { $("#import-message").textContent = "取り込み後の ID を入力してください"; return; }
+  let overwrite = false;
+  if (state.recipes.some((item) => item.id === id)) {
+    overwrite = window.confirm(`環境 ${id} はもうあります。上書きしますか？\nキャンセルすると別の ID を入力できます。`);
+    if (!overwrite) {
+      const alternative = window.prompt("別の ID を入力してください", `${id}-copy`);
+      if (!alternative) return;
+      id = alternative.trim();
+      $("#import-target-id").value = id;
+    }
+  }
+  const repository = $("#import-source").value;
+  $("#import-message").textContent = `${id} を取り込んでいます…`;
+  $("#import-selected").disabled = true;
+  try {
+    const result = await api("POST", "imports", { repository, recipe: chosen.value, id, overwrite });
+    await loadRecipes();
+    $("#import-dialog").close();
+    await openRecipe(result.id);
+    setStatus(`${repository} から ${result.id} を取り込みました（資産 ${result.copied_files} 件）`, "ok");
+  } catch (error) {
+    $("#import-message").textContent = error.message;
+    $("#import-selected").disabled = false;
+  }
+}
+
 // --- Editing ----------------------------------------------------------------------
 
 // A part of the Catalog added to the environment: where it was dropped on
@@ -840,7 +938,7 @@ async function openRecipe(id) {
   loaded.recipe.objects = loaded.recipe.objects || [];
   await loadCatalog(loaded.catalog_id || state.catalogId);
   await catalog.prime(loaded.recipe.objects); // every shape in one request, before the first drawing
-  state.current = { id, editable: loaded.editable, recipe: loaded.recipe };
+  state.current = { id, editable: loaded.editable, recipe: loaded.recipe, source: loaded.source };
   state.openedId = loaded.editable ? id : null; // the saved Recipe this edits (saving it again is no overwrite)
   state.selection = [];
   state.saved = snapshot();
@@ -983,6 +1081,9 @@ async function init() {
   $("#terrain-select").addEventListener("change", (event) => setTerrain(event.target.value));
 
   $("#new-recipe").addEventListener("click", newRecipe);
+  $("#import-recipe").addEventListener("click", openImportDialog);
+  $("#import-source").addEventListener("change", (event) => loadImportSource(event.target.value));
+  $("#import-selected").addEventListener("click", importSelected);
   $("#save").addEventListener("click", saveRecipe);
   $("#urban").addEventListener("click", exportUrban);
   // Export only when started with an export folder (a tool that takes the Worlds).

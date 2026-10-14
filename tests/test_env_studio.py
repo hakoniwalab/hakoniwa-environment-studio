@@ -34,7 +34,9 @@ class StudioServerTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.user = Path(directory.name) / "work/recipes"
+        self.workspace = Path(directory.name) / "workspace"
         for patch in (mock.patch.object(env_studio, "USER_RECIPES", self.user),
+                      mock.patch.object(env_studio, "WORKSPACE_ROOT", self.workspace),
                       mock.patch.object(env_studio.env_cityworld, "WORK", self.user.parent / "city-worlds")):
             patch.start()
             self.addCleanup(patch.stop)
@@ -194,6 +196,96 @@ class StudioServerTest(unittest.TestCase):
         self.assertEqual(written["objects"][0]["pose"]["x_m"], 1.25)
         _, listed = self.call("GET", "/api/recipes")
         self.assertTrue(next(item for item in listed if item["id"] == "drone-practice-field")["editable"])
+
+    def test_workspace_environments_are_listed_only_in_the_import_dialog(self):
+        pack = self.workspace / "hakoniwa-scenario/environments/highway-3lane"
+        pack.mkdir(parents=True)
+        (pack / "highway-3lane.yaml").write_text(yaml.safe_dump({
+            "schema": env_studio.env_schema.RECIPE_SCHEMA, "name": "高速道路", "description": "3 lanes",
+            "catalog": "starter", "size_m": {"east": 40, "north": 1100},
+            "terrain": GROUND, "objects": [cone("cone", 1, 2)],
+        }, sort_keys=False), encoding="utf-8")
+        (pack / "broken.yaml").write_text("schema: [\n", encoding="utf-8")
+        (self.workspace / "empty/environments").mkdir(parents=True)
+        own = self.workspace / "hakoniwa-environment-studio"
+        (own / "environments").mkdir(parents=True)
+        shutil.copy2(pack / "highway-3lane.yaml", own / "environments/own.yaml")
+
+        with mock.patch.object(env_studio, "ROOT", own):
+            status, sources = self.call("GET", "/api/imports/sources")
+            self.assertEqual(status, 200)
+            self.assertEqual(sources, [{"repository": "hakoniwa-scenario", "environments": 1,
+                                        "unreadable": 1}])
+            status, choices = self.call("GET", "/api/imports/sources/hakoniwa-scenario")
+        self.assertEqual(status, 200)
+        by_recipe = {item["recipe"]: item for item in choices["environments"]}
+        self.assertEqual(by_recipe["highway-3lane/highway-3lane.yaml"]["size_m"],
+                         {"east": 40, "north": 1100})
+        self.assertEqual(by_recipe["highway-3lane/highway-3lane.yaml"]["objects"], 1)
+        self.assertIn("error", by_recipe["highway-3lane/broken.yaml"])
+        # Discovery never puts a provider Recipe in the ordinary environment list.
+        _, listed = self.call("GET", "/api/recipes")
+        self.assertNotIn("highway-3lane", {item["id"] for item in listed})
+
+    def test_import_copies_recipe_assets_rewrites_catalog_and_records_source(self):
+        pack = self.workspace / "hakoniwa-scenario/environments/highway-3lane"
+        assets = pack / "highway-3lane.assets"
+        assets.mkdir(parents=True)
+        (assets / "building.glb").write_bytes(b"glTF-test")
+        recipe = {
+            "schema": env_studio.env_schema.RECIPE_SCHEMA, "name": "高速道路", "catalog": "starter",
+            "size_m": SIZE, "terrain": GROUND,
+            "objects": [{"id": "building", "item": "building-footprint", "pose": {"x_m": 0, "y_m": 0},
+                         "params": {"visual": "highway-3lane.assets/building.glb"}}],
+        }
+        (pack / "highway-3lane.yaml").write_text(yaml.safe_dump(recipe, sort_keys=False), encoding="utf-8")
+
+        status, answer = self.call("POST", "/api/imports", {
+            "repository": "hakoniwa-scenario", "recipe": "highway-3lane/highway-3lane.yaml",
+            "id": "copied-highway",
+        })
+        self.assertEqual(status, 200, answer)
+        written = yaml.safe_load((self.user / "copied-highway.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(written["objects"][0]["params"]["visual"],
+                         "copied-highway.assets/building.glb")
+        self.assertEqual((self.user / written["catalog"]).resolve(),
+                         (env_studio.CATALOGS / "starter/catalog.yaml").resolve())
+        self.assertEqual((self.user / "copied-highway.assets/building.glb").read_bytes(), b"glTF-test")
+        record = json.loads((self.user / ".imports/copied-highway.json").read_text(encoding="utf-8"))
+        self.assertEqual((record["repository"], record["source"]),
+                         ("hakoniwa-scenario", "highway-3lane/highway-3lane.yaml"))
+        self.assertRegex(record["imported_at"], r"^\d{4}-\d\d-\d\dT")
+        _, listed = self.call("GET", "/api/recipes")
+        self.assertTrue(next(item for item in listed if item["id"] == "copied-highway")["editable"])
+
+    def test_import_conflicts_missing_assets_and_workspace_escape_are_rejected(self):
+        pack = self.workspace / "provider/environments"
+        pack.mkdir(parents=True)
+        base = {"schema": env_studio.env_schema.RECIPE_SCHEMA, "name": "one", "catalog": "starter",
+                "size_m": SIZE, "terrain": GROUND, "objects": [cone("cone", 1, 2)]}
+        (pack / "one.yaml").write_text(yaml.safe_dump(base), encoding="utf-8")
+        self.assertEqual(self.call("POST", "/api/imports",
+                                  {"repository": "provider", "recipe": "one.yaml", "id": "one"})[0], 200)
+        status, conflict = self.call("POST", "/api/imports",
+                                     {"repository": "provider", "recipe": "one.yaml", "id": "one"})
+        self.assertEqual(status, 409)
+        self.assertIn("上書き", conflict["error"])
+        self.assertEqual(self.call("POST", "/api/imports", {
+            "repository": "provider", "recipe": "one.yaml", "id": "two", "overwrite": False})[0], 200)
+
+        missing = {**base, "objects": [{"id": "building", "item": "building-footprint",
+                                         "pose": {"x_m": 0, "y_m": 0},
+                                         "params": {"visual": "missing.assets/no.glb"}}]}
+        (pack / "missing.yaml").write_text(yaml.safe_dump(missing), encoding="utf-8")
+        status, listed = self.call("GET", "/api/imports/sources/provider")
+        self.assertEqual(status, 200)
+        self.assertEqual(next(item for item in listed["environments"] if item["id"] == "missing")
+                         ["missing_files"], ["missing.assets/no.glb"])
+        self.assertEqual(self.call("POST", "/api/imports", {
+            "repository": "provider", "recipe": "missing.yaml", "id": "missing"})[0], 400)
+        self.assertEqual(self.call("GET", "/api/imports/sources/../outside")[0], 404)
+        self.assertEqual(self.call("POST", "/api/imports", {
+            "repository": "provider", "recipe": "../one.yaml", "id": "escape"})[0], 404)
 
     def test_the_3d_preview_is_the_generated_glb_of_the_unsaved_recipe(self):
         objects = [cone("a", 0, 0), cone("b", 2, 0)]
