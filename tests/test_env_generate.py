@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import env_generate  # noqa: E402
+import env_road_ribbon  # noqa: E402
 import env_schema  # noqa: E402
 
 try:
@@ -90,6 +91,37 @@ class GlbTest(unittest.TestCase):
 
 @unittest.skipIf(mujoco is None, "MuJoCo is not installed")
 class MjcfTest(unittest.TestCase):
+    def test_rich_ribbon_draws_double_colored_marks_and_lane_kinds_without_collision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            ribbon.write_text(json.dumps({
+                "schema": "hakoniwa.road-ribbon/v1",
+                "sections": [
+                    {"s_m": 0, "points_m": [[-3, 0, 0], [0, 0, 0], [3, 0, 0]]},
+                    {"s_m": 5, "points_m": [[-3, 5, 0], [0, 5, 0], [3, 5, 0]]},
+                ],
+                "lanes": [
+                    {"id": 1, "kind": "sidewalk", "left_boundary": 0, "right_boundary": 1,
+                     "speed_limit_kmh": 0},
+                    {"id": -1, "kind": "biking", "left_boundary": 1, "right_boundary": 2,
+                     "speed_limit_kmh": 20},
+                ],
+                "markings": [{"boundary": 1, "start_s_m": 0, "end_s_m": 5, "color": "yellow",
+                              "lines": [
+                                  {"pattern": "solid", "t_offset_m": -0.2, "width_m": 0.2,
+                                   "length_m": 4, "space_m": 0, "s_offset_m": 0},
+                                  {"pattern": "dashed", "t_offset_m": 0.2, "width_m": 0.1,
+                                   "length_m": 4, "space_m": 4, "s_offset_m": 0},
+                              ]}],
+            }), encoding="utf-8")
+            shape = env_road_ribbon.load(ribbon, thickness_m=0.02, color="#444444",
+                                         line_color="#ffffff")
+        by_prefix = lambda prefix: [solid for solid in shape.solids if solid.name.startswith(prefix)]
+        self.assertEqual(len(by_prefix("lane-")), 2)
+        self.assertEqual(len(by_prefix("mark-")), 2)
+        self.assertTrue(all(not solid.collide for solid in by_prefix("lane-") + by_prefix("mark-")))
+        self.assertTrue(all(solid.color == "#f1c232" for solid in by_prefix("mark-")))
+
     def compile(self, recipe, **options):
         model = mujoco.MjModel.from_xml_string(env_generate.environment_mjcf(recipe, **options))
         data = mujoco.MjData(model)
