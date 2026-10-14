@@ -1,0 +1,13 @@
+schema: hakoniwa.environment-recipe/v1
+name: 高速道路部品の1000m検査
+catalog: ../../catalogs/starter/catalog.yaml
+size_m: {east: 40, north: 1100}
+terrain: {item: asphalt-ground}
+objects:
+  - id: highway
+    item: highway-three-lane-road
+    pose: {x_m: 0, y_m: 0, yaw_deg: 0}
+  - id: median
+    item: concrete-median-barrier
+    pose: {x_m: -8, y_m: 0, yaw_deg: 90}
+    params: {width_m: 1000}

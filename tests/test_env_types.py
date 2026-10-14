@@ -45,7 +45,7 @@ class ShippedTypesTest(unittest.TestCase):
             "flat_ground", "hills_terrain", "wall", "building_block", "box_obstacle", "pylon", "gate", "ramp",
             "platform", "landing_pad", "road_surface", "road_marking", "guard_rail", "road_sign", "traffic_signal",
             "road_path", "building_footprint", "road_area", "dem_terrain", "city_layer", "food_stall", "open_space", "shuttle_stop",
-            "stairs"})
+            "stairs", "concrete_median_barrier"})
         self.assertTrue(self.library.types["hills_terrain"].is_terrain)
         self.assertTrue(self.library.types["landing_pad"].is_a("platform"))
 
@@ -90,6 +90,51 @@ class ShippedTypesTest(unittest.TestCase):
                 self.assertEqual(sum(1 for solid in road.solids if solid.name.startswith("lane-")), lines)
         markings = [solid for solid in resolved(self.library, "road_surface").solids if solid.name != "slab"]
         self.assertTrue(all(not solid.collide for solid in markings))
+
+    def test_default_road_geometry_is_unchanged(self):
+        road = resolved(self.library, "road_surface")
+        self.assertEqual(
+            [(solid.name, solid.x_m, solid.y_m, solid.width_m, solid.depth_m) for solid in road.solids],
+            [("slab", 0.0, 0.0, 7.0, 20.0), ("edge-left", -3.3, 0.0, 0.15, 20.0),
+             ("edge-right", 3.3, 0.0, 0.15, 20.0), ("lane-1", 0.0, 0.0, 0.12, 20.0)],
+        )
+
+    def test_highway_road_has_shoulders_and_repeated_dashes(self):
+        road = resolved(self.library, "road_surface", width_m=13.75, length_m=1000, lanes=3, lane_line="dashed",
+                        shoulder_left_m=2.5, shoulder_right_m=0.75)
+        named = {solid.name: solid for solid in road.solids}
+        self.assertEqual((named["edge-left"].x_m, named["edge-right"].x_m), (-4.375, 6.125))
+        lane1 = [solid for solid in road.solids if solid.name.startswith("lane-1-dash-")]
+        lane2 = [solid for solid in road.solids if solid.name.startswith("lane-2-dash-")]
+        self.assertEqual((len(lane1), len(lane2)), (50, 50))
+        self.assertEqual((lane1[0].y_m, lane1[-1].y_m), (-496.0, 484.0))
+        self.assertAlmostEqual(lane1[0].x_m, -0.875)
+        self.assertAlmostEqual(lane2[0].x_m, 2.625)
+
+    def test_repeat_combines_with_when_and_has_a_limit(self):
+        library = library_from("""
+- id: posts
+  params:
+    count: {kind: integer, default: 3}
+    enabled: {kind: bool, default: true}
+  shapes:
+    - {name: post, primitive: box, w: 1, d: 1, h: 1, x: 2, when: $enabled,
+       repeat: {count: $count, step_x: 1, step_y: 2, step_z: 0.5}}
+""")
+        shape = resolved(library, "posts")
+        self.assertEqual([(s.name, s.x_m, s.y_m, s.z_m) for s in shape.solids],
+                         [("post-1", 2.0, 0.0, 0.5), ("post-2", 3.0, 2.0, 1.0),
+                          ("post-3", 4.0, 4.0, 1.5)])
+        with self.assertRaises(DiagnosticError) as caught:
+            resolved(library, "posts", count=501)
+        self.assertEqual(caught.exception.diagnostics[0].code, "out_of_range")
+
+    def test_concrete_median_barrier_is_a_single_colliding_box(self):
+        barrier = resolved(self.library, "concrete_median_barrier", width_m=1000)
+        self.assertEqual(len(barrier.solids), 1)
+        self.assertEqual((barrier.solids[0].width_m, barrier.solids[0].depth_m,
+                          barrier.solids[0].height_m, barrier.solids[0].collide),
+                         (1000.0, 0.6, 0.8, True))
 
 
 class ExpressionTest(unittest.TestCase):

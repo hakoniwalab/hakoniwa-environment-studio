@@ -27,8 +27,8 @@ types:
     abstract: true
     extends: object
     params:
-      width_m: {kind: length, label: 幅, min: 0.01, max: 1000, level: item, description: Size along its x.}
-      depth_m: {kind: length, label: 奥行き, min: 0.01, max: 1000, level: item, description: Size along its y.}
+      width_m: {kind: length, label: 幅, min: 0.01, max: 2000, level: item, description: Size along its x.}
+      depth_m: {kind: length, label: 奥行き, min: 0.01, max: 2000, level: item, description: Size along its y.}
       height_m: {kind: length, label: 高さ, min: 0.01, max: 500, level: item, description: Size along z.}
     shapes:
       - {name: body, primitive: box, w: $width_m, d: $depth_m, h: $height_m}
@@ -88,7 +88,7 @@ types:
     id_prefix: wall
     params:
       snap: {kind: bool, label: 吸い付き, default: true, level: item}
-      width_m: {kind: length, label: 長さ, min: 0.1, max: 1000, level: placement}
+      width_m: {kind: length, label: 長さ, min: 0.1, max: 2000, level: placement}
 
   - id: building_block
     extends: block
@@ -97,8 +97,8 @@ types:
     id_prefix: building
     params:
       snap: {kind: bool, label: 吸い付き, default: true, level: item}
-      width_m: {kind: length, label: 幅, min: 1, max: 1000, level: placement}
-      depth_m: {kind: length, label: 奥行き, min: 1, max: 1000, level: placement}
+      width_m: {kind: length, label: 幅, min: 1, max: 2000, level: placement}
+      depth_m: {kind: length, label: 奥行き, min: 1, max: 2000, level: placement}
       height_m: {kind: length, label: 高さ, min: 1, max: 500, level: placement}
 
   - id: box_obstacle
@@ -265,21 +265,34 @@ types:
       color: {kind: color, label: 路面の色, default: "#4a4d52", level: placement}
       snap: {kind: bool, label: 吸い付き, default: true, level: item}
       width_m: {kind: length, label: 幅, default: 7.0, min: 1, max: 50, level: placement}
-      length_m: {kind: length, label: 長さ, default: 20.0, min: 1, max: 1000, level: placement}
+      length_m: {kind: length, label: 長さ, default: 20.0, min: 1, max: 2000, level: placement}
       lanes: {kind: integer, label: 車線の数, default: 2, values: [1, 2, 3, 4], level: placement}
       line_color: {kind: color, label: 線の色, default: "#f4f4f4", level: item}
+      lane_line: {kind: enum, label: 車線境界線, values: [solid, dashed], default: solid, level: placement}
+      shoulder_left_m: {kind: length, label: 左路肩, default: 0, min: 0, max: 5, level: placement}
+      shoulder_right_m: {kind: length, label: 右路肩, default: 0, min: 0, max: 5, level: placement}
+      direction: {kind: enum, label: 進行方向, values: [unspecified, one_way_plus_y, one_way_minus_y, two_way], default: unspecified, level: placement}
+      lane_numbering: {kind: enum, label: 車線番号, values: [left_first, right_first], default: left_first, level: placement}
+      lane_kinds: {kind: text, label: 車線種別, default: "", level: placement}
+      speed_limit_kmh: {kind: number, label: 制限速度, default: 0, min: 0, max: 200, level: placement}
     shapes:
       - {name: slab, primitive: box, w: $width_m, d: $length_m, h: 0.02}
-      - {name: edge-left, primitive: box, w: 0.15, d: $length_m, h: 0.004, x: -$width_m / 2 + 0.2, z: 0.022,
+      - {name: edge-left, primitive: box, w: 0.15, d: $length_m, h: 0.004, x: "cond($shoulder_left_m > 0, -$width_m / 2 + $shoulder_left_m, -$width_m / 2 + 0.2)", z: 0.022,
          color: $line_color, collide: false}
-      - {name: edge-right, primitive: box, w: 0.15, d: $length_m, h: 0.004, x: $width_m / 2 - 0.2, z: 0.022,
+      - {name: edge-right, primitive: box, w: 0.15, d: $length_m, h: 0.004, x: "cond($shoulder_right_m > 0, $width_m / 2 - $shoulder_right_m, $width_m / 2 - 0.2)", z: 0.022,
          color: $line_color, collide: false}
-      - {name: lane-1, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: -$width_m / 2 + $width_m / $lanes,
-         z: 0.022, color: $line_color, collide: false, when: $lanes >= 2}
-      - {name: lane-2, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: -$width_m / 2 + 2 * $width_m / $lanes,
-         z: 0.022, color: $line_color, collide: false, when: $lanes >= 3}
-      - {name: lane-3, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: -$width_m / 2 + 3 * $width_m / $lanes,
-         z: 0.022, color: $line_color, collide: false, when: $lanes >= 4}
+      - {name: lane-1, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: "-$width_m / 2 + $shoulder_left_m + ($width_m - $shoulder_left_m - $shoulder_right_m) / $lanes",
+         z: 0.022, color: $line_color, collide: false, when: "$lanes >= 2 and $lane_line == 'solid'"}
+      - {name: lane-2, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: "-$width_m / 2 + $shoulder_left_m + 2 * ($width_m - $shoulder_left_m - $shoulder_right_m) / $lanes",
+         z: 0.022, color: $line_color, collide: false, when: "$lanes >= 3 and $lane_line == 'solid'"}
+      - {name: lane-3, primitive: box, w: 0.12, d: $length_m, h: 0.004, x: "-$width_m / 2 + $shoulder_left_m + 3 * ($width_m - $shoulder_left_m - $shoulder_right_m) / $lanes",
+         z: 0.022, color: $line_color, collide: false, when: "$lanes >= 4 and $lane_line == 'solid'"}
+      - {name: lane-1-dash, primitive: box, w: 0.12, d: 8, h: 0.004, x: "-$width_m / 2 + $shoulder_left_m + ($width_m - $shoulder_left_m - $shoulder_right_m) / $lanes", y: -$length_m / 2 + 4,
+         z: 0.022, color: $line_color, collide: false, when: "$lanes >= 2 and $lane_line == 'dashed'", repeat: {count: "floor(($length_m - 8) / 20) + 1", step_y: 20}}
+      - {name: lane-2-dash, primitive: box, w: 0.12, d: 8, h: 0.004, x: "-$width_m / 2 + $shoulder_left_m + 2 * ($width_m - $shoulder_left_m - $shoulder_right_m) / $lanes", y: -$length_m / 2 + 4,
+         z: 0.022, color: $line_color, collide: false, when: "$lanes >= 3 and $lane_line == 'dashed'", repeat: {count: "floor(($length_m - 8) / 20) + 1", step_y: 20}}
+      - {name: lane-3-dash, primitive: box, w: 0.12, d: 8, h: 0.004, x: "-$width_m / 2 + $shoulder_left_m + 3 * ($width_m - $shoulder_left_m - $shoulder_right_m) / $lanes", y: -$length_m / 2 + 4,
+         z: 0.022, color: $line_color, collide: false, when: "$lanes >= 4 and $lane_line == 'dashed'", repeat: {count: "floor(($length_m - 8) / 20) + 1", step_y: 20}}
 
   - id: road_marking
     extends: object
@@ -412,6 +425,20 @@ types:
       - {name: post-right, primitive: box, w: 0.1, d: 0.1, h: $height_m, x: $width_m / 2 - 0.05}
       - {name: post-middle, primitive: box, w: 0.1, d: 0.1, h: $height_m, when: $width_m > 4}
       - {name: rail, primitive: box, w: $width_m, d: 0.06, h: 0.3, y: 0.08, z: $height_m - 0.2}
+
+  - id: concrete_median_barrier
+    extends: object
+    label: 中央分離帯
+    description: A concrete median barrier along its x, with collision.
+    id_prefix: median
+    params:
+      color: {kind: color, label: 色, default: "#a9aaac", level: placement}
+      snap: {kind: bool, label: 吸い付き, default: true, level: item}
+      width_m: {kind: length, label: 長さ, default: 100, min: 1, max: 2000, level: placement}
+      height_m: {kind: length, label: 高さ, default: 0.8, min: 0.3, max: 1.5, level: placement}
+      depth_m: {kind: length, label: 厚さ, default: 0.6, min: 0.2, max: 2, level: placement}
+    shapes:
+      - {name: body, primitive: box, w: $width_m, d: $depth_m, h: $height_m}
 
   # A pole and a plate facing +y; a round plate is a disc (a cylinder tipped on its side).
   - id: road_sign

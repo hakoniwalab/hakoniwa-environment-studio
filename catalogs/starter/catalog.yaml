@@ -87,6 +87,13 @@ items:
     type: road_surface
     name: 道路（2 車線・幅 7 m）
 
+  - id: highway-three-lane-road
+    type: road_surface
+    name: 道路（高速・3車線）
+    params: {width_m: 13.75, length_m: 1000, lanes: 3, lane_line: dashed, shoulder_left_m: 2.5,
+             shoulder_right_m: 0.75, direction: one_way_plus_y, lane_kinds: "driving,driving,passing",
+             speed_limit_kmh: 100}
+
   - id: road-path
     type: road_path
     name: 道路（中心線・地図から）
@@ -110,6 +117,10 @@ items:
   - id: guard-rail
     type: guard_rail
     name: ガードレール（4 m）
+
+  - id: concrete-median-barrier
+    type: concrete_median_barrier
+    name: 中央分離帯
 
   - id: stop-sign
     type: road_sign

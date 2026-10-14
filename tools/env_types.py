@@ -61,7 +61,9 @@ TYPE_KEYS = {"id", "label", "description", "abstract", "extends", "id_prefix", "
              "envelope", "terrain"}
 PARAM_KEYS = {"kind", "level", "label", "description", "unit", "default", "min", "max", "values"}
 SHAPE_KEYS = {"name", "primitive", "w", "d", "h", "x", "y", "z", "roll", "pitch", "yaw", "color", "collide",
-              "visible", "when", "points", "polygons", "holes"}
+              "visible", "when", "points", "polygons", "holes", "repeat"}
+REPEAT_KEYS = {"count", "step_x", "step_y", "step_z"}
+MAX_SHAPE_REPEATS = 500
 BEHAVIOR_KEYS = {"surface", "snap", "friction", "layer", "locked"}
 # Largest size or position accepted, in metres (a sanity bound).
 MAX_M = 100_000.0
@@ -76,6 +78,7 @@ MAX_M = 100_000.0
 _PARAM = re.compile(r"\$([a-z_][a-z0-9_]*)")
 _FUNCTIONS = {
     "min": min, "max": max, "abs": abs, "sqrt": math.sqrt,
+    "floor": math.floor,
     # Trigonometry in degrees, as the rest of the contract.
     "sin": lambda deg: math.sin(math.radians(deg)), "cos": lambda deg: math.cos(math.radians(deg)),
     "tan": lambda deg: math.tan(math.radians(deg)),
@@ -622,7 +625,21 @@ def _compiled(env_type: EnvType, where: str) -> EnvType:
         for key in ("primitive", "h", *(("w", "d") if "points" not in shape and "polygons" not in shape else ())):
             if key not in shape:
                 raise fail(f"{path}.{key}", "missing_field", f"a shape needs {key}")
-        shapes.append({key: compiled(value, f"{path}.{key}") for key, value in shape.items()})
+        repeat = shape.get("repeat")
+        if repeat is not None:
+            repeat = mapping(repeat, f"{path}.repeat")
+            only(repeat, REPEAT_KEYS, f"{path}.repeat")
+            if "count" not in repeat:
+                raise fail(f"{path}.repeat.count", "missing_field", "repeat needs count")
+        compiled_shape = {
+            key: compiled(value, f"{path}.{key}")
+            for key, value in shape.items() if key != "repeat"
+        }
+        if repeat is not None:
+            compiled_shape["repeat"] = {
+                key: compiled(value, f"{path}.repeat.{key}") for key, value in repeat.items()
+            }
+        shapes.append(compiled_shape)
     names = [shape.get("name") for shape in shapes if "name" in shape]
     if len(names) != len(set(names)):
         raise fail(f"{where}.shapes", "duplicate_id", "shape names must be unique", actual=names)
@@ -711,11 +728,40 @@ def _resolve_shape(env_type: EnvType, params: dict, path: str) -> Shape:
     (x = 0), an upright cylinder filling each bend (<name>-joint-1, ...); x
     moves it sideways, to the right of the line's direction.
     """
-    solids = []
+    expanded_shapes = []
     for index, shape in enumerate(env_type.shapes):
         where = f"{path} ({env_type.id}.shapes[{index}])"
         if "when" in shape and not evaluate(shape["when"], params, f"{where}.when"):
             continue
+        repeat = shape.get("repeat")
+        if repeat is None:
+            expanded_shapes.append((index, shape))
+            continue
+        count = evaluate(repeat["count"], params, f"{where}.repeat.count")
+        if isinstance(count, bool) or not isinstance(count, (int, float)) or not math.isfinite(count) or int(count) != count:
+            raise fail(f"{where}.repeat.count", "invalid_shape", "must be a whole number", expected="integer", actual=count)
+        count = int(count)
+        if not 0 <= count <= MAX_SHAPE_REPEATS:
+            raise fail(f"{where}.repeat.count", "out_of_range", f"must be between 0 and {MAX_SHAPE_REPEATS}",
+                       expected=f"0..{MAX_SHAPE_REPEATS}", actual=count)
+        steps = {
+            axis: _number(evaluate(repeat.get(f"step_{axis}", 0), params, f"{where}.repeat.step_{axis}"),
+                          f"{where}.repeat.step_{axis}")
+            for axis in ("x", "y", "z")
+        }
+        base_name = str(shape.get("name", f"solid{index}"))
+        for number_ in range(count):
+            instance = {key: value for key, value in shape.items() if key != "repeat"}
+            instance["name"] = f"{base_name}-{number_ + 1}"
+            for axis in ("x", "y", "z"):
+                default = evaluate(shape["h"], params, f"{where}.h") / 2 if axis == "z" else 0
+                base = evaluate(shape.get(axis, default), params, f"{where}.{axis}")
+                instance[axis] = _number(base + number_ * steps[axis], f"{where}.{axis}")
+            expanded_shapes.append((index, instance))
+
+    solids = []
+    for index, shape in expanded_shapes:
+        where = f"{path} ({env_type.id}.shapes[{index}])"
         primitive = evaluate(shape["primitive"], params, f"{where}.primitive")
         if primitive not in PRIMITIVES:
             raise fail(f"{where}.primitive", "invalid_shape", "unknown primitive", expected=sorted(PRIMITIVES), actual=primitive)
