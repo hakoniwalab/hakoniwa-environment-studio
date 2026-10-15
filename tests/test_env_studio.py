@@ -482,6 +482,17 @@ class HeavyWorkTest(unittest.TestCase):
         self.assertTrue(env_studio.preview_glb(self.body()).startswith(b"glTF"))
         self.assertEqual(env_studio.validate_recipe(self.body())["stage"], "physics")
 
+    def test_pages_do_not_cancel_each_other(self):
+        # Two pages ask at once (2026-10-15: a second browser made the first page's GLB fail).
+        results = {}
+        threads = [threading.Thread(target=lambda name=name: results.__setitem__(
+            name, env_studio.preview_glb(self.body(), client=name))) for name in ("page-a", "page-b")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertTrue(all(value.startswith(b"glTF") for value in results.values()))
+
     def test_a_validation_over_the_time_limit_is_stopped_and_reported(self):
         with mock.patch.object(env_studio, "VALIDATE_LIMIT_S", 0.001):
             result = env_studio.validate_recipe(self.body())

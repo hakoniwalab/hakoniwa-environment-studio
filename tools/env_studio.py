@@ -543,15 +543,18 @@ class Superseded(StudioError):
     """A newer request of the same kind replaced this one."""
 
 
-def _in_worker(kind: str, body: object, timeout: float | None = None) -> bytes | None:
+def _in_worker(kind: str, body: object, timeout: float | None = None, client: str | None = None) -> bytes | None:
     """Run `env_studio.py --worker <kind>` on the request body; its stdout, or None
-    when the time limit was reached (the worker is stopped)."""
+    when the time limit was reached (the worker is stopped). A newer request of the
+    same kind from the same page (`client`, the X-Studio-Client header) cancels the
+    older one; requests of other pages, or without the header, are never cancelled."""
     command = [sys.executable, str(Path(__file__).resolve()), "--worker", kind]
     process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, cwd=ROOT)
+    key = (kind, client) if client else (kind, f"pid-{process.pid}")
     with _WORKERS_LOCK:
-        older = _WORKERS.get(kind)
-        _WORKERS[kind] = process
+        older = _WORKERS.get(key)
+        _WORKERS[key] = process
     if older is not None and older.poll() is None:
         older.kill()
     try:
@@ -562,8 +565,8 @@ def _in_worker(kind: str, body: object, timeout: float | None = None) -> bytes |
         return None
     finally:
         with _WORKERS_LOCK:
-            if _WORKERS.get(kind) is process:
-                del _WORKERS[kind]
+            if _WORKERS.get(key) is process:
+                del _WORKERS[key]
     if process.returncode in (-signal.SIGKILL, -signal.SIGTERM) or process.returncode == 137:
         raise Superseded("a newer request replaced this one")
     if process.returncode != 0:
@@ -587,12 +590,12 @@ def worker_main(kind: str) -> int:
     return 0
 
 
-def preview_glb(body: object) -> bytes:
-    return _in_worker("glb", body)
+def preview_glb(body: object, client: str | None = None) -> bytes:
+    return _in_worker("glb", body, client=client)
 
 
-def validate_recipe(body: object) -> dict:
-    out = _in_worker("validate", body, timeout=VALIDATE_LIMIT_S)
+def validate_recipe(body: object, client: str | None = None) -> dict:
+    out = _in_worker("validate", body, timeout=VALIDATE_LIMIT_S, client=client)
     if out is None:
         return {"ok": True, "stage": "schema", "diagnostics": [
             {"severity": "warning", "path": "", "code": "physics_timeout",
@@ -1286,12 +1289,13 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("DELETE", ("recipes", "*"), lambda self, parts: self._json(delete_recipe(parts[1]))),
         ("POST", ("resolve-many",), lambda self, _: self._json(resolve_many_json(self._body()))),
         ("POST", ("resolve",), lambda self, _: self._json(resolve_json(self._body()))),
-        ("POST", ("validate",), lambda self, _: self._json(validate_recipe(self._body()))),
+        ("POST", ("validate",), lambda self, _: self._json(validate_recipe(self._body(), self.headers.get("X-Studio-Client")))),
         ("POST", ("terrain",), lambda self, _: self._json(terrain_json(self._body()))),
         ("POST", ("poses",), lambda self, _: self._json(preview_poses(self._body()))),
         ("POST", ("explode",), lambda self, _: self._json(explode_layer(self._body()))),
         ("POST", ("layer-outlines",), lambda self, _: self._json(layer_outlines(self._body()))),
-        ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body()), "model/gltf-binary")),
+        ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body(), self.headers.get("X-Studio-Client")),
+                                                      "model/gltf-binary")),
     )
 
     def _query(self, name: str) -> str | None:

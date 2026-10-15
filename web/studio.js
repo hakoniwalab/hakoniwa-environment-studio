@@ -6,7 +6,7 @@
 // parameters change the shape is resolved by the server too (POST
 // /api/resolve, cached). Metres, ENU, origin at the environment's centre.
 
-import { $, api, el, warnIfServerIsOld } from "./dom.js";
+import { $, api, CLIENT_ID, el, warnIfServerIsOld } from "./dom.js";
 import { History } from "./history.js";
 import { createInspector } from "./inspector.js";
 import { Parts } from "./parts.js";
@@ -338,7 +338,8 @@ async function refreshPreview() {
       if (state.view3d.setPoses(poses)) return;
     }
     const response = await fetch("/api/glb", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(recipeBody()),
+      method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Client": CLIENT_ID },
+      body: JSON.stringify(recipeBody()),
     });
     if (!response.ok) throw new Error((await response.json()).error);
     const buffer = await response.arrayBuffer();
