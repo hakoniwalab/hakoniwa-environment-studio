@@ -170,6 +170,19 @@ class MjcfTest(unittest.TestCase):
         self.assertEqual(geom, "terrain")
         self.assertAlmostEqual(height, 0.0, places=6)
 
+    def test_ribbon_plan_outline_is_its_edges(self):
+        # The 2-D plan draws a road_ribbon from its file's outline (it showed nothing before).
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            ribbon.write_text(json.dumps({"schema": "hakoniwa.road-ribbon/v1", "sections": [
+                {"s_m": s, "points_m": [[-2, s, 0.1 * s], [0, s, 0.1 * s], [2, s, 0.1 * s]]} for s in range(0, 11)]}),
+                encoding="utf-8")
+            plan = env_road_ribbon.plan_outline(ribbon)
+        self.assertEqual(len(plan["outline"]), 22)                         # left edge out, right edge back
+        self.assertEqual(plan["outline"][0], [-2, 0]); self.assertEqual(plan["outline"][10], [-2, 10])
+        self.assertEqual(plan["outline"][11], [2, 10]); self.assertEqual(plan["outline"][-1], [2, 0])
+        self.assertEqual(plan["z_range_m"], [0, 1.0])
+
     def test_road_ribbon_enables_multiccd_only_for_that_representation(self):
         ordinary = ET.fromstring(env_generate.environment_mjcf(load("car-test-course")))
         self.assertIsNone(ordinary.find("./option/flag[@multiccd='enable']"))

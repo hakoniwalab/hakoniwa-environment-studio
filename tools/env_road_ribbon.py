@@ -167,3 +167,32 @@ def _valid_lane(value, boundary_count):
 
 def _add(point, delta, lift):
     return point[0] + delta[0], point[1] + delta[1], point[2] + delta[2] + lift
+
+
+PLAN_OUTLINE_POINTS = 400
+_PLAN_CACHE: dict[tuple[str, float], dict] = {}
+
+
+def plan_outline(path: Path) -> dict:
+    """The ribbon seen from above for a 2-D plan: one polygon (the left edge forward, the
+    right edge back, thinned to PLAN_OUTLINE_POINTS) and its height range, in the object's
+    frame. Read from the sections' end points only, so large networks stay quick; kept
+    until the file changes."""
+    path = Path(path)
+    key = (str(path.resolve()), path.stat().st_mtime)
+    if key in _PLAN_CACHE:
+        return _PLAN_CACHE[key]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    sections = [section["points_m"] for section in data.get("sections", []) if len(section.get("points_m", [])) >= 2]
+    if len(sections) < 2:
+        raise ValueError(f"{path.name}: a ribbon needs two sections of two points")
+    left = [points[0] for points in sections]
+    right = [points[-1] for points in sections]
+    step = max(1, math.ceil(len(left) / (PLAN_OUTLINE_POINTS // 2)))
+    keep = lambda points: points[::step] + ([points[-1]] if (len(points) - 1) % step else [])
+    ring = keep(left) + keep(right)[::-1]
+    heights = [point[2] for points in sections for point in (points[0], points[-1])]
+    result = {"outline": [[round(x, 3), round(y, 3)] for x, y, _ in ring],
+              "z_range_m": [round(min(heights), 6), round(max(heights), 6)]}
+    _PLAN_CACHE[key] = result
+    return result

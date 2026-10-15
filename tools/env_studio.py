@@ -69,6 +69,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
+import env_road_ribbon  # noqa: E402
 import env_catalog_items  # noqa: E402
 import env_citygml  # noqa: E402
 import env_envsim  # noqa: E402
@@ -179,6 +180,27 @@ def _catalog(body: dict) -> env_schema.Catalog:
     return env_schema.load_catalog(_catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID))
 
 
+def _shape_for_plan(item, params: dict, shape) -> dict:
+    """A shape for the browser's plan and checks. A road_ribbon's geometry is in its
+    ribbon file, which the catalog item does not have: give the plan that file's outline
+    (relative paths are beside the Recipes, as for the 3D view)."""
+    data = shape.as_json()
+    if item.type.id != "road_ribbon" or not str(params.get("ribbon_file") or "").strip():
+        return data
+    ribbon = Path(str(params["ribbon_file"])).expanduser()
+    if not ribbon.is_absolute():
+        ribbon = (USER_RECIPES.resolve() / ribbon).resolve()
+    try:
+        plan = env_road_ribbon.plan_outline(ribbon)
+    except (OSError, ValueError, KeyError) as exc:
+        raise StudioError(f"road ribbon {ribbon.name}: {exc}") from exc
+    solid = {"name": "plan-outline", "primitive": "convex", "width_m": 0, "depth_m": 0,
+             "height_m": round(plan["z_range_m"][1] - plan["z_range_m"][0], 6), "x_m": 0, "y_m": 0, "z_m": 0,
+             "roll_deg": 0, "pitch_deg": 0, "yaw_deg": 0, "color": params.get("color", "#444444"),
+             "collide": True, "visible": True, **plan}
+    return {**data, "solids": [solid]}
+
+
 def resolve_json(body: object) -> dict:
     """The shape of an item with a placement's parameters (the browser asks when
     a parameter that changes the shape, such as a gate's opening, is changed)."""
@@ -188,7 +210,7 @@ def resolve_json(body: object) -> dict:
     if item is None or item.shape is None:
         raise StudioError(f"no object item {body.get('item')!r} in the catalog", HTTPStatus.NOT_FOUND)
     params, shape = env_schema.resolve_placement(item, body.get("params") or {}, "params")
-    return {"item": item.id, "params": params, **shape.as_json()}
+    return {"item": item.id, "params": params, **_shape_for_plan(item, params, shape)}
 
 
 def resolve_many_json(body: object) -> dict:
@@ -207,7 +229,7 @@ def resolve_many_json(body: object) -> dict:
             if item is None or item.shape is None:
                 raise StudioError(f"no object item {placement.get('item')!r} in the catalog")
             params, shape = env_schema.resolve_placement(item, placement.get("params") or {}, "params")
-            shapes.append({"item": item.id, "params": params, **shape.as_json()})
+            shapes.append({"item": item.id, "params": params, **_shape_for_plan(item, params, shape)})
         except (StudioError, DiagnosticError) as exc:
             shapes.append({"error": str(exc)})
     return {"shapes": shapes}
