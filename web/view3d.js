@@ -95,13 +95,22 @@ export class View3D {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Shadows: without them a road 10 m up (an overpass) looked laid on the ground.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.append(this.renderer.domElement);
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xcfe0ee); // sky
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6f7a66, 1.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-    sun.position.set(-30, 60, 20);
-    this.scene.add(sun);
+    // A softer sky and a stronger sun from the north-east, high: the shadows fall toward
+    // the default view (from the south-west) and are dark enough to read.
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6f7a66, 0.9));
+    const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(4096, 4096);
+    sun.shadow.bias = -0.0005;
+    sun.shadow.normalBias = 0.05;
+    this.scene.add(sun, sun.target);
+    this.sun = sun;
     this.model = new THREE.Group();
     this.scene.add(this.model);
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 5000);
@@ -256,6 +265,11 @@ export class View3D {
     gltf.scene.traverse((node) => {
       if (node.isMesh) node.material = Array.isArray(node.material) ? node.material.map((m) => m.clone()) : node.material.clone();
       if (node.isMesh) for (const material of [node.material].flat()) applyDecal(material);
+      if (node.isMesh) {
+        node.castShadow = node.receiveShadow = true;
+        // Roads are top faces only: cast from both sides (the default casts from back faces).
+        for (const material of [node.material].flat()) material.shadowSide = THREE.DoubleSide;
+      }
     });
     dispose(this.model); // the previous environment's GPU buffers, materials and textures
     this.model.clear();
@@ -268,6 +282,7 @@ export class View3D {
     });
     const resized = !this.size || this.size.east !== size.east || this.size.north !== size.north;
     this.size = { ...size };
+    this.fitShadow();
     this.applyHighlight();
     if (resized) this.overview();
   }
@@ -314,6 +329,16 @@ export class View3D {
       node.material.emissive?.copy(selected ? HIGHLIGHT : BLACK);
       if (node.material.emissiveIntensity !== undefined) node.material.emissiveIntensity = selected ? 0.45 : 0;
     });
+  }
+
+  // The sun's shadow box covers the whole environment (Town04, 1.1 km: about 30 cm a texel).
+  fitShadow() {
+    const half = this.span() / 2 + 20;
+    const camera = this.sun.shadow.camera;
+    Object.assign(camera, { left: -half, right: half, top: half, bottom: -half, near: 1, far: half * 4 });
+    camera.updateProjectionMatrix();
+    this.sun.target.position.set(0, 0, 0);
+    this.sun.position.set(half * 0.5, half, -half * 0.8);
   }
 
   span() {
