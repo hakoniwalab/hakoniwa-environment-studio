@@ -14,10 +14,14 @@ export function el(tag, attributes = {}, ...children) {
   return node;
 }
 
+// This page's id: the server cancels only this page's older heavy request (a GLB, a
+// MuJoCo check) when it asks again, never another page's.
+export const CLIENT_ID = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+
 export async function api(method, path, body) {
   const response = await fetch(`/api/${path}`, {
     method,
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers: { "X-Studio-Client": CLIENT_ID, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await response.json();

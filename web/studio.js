@@ -6,7 +6,7 @@
 // parameters change the shape is resolved by the server too (POST
 // /api/resolve, cached). Metres, ENU, origin at the environment's centre.
 
-import { $, api, el, warnIfServerIsOld } from "./dom.js";
+import { $, api, CLIENT_ID, el, warnIfServerIsOld } from "./dom.js";
 import { History } from "./history.js";
 import { createInspector } from "./inspector.js";
 import { Parts } from "./parts.js";
@@ -337,8 +337,10 @@ async function refreshPreview() {
       if (version !== state.previewVersion) return;
       if (state.view3d.setPoses(poses)) return;
     }
+    setBusy3d(true);
     const response = await fetch("/api/glb", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(recipeBody()),
+      method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Client": CLIENT_ID },
+      body: JSON.stringify(recipeBody()),
     });
     if (!response.ok) throw new Error((await response.json()).error);
     const buffer = await response.arrayBuffer();
@@ -349,7 +351,21 @@ async function refreshPreview() {
     state.view3d.setSelected(state.selection);
   } catch (error) {
     setStatus(error.message, "error");
+  } finally {
+    if (version === state.previewVersion) setBusy3d(false);
   }
+}
+
+// While the GLB is made and sent (about a minute for a large environment), say so over the
+// 3D view: without it, the previous environment stayed on screen as if nothing happened.
+function setBusy3d(busy) {
+  const host = $("#view3d");
+  let note = host.querySelector(".view3d-busy");
+  if (busy && !note) {
+    note = el("p", { class: "view3d-busy" }, "⏳ 3D を作っています…（大きな環境は 1 分ほどかかります）");
+    host.append(note);
+  }
+  if (!busy && note) note.remove();
 }
 
 // --- Problems: the quick check, then the server's (schema and MuJoCo) -------------
@@ -707,16 +723,22 @@ async function importSelected() {
     }
   }
   const repository = $("#import-source").value;
-  $("#import-message").textContent = `${id} を取り込んでいます…`;
+  // Each step says what it is doing: a large environment (CARLA Town04, 737 parts and
+  // 734 files) takes a while at each, and the page looked stuck.
+  $("#import-message").textContent = `⏳ ${id} を取り込んでいます…（ファイルをコピーしています）`;
+  setStatus(`⏳ ${id} を取り込んでいます…`, "busy");
   $("#import-selected").disabled = true;
   try {
     const result = await api("POST", "imports", { repository, recipe: chosen.value, id, overwrite });
+    $("#import-message").textContent = `⏳ ${result.id} を開いています…`;
     await loadRecipes();
     $("#import-dialog").close();
+    setStatus(`⏳ ${result.id} を開いています…（上面図を準備しています。3D はそのあと）`, "busy");
     await openRecipe(result.id);
     setStatus(`${repository} から ${result.id} を取り込みました（資産 ${result.copied_files} 件）`, "ok");
   } catch (error) {
     $("#import-message").textContent = error.message;
+    setStatus(error.message, "error");
     $("#import-selected").disabled = false;
   }
 }
@@ -934,6 +956,7 @@ async function loadRecipes() {
 }
 
 async function openRecipe(id) {
+  setStatus(`⏳ ${id} を開いています…（上面図を準備しています。3D はそのあと）`, "busy");
   const loaded = await api("GET", `recipes/${id}`);
   loaded.recipe.objects = loaded.recipe.objects || [];
   await loadCatalog(loaded.catalog_id || state.catalogId);

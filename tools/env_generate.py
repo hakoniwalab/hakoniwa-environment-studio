@@ -48,7 +48,7 @@ import env_terrain  # noqa: E402
 from env_diagnostics import DiagnosticError  # noqa: E402
 from env_types import Solid, rotation_matrix  # noqa: E402
 
-GENERATOR_VERSION = "1"
+GENERATOR_VERSION = "3"
 CIRCLE_SEGMENTS = env_schema.CIRCLE_SEGMENTS
 BODY_PREFIX = "object:"
 GEOM_PREFIX = "geom:"
@@ -271,12 +271,17 @@ class _GlbBuilder:
         return len(self.gltf["accessors"]) - 1
 
     def material(self, color: str) -> int:
+        """A plain material. "<colour>@<n>" marks a decal drawn over a surface (road lane
+        faces 1, road marks 2): the viewer pulls it toward the camera (polygonOffset) instead
+        of relying on the few millimetres it is lifted, which flickered from afar."""
         if color not in self.material_ids:
-            r, g, b = (srgb_to_linear(value) for value in hex_rgb(color))
-            self.gltf["materials"].append({
-                "name": color,
-                "pbrMetallicRoughness": {"baseColorFactor": [r, g, b, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.85},
-            })
+            base, _, decal = color.partition("@")
+            r, g, b = (srgb_to_linear(value) for value in hex_rgb(base))
+            entry = {"name": color,
+                     "pbrMetallicRoughness": {"baseColorFactor": [r, g, b, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.85}}
+            if decal:
+                entry["extras"] = {"decal": int(decal)}
+            self.gltf["materials"].append(entry)
             self.material_ids[color] = len(self.gltf["materials"]) - 1
         return self.material_ids[color]
 
@@ -511,6 +516,85 @@ def asset_scale(obj: env_schema.EnvObject) -> tuple[float, float, float]:
     return tuple(float(obj.params.get(key, 1.0)) for key in ("scale_x", "scale_y", "scale_z"))
 
 
+def ribbon_top_pieces(solids, *, min_up: float = 0.1) -> list:
+    """A road_ribbon's look: one mesh per colour, its solids' upward faces only, shared vertices.
+
+    The ribbon is many thin convex columns (for MuJoCo's contacts); drawn one primitive per
+    column with all six sides, a large network was a 1 GB GLB of 850,000 primitives (CARLA
+    Town04). From above only the top faces show: keep the triangles facing up, merge the
+    columns of one colour, and share vertices that coincide (same position and normal).
+    """
+    merged: dict[str, tuple[list, list, list, dict]] = {}
+    for solid in solids:
+        if not solid.visible:
+            continue
+        positions, normals, indices = solid_mesh(solid)
+        decal = 1 if solid.name.startswith("lane-") else 2 if solid.name.startswith("mark-") else 0
+        key = f"{solid.color}@{decal}" if decal else solid.color
+        out_positions, out_normals, out_indices, index_of = merged.setdefault(key, ([], [], [], {}))
+        for t in range(0, len(indices), 3):
+            corners = indices[t:t + 3]
+            if sum(normals[i][2] for i in corners) / 3 < min_up:
+                continue  # a side or the bottom: not seen from above
+            for i in corners:
+                key = (round(positions[i][0], 6), round(positions[i][1], 6), round(positions[i][2], 6),
+                       round(normals[i][0], 3), round(normals[i][1], 3), round(normals[i][2], 3))
+                if key not in index_of:
+                    index_of[key] = len(out_positions)
+                    out_positions.append(positions[i])
+                    out_normals.append(normals[i])
+                out_indices.append(index_of[key])
+    sides = _ribbon_edge_sides(solids)
+    if sides is not None:
+        positions, normals, indices = sides
+        merged[RIBBON_SIDE_COLOR] = (positions, normals, indices, {})
+    return [((positions, normals, indices), color)
+            for color, (positions, normals, indices, _) in merged.items() if indices]
+
+
+RIBBON_SIDE_COLOR = "#2f3134"
+
+
+def _ribbon_edge_sides(solids):
+    """The road's two outer edges, as deep as the road surface is thick: the top faces alone
+    looked flat. Only the surface's own sides (no wall down to the ground: OpenDRIVE has no
+    such structure). Each column is top (start-left, start-right, end-right, end-left), then
+    the same corners at its bottom."""
+    slabs = [solid for solid in solids if solid.name.startswith("slab-")]
+    if not slabs:
+        return None
+    positions, normals, indices = [], [], []
+    index_of: dict[tuple, int] = {}
+
+    def vertex(point, outward, side):
+        # Shared with the neighbouring column on the same side; its normal is the average
+        # (smooth along curves), so the sides add about half the vertices of separate quads.
+        key = (side, round(point[0], 6), round(point[1], 6), round(point[2], 6))
+        if key not in index_of:
+            index_of[key] = len(positions)
+            positions.append(point)
+            normals.append([0.0, 0.0, 0.0])
+        normal = normals[index_of[key]]
+        for axis in range(3):
+            normal[axis] += outward[axis]
+        return index_of[key]
+
+    def quad(a_top, b_top, b_bottom, a_bottom, outward, side):
+        a, b, c, d = (vertex(point, outward, side) for point in (a_top, b_top, b_bottom, a_bottom))
+        indices.extend((a, c, b, a, d, c))
+
+    for slab in slabs:
+        left0, right0, right1, left1, left0b, right0b, right1b, left1b = slab.vertices[:8]
+        dx, dy = left1[0] - left0[0], left1[1] - left0[1]
+        size = math.hypot(dx, dy) or 1.0
+        quad(left1, left0, left0b, left1b, (-dy / size, dx / size, 0.0), "left")     # wound to face outward
+        quad(right0, right1, right1b, right0b, (dy / size, -dx / size, 0.0), "right")
+    for normal in normals:
+        size = math.sqrt(sum(value * value for value in normal)) or 1.0
+        normal[:] = [value / size for value in normal]
+    return (positions, [tuple(normal) for normal in normals], indices) if indices else None
+
+
 def environment_glb(recipe: env_schema.Recipe) -> bytes:
     builder = _GlbBuilder()
     terrain = recipe.terrain
@@ -532,7 +616,10 @@ def environment_glb(recipe: env_schema.Recipe) -> bytes:
                                  primitives=builder.asset_primitives(visual), scale=(sx, sz, sy))
             builder.add_lights(index, builder.asset_lights(visual))  # a part's own lights (a stall's lamp)
             continue
-        pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
+        if obj.type == "road_ribbon":
+            pieces = ribbon_top_pieces(obj.solids)
+        else:
+            pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
         builder.node(obj.id, pieces, *placement, extras, tilt=tilt)
     return builder.glb()
 
@@ -786,8 +873,11 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
             ET.SubElement(body, "inertial", {"pos": "0 0 0", "mass": "1", "diaginertia": "1 1 1"})
         friction = _numbers((obj.shape.friction, 0.005, 0.0001))
         for solid in obj.solids:
-            if (validation or obj.visual is not None) and not solid.collide:
-                continue  # its GLB is its look (a layer's outlines only draw it on the plan)
+            if (validation or obj.visual is not None or obj.type == "road_ribbon") and not solid.collide:
+                # Its GLB is its look (a layer's outlines only draw it on the plan). A road_ribbon's
+                # paint and lane-kind faces are drawn by the GLB too: as MuJoCo geoms they only made
+                # large road networks slow to compile (CARLA Town04: a 528 MB MJCF).
+                continue
             attributes = {"name": geom_name(obj.id, solid.name), "rgba": _numbers((*hex_rgb(solid.color), 1.0)),
                           "pos": _numbers((solid.x_m, solid.y_m, solid.z_m)),
                           "quat": _numbers(quaternion(solid.roll_deg, solid.pitch_deg, solid.yaw_deg)),

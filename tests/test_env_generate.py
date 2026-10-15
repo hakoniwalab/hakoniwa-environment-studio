@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import env_generate  # noqa: E402
+import env_road_ribbon  # noqa: E402
 import env_schema  # noqa: E402
 
 try:
@@ -90,6 +91,57 @@ class GlbTest(unittest.TestCase):
 
 @unittest.skipIf(mujoco is None, "MuJoCo is not installed")
 class MjcfTest(unittest.TestCase):
+    def test_rich_ribbon_draws_double_colored_marks_and_lane_kinds_without_collision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            ribbon.write_text(json.dumps({
+                "schema": "hakoniwa.road-ribbon/v1",
+                "sections": [
+                    {"s_m": 0, "points_m": [[-3, 0, 0], [0, 0, 0], [3, 0, 0]]},
+                    {"s_m": 5, "points_m": [[-3, 5, 0], [0, 5, 0], [3, 5, 0]]},
+                ],
+                "lanes": [
+                    {"id": 1, "kind": "sidewalk", "left_boundary": 0, "right_boundary": 1,
+                     "speed_limit_kmh": 0},
+                    {"id": -1, "kind": "biking", "left_boundary": 1, "right_boundary": 2,
+                     "speed_limit_kmh": 20},
+                ],
+                "markings": [{"boundary": 1, "start_s_m": 0, "end_s_m": 5, "color": "yellow",
+                              "lines": [
+                                  {"pattern": "solid", "t_offset_m": -0.2, "width_m": 0.2,
+                                   "length_m": 4, "space_m": 0, "s_offset_m": 0},
+                                  {"pattern": "dashed", "t_offset_m": 0.2, "width_m": 0.1,
+                                   "length_m": 4, "space_m": 4, "s_offset_m": 0},
+                              ]}],
+            }), encoding="utf-8")
+            shape = env_road_ribbon.load(ribbon, thickness_m=0.02, color="#444444",
+                                         line_color="#ffffff")
+        by_prefix = lambda prefix: [solid for solid in shape.solids if solid.name.startswith(prefix)]
+        self.assertEqual(len(by_prefix("lane-")), 2)
+        self.assertEqual(len(by_prefix("mark-")), 2)
+        self.assertTrue(all(not solid.collide for solid in by_prefix("lane-") + by_prefix("mark-")))
+        self.assertTrue(all(solid.color == "#f1c232" for solid in by_prefix("mark-")))
+        for mark in by_prefix("mark-"):   # a flat stripe of the line's width, not a vertical sliver
+            top = mark.vertices[:4]
+            self.assertAlmostEqual(max(p[2] for p in top) - min(p[2] for p in top), 0.0, places=9)
+            width = math.dist(top[0], top[1])
+            self.assertTrue(any(abs(width - w) < 1e-9 for w in (0.2, 0.1)), width)
+
+        # Its look: one mesh per colour, only the faces seen from above, shared vertices
+        # (a large network drawn per column was a 1 GB GLB of 850,000 primitives).
+        pieces = env_generate.ribbon_top_pieces(shape.solids)
+        colours = {solid.color for solid in shape.solids if solid.visible}
+        drawn = {color.split("@")[0] for _, color in pieces} - {env_generate.RIBBON_SIDE_COLOR}
+        self.assertEqual(sorted(drawn), sorted(colours))                  # decals carry "@<level>"
+        for (positions, normals, indices), color in pieces:
+            if color == env_generate.RIBBON_SIDE_COLOR:
+                continue                                                    # the outer edges' sides
+            self.assertTrue(all(normals[i][2] > 0.1 for i in indices))      # no inner sides or bottoms
+            self.assertLess(len(positions), len(indices))                     # vertices are shared
+        drawn = sum(len(indices) // 3 for (_, _, indices), color in pieces if color != env_generate.RIBBON_SIDE_COLOR)
+        whole = sum(len(env_generate.solid_mesh(solid)[2]) // 3 for solid in shape.solids if solid.visible)
+        self.assertLessEqual(drawn * 4, whole)                               # tops are 2 of 12 triangles
+
     def compile(self, recipe, **options):
         model = mujoco.MjModel.from_xml_string(env_generate.environment_mjcf(recipe, **options))
         data = mujoco.MjData(model)
@@ -121,6 +173,39 @@ class MjcfTest(unittest.TestCase):
         self.assertEqual(geom, "terrain")
         self.assertAlmostEqual(height, 0.0, places=6)
 
+    def test_ribbon_look_has_edge_sides_and_no_hidden_top(self):
+        # An elevated ribbon (z = 5 m) whose lanes cover the whole width: the slab's top is not
+        # drawn under the lane faces (it flickered), the lane faces are decals (drawn over the
+        # road), and the two outer edges get sides as deep as the surface (no wall to the ground).
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            ribbon.write_text(json.dumps({"schema": "hakoniwa.road-ribbon/v1", "sections": [
+                {"s_m": s, "points_m": [[-2, s, 5.0], [2, s, 5.0]]} for s in (0, 5, 10)],
+                "lanes": [{"id": -1, "kind": "driving", "left_boundary": 0, "right_boundary": 1,
+                           "speed_limit_kmh": 50}]}), encoding="utf-8")
+            shape = env_road_ribbon.load(ribbon, thickness_m=0.02, color="#444444", line_color="#ffffff")
+        self.assertFalse(any(solid.visible for solid in shape.solids if solid.name.startswith("slab-")))
+        self.assertTrue(all(solid.collide for solid in shape.solids if solid.name.startswith("slab-")))
+        pieces = dict((color, mesh) for mesh, color in env_generate.ribbon_top_pieces(shape.solids))
+        positions, normals, indices = pieces[env_generate.RIBBON_SIDE_COLOR]
+        self.assertEqual(len(indices) // 3, 2 * 2 * 2)                     # 2 columns x 2 edges x 2 triangles
+        self.assertAlmostEqual(min(p[2] for p in positions), 5.0 - 0.02)
+        self.assertTrue(any(key.endswith("@1") for key in pieces))          # the lane face is a decal
+        self.assertEqual(sorted({round(n[0]) for n in normals}), [-1, 1])  # facing out on both sides
+
+    def test_ribbon_plan_outline_is_its_edges(self):
+        # The 2-D plan draws a road_ribbon from its file's outline (it showed nothing before).
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            ribbon.write_text(json.dumps({"schema": "hakoniwa.road-ribbon/v1", "sections": [
+                {"s_m": s, "points_m": [[-2, s, 0.1 * s], [0, s, 0.1 * s], [2, s, 0.1 * s]]} for s in range(0, 11)]}),
+                encoding="utf-8")
+            plan = env_road_ribbon.plan_outline(ribbon)
+        self.assertEqual(len(plan["outline"]), 22)                         # left edge out, right edge back
+        self.assertEqual(plan["outline"][0], [-2, 0]); self.assertEqual(plan["outline"][10], [-2, 10])
+        self.assertEqual(plan["outline"][11], [2, 10]); self.assertEqual(plan["outline"][-1], [2, 0])
+        self.assertEqual(plan["z_range_m"], [0, 1.0])
+
     def test_road_ribbon_enables_multiccd_only_for_that_representation(self):
         ordinary = ET.fromstring(env_generate.environment_mjcf(load("car-test-course")))
         self.assertIsNone(ordinary.find("./option/flag[@multiccd='enable']"))
@@ -131,9 +216,16 @@ class MjcfTest(unittest.TestCase):
             ribbon.write_text(json.dumps({
                 "schema": "hakoniwa.road-ribbon/v1",
                 "sections": [
-                    {"s_m": 0, "points_m": [[-2, 0, 0], [2, 0, 0]]},
-                    {"s_m": 5, "points_m": [[-2, 5, 0], [2, 5, 0]]},
+                    {"s_m": 0, "points_m": [[-2, 0, 0], [0, 0, 0], [2, 0, 0]]},
+                    {"s_m": 5, "points_m": [[-2, 5, 0], [0, 5, 0], [2, 5, 0]]},
                 ],
+                "lanes": [
+                    {"id": 1, "kind": "driving", "left_boundary": 0, "right_boundary": 1, "speed_limit_kmh": 50},
+                    {"id": -1, "kind": "sidewalk", "left_boundary": 1, "right_boundary": 2, "speed_limit_kmh": 0},
+                ],
+                "markings": [{"boundary": 1, "start_s_m": 0, "end_s_m": 5, "color": "white",
+                              "lines": [{"pattern": "solid", "t_offset_m": 0, "width_m": 0.12,
+                                         "length_m": 0, "space_m": 0, "s_offset_m": 0}]}],
             }), encoding="utf-8")
             recipe_path = root / "ribbon.yaml"
             recipe_path.write_text(
@@ -155,6 +247,10 @@ class MjcfTest(unittest.TestCase):
                 env_generate.environment_mjcf(env_schema.load_recipe(recipe_path))
             )
             self.assertIsNotNone(model.find("./option/flag[@multiccd='enable']"))
+            # Its road marks are drawn by the GLB only: no collision-free geoms in the MJCF.
+            road_geoms = [geom for geom in model.iter("geom") if geom.get("name", "").startswith("geom:road/")]
+            self.assertTrue(road_geoms)
+            self.assertFalse([geom.get("name") for geom in road_geoms if geom.get("contype") == "0"])
 
     def test_geoms_are_where_the_solids_are(self):
         # Boxes, cylinders, tilted discs and a wedge (a mesh MuJoCo recentres).

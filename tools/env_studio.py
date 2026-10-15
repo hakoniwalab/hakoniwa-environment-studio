@@ -69,6 +69,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import env_generate  # noqa: E402
+import env_road_ribbon  # noqa: E402
 import env_catalog_items  # noqa: E402
 import env_citygml  # noqa: E402
 import env_envsim  # noqa: E402
@@ -179,6 +180,27 @@ def _catalog(body: dict) -> env_schema.Catalog:
     return env_schema.load_catalog(_catalog_path(body.get("catalog_id") or DEFAULT_CATALOG_ID))
 
 
+def _shape_for_plan(item, params: dict, shape) -> dict:
+    """A shape for the browser's plan and checks. A road_ribbon's geometry is in its
+    ribbon file, which the catalog item does not have: give the plan that file's outline
+    (relative paths are beside the Recipes, as for the 3D view)."""
+    data = shape.as_json()
+    if item.type.id != "road_ribbon" or not str(params.get("ribbon_file") or "").strip():
+        return data
+    ribbon = Path(str(params["ribbon_file"])).expanduser()
+    if not ribbon.is_absolute():
+        ribbon = (USER_RECIPES.resolve() / ribbon).resolve()
+    try:
+        plan = env_road_ribbon.plan_outline(ribbon)
+    except (OSError, ValueError, KeyError) as exc:
+        raise StudioError(f"road ribbon {ribbon.name}: {exc}") from exc
+    solid = {"name": "plan-outline", "primitive": "convex", "width_m": 0, "depth_m": 0,
+             "height_m": round(plan["z_range_m"][1] - plan["z_range_m"][0], 6), "x_m": 0, "y_m": 0, "z_m": 0,
+             "roll_deg": 0, "pitch_deg": 0, "yaw_deg": 0, "color": params.get("color", "#444444"),
+             "collide": True, "visible": True, **plan}
+    return {**data, "solids": [solid]}
+
+
 def resolve_json(body: object) -> dict:
     """The shape of an item with a placement's parameters (the browser asks when
     a parameter that changes the shape, such as a gate's opening, is changed)."""
@@ -188,7 +210,7 @@ def resolve_json(body: object) -> dict:
     if item is None or item.shape is None:
         raise StudioError(f"no object item {body.get('item')!r} in the catalog", HTTPStatus.NOT_FOUND)
     params, shape = env_schema.resolve_placement(item, body.get("params") or {}, "params")
-    return {"item": item.id, "params": params, **shape.as_json()}
+    return {"item": item.id, "params": params, **_shape_for_plan(item, params, shape)}
 
 
 def resolve_many_json(body: object) -> dict:
@@ -207,7 +229,7 @@ def resolve_many_json(body: object) -> dict:
             if item is None or item.shape is None:
                 raise StudioError(f"no object item {placement.get('item')!r} in the catalog")
             params, shape = env_schema.resolve_placement(item, placement.get("params") or {}, "params")
-            shapes.append({"item": item.id, "params": params, **shape.as_json()})
+            shapes.append({"item": item.id, "params": params, **_shape_for_plan(item, params, shape)})
         except (StudioError, DiagnosticError) as exc:
             shapes.append({"error": str(exc)})
     return {"shapes": shapes}
@@ -527,7 +549,84 @@ def _recipe_from_body(body: object, path: Path) -> env_schema.Recipe:
     return env_schema.parse_recipe(_recipe_data(body, path.stem), path, _catalog(body))
 
 
-def preview_glb(body: object) -> bytes:
+# --- Heavy work outside the server process -------------------------------------
+# Making a GLB and compiling the MuJoCo world are long for a large Recipe (CARLA
+# Town04: about 80 s and 49 min) and hold the interpreter: run in this process,
+# they froze every other request. Each runs in a worker process instead; a newer
+# request of the same kind (another environment chosen) cancels the older one,
+# and the physics check has a time limit.
+
+VALIDATE_LIMIT_S = float(os.environ.get("ENV_STUDIO_VALIDATE_LIMIT_S", "60"))
+_WORKERS: dict[str, subprocess.Popen] = {}
+_WORKERS_LOCK = threading.Lock()
+
+
+class Superseded(StudioError):
+    """A newer request of the same kind replaced this one."""
+
+
+def _in_worker(kind: str, body: object, timeout: float | None = None, client: str | None = None) -> bytes | None:
+    """Run `env_studio.py --worker <kind>` on the request body; its stdout, or None
+    when the time limit was reached (the worker is stopped). A newer request of the
+    same kind from the same page (`client`, the X-Studio-Client header) cancels the
+    older one; requests of other pages, or without the header, are never cancelled."""
+    command = [sys.executable, str(Path(__file__).resolve()), "--worker", kind]
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, cwd=ROOT)
+    key = (kind, client) if client else (kind, f"pid-{process.pid}")
+    with _WORKERS_LOCK:
+        older = _WORKERS.get(key)
+        _WORKERS[key] = process
+    if older is not None and older.poll() is None:
+        older.kill()
+    try:
+        out, err = process.communicate(json.dumps(body).encode("utf-8"), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        return None
+    finally:
+        with _WORKERS_LOCK:
+            if _WORKERS.get(key) is process:
+                del _WORKERS[key]
+    if process.returncode in (-signal.SIGKILL, -signal.SIGTERM) or process.returncode == 137:
+        raise Superseded("a newer request replaced this one")
+    if process.returncode != 0:
+        raise StudioError((err.decode("utf-8", "replace").strip().splitlines() or ["worker failed"])[-1])
+    return out
+
+
+def worker_main(kind: str) -> int:
+    """The worker side: the request body on stdin, the result on stdout."""
+    body = json.loads(sys.stdin.buffer.read() or b"null")
+    try:
+        if kind == "glb":
+            sys.stdout.buffer.write(_preview_glb(body))
+        elif kind == "validate":
+            sys.stdout.buffer.write(json.dumps(_validate_recipe(body)).encode("utf-8"))
+        else:
+            raise StudioError(f"unknown worker {kind}")
+    except StudioError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
+
+
+def preview_glb(body: object, client: str | None = None) -> bytes:
+    return _in_worker("glb", body, client=client)
+
+
+def validate_recipe(body: object, client: str | None = None) -> dict:
+    out = _in_worker("validate", body, timeout=VALIDATE_LIMIT_S, client=client)
+    if out is None:
+        return {"ok": True, "stage": "schema", "diagnostics": [
+            {"severity": "warning", "path": "", "code": "physics_timeout",
+             "reason": f"MuJoCo の検証が {VALIDATE_LIMIT_S:g} 秒で終わらないので止めた（大きな環境）。"
+                       "スキーマの検査は合格"}]}
+    return json.loads(out)
+
+
+def _preview_glb(body: object) -> bytes:
     """The GLB the generator makes for an unsaved Recipe (the same file as generate)."""
     try:
         recipe = _recipe_from_body(body, USER_RECIPES.resolve() / "preview.yaml")
@@ -659,7 +758,7 @@ def explode_layer(body: object) -> dict:
     return {"objects": parts}
 
 
-def validate_recipe(body: object) -> dict:
+def _validate_recipe(body: object) -> dict:
     """Schema, then MuJoCo checks of an unsaved Recipe, as {ok, diagnostics}:
     the problems are an answer here, not an error."""
     try:
@@ -1212,12 +1311,13 @@ class StudioHandler(SimpleHTTPRequestHandler):
         ("DELETE", ("recipes", "*"), lambda self, parts: self._json(delete_recipe(parts[1]))),
         ("POST", ("resolve-many",), lambda self, _: self._json(resolve_many_json(self._body()))),
         ("POST", ("resolve",), lambda self, _: self._json(resolve_json(self._body()))),
-        ("POST", ("validate",), lambda self, _: self._json(validate_recipe(self._body()))),
+        ("POST", ("validate",), lambda self, _: self._json(validate_recipe(self._body(), self.headers.get("X-Studio-Client")))),
         ("POST", ("terrain",), lambda self, _: self._json(terrain_json(self._body()))),
         ("POST", ("poses",), lambda self, _: self._json(preview_poses(self._body()))),
         ("POST", ("explode",), lambda self, _: self._json(explode_layer(self._body()))),
         ("POST", ("layer-outlines",), lambda self, _: self._json(layer_outlines(self._body()))),
-        ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body()), "model/gltf-binary")),
+        ("POST", ("glb",), lambda self, _: self._bytes(preview_glb(self._body(), self.headers.get("X-Studio-Client")),
+                                                      "model/gltf-binary")),
     )
 
     def _query(self, name: str) -> str | None:
@@ -1498,4 +1598,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--worker":   # heavy work for the server (_in_worker)
+        raise SystemExit(worker_main(sys.argv[2]))
     raise SystemExit(main())

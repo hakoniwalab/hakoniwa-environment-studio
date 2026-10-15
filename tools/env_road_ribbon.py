@@ -13,6 +13,14 @@ SCHEMA = "hakoniwa.road-ribbon/v1"
 MAX_SECTIONS = 20_000
 FACES = ((0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1),
          (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0))
+MARK_COLORS = {"standard": "#f4f4f4", "white": "#f4f4f4", "yellow": "#f1c232",
+               "blue": "#4a86e8", "green": "#6aa84f", "red": "#cc0000", "orange": "#e69138"}
+LANE_COLORS = {
+    "driving": "#4a4d52", "entry": "#4e5359", "exit": "#4e5359", "onRamp": "#535860",
+    "offRamp": "#535860", "connectingRamp": "#535860", "shoulder": "#62666b",
+    "border": "#696d72", "restricted": "#765f50", "stop": "#6c6260", "sidewalk": "#8d8d88",
+    "biking": "#765b50", "parking": "#606b73", "median": "#777b70", "none": "#343638",
+}
 
 
 def _point(value, path):
@@ -55,10 +63,26 @@ def load(path: Path, *, thickness_m: float, color: str, line_color: str) -> Shap
         sections.append((float(s), tuple(_point(point, f"sections[{index}].points_m") for point in points)))
         previous_s = float(s)
     markings = data.get("markings", ["none"] * count)
-    if (not isinstance(markings, list) or len(markings) != count or
-            any(value not in ("none", "solid", "dashed") for value in markings)):
+    if isinstance(markings, list) and len(markings) == count and all(
+            value in ("none", "solid", "dashed") for value in markings):
+        markings = [{"boundary": boundary, "start_s_m": sections[0][0], "end_s_m": sections[-1][0],
+                     "color": "standard", "lines": ([] if value == "none" else [{
+                         "pattern": value, "t_offset_m": 0.0, "width_m": 0.12,
+                         "length_m": 8.0, "space_m": 12.0 if value == "dashed" else 0.0,
+                         "s_offset_m": 0.0}])} for boundary, value in enumerate(markings)]
+    if not isinstance(markings, list) or any(not _valid_marking(value, count) for value in markings):
         raise fail("params.ribbon_file.markings", "wrong_type",
-                   "one none/solid/dashed value is required per boundary", expected=count, actual=markings)
+                   "marking segments with valid boundary, range, color and lines are required", actual=markings)
+    lanes = data.get("lanes", [])
+    if not isinstance(lanes, list) or any(not _valid_lane(value, count) for value in lanes):
+        raise fail("params.ribbon_file.lanes", "wrong_type", "lane spans and kinds are required", actual=lanes)
+
+    # Lane faces covering the whole width hide the slab's top: drawing both, 0.5 mm apart,
+    # flickered (z-fighting) when seen from afar. The slab still collides; it is just not drawn.
+    covered = set()
+    for lane in lanes:
+        covered.update(range(lane["left_boundary"], lane["right_boundary"]))
+    slab_visible = covered != set(range(count - 1))
 
     solids = []
     for interval, ((s0, first), (s1, second)) in enumerate(zip(sections, sections[1:]), 1):
@@ -66,18 +90,37 @@ def load(path: Path, *, thickness_m: float, color: str, line_color: str) -> Shap
         # exact same top vertices from `sections`.
         top = (first[0], first[-1], second[-1], second[0])
         vertices = top + tuple((x, y, z - thickness_m) for x, y, z in top)
-        solids.append(_solid(f"slab-{interval}", vertices, FACES, color, collide=True, visible=True))
-        for boundary, marking in enumerate(markings):
-            if marking == "none" or (marking == "dashed" and ((s0 + s1) / 2) % 20.0 >= 8.0):
+        solids.append(_solid(f"slab-{interval}", vertices, FACES, color, collide=True, visible=slab_visible))
+        for lane in lanes:
+            left, right = lane["left_boundary"], lane["right_boundary"]
+            lane_top = tuple(_add(point, (0, 0, 0), 0.0005) for point in
+                             (first[left], first[right], second[right], second[left]))
+            lane_bottom = tuple((x, y, z - 0.0004) for x, y, z in lane_top)
+            solids.append(_solid(f"lane-{lane['id']}-{interval}", lane_top + lane_bottom, FACES,
+                                 LANE_COLORS[lane["kind"]], collide=False, visible=True))
+        middle_s = (s0 + s1) / 2
+        for marking in markings:
+            if not marking["start_s_m"] <= middle_s < marking["end_s_m"]:
                 continue
-            p0, p1 = first[boundary], second[boundary]
-            q0 = _across(first, boundary, 0.06)
-            q1 = _across(second, boundary, 0.06)
-            top_mark = (_add(p0, q0, 0.003), _add(p0, q0, -0.003),
-                        _add(p1, q1, -0.003), _add(p1, q1, 0.003))
-            bottom = tuple((x, y, z - 0.002) for x, y, z in top_mark)
-            solids.append(_solid(f"mark-{boundary}-{interval}", top_mark + bottom, FACES,
-                                 line_color, collide=False, visible=True))
+            boundary = marking["boundary"]
+            for line_index, line in enumerate(marking["lines"]):
+                period = line["length_m"] + line["space_m"]
+                phase = middle_s - marking["start_s_m"] - line["s_offset_m"]
+                if line["pattern"] == "dashed" and period > 0 and phase % period >= line["length_m"]:
+                    continue
+                p0, p1 = (_offset(first, boundary, line["t_offset_m"]),
+                          _offset(second, boundary, line["t_offset_m"]))
+                q0 = _across(first, boundary, line["width_m"] / 2)
+                q1 = _across(second, boundary, line["width_m"] / 2)
+                # A flat stripe line_width wide, 3 mm above the road, ordered like the lane faces
+                # (start-left, start-right, end-right, end-left; +q points to the right) so its top
+                # faces up. It used to be four points on one side lifted +-3 mm: a vertical sliver.
+                minus = lambda q: (-q[0], -q[1], -q[2])
+                top_mark = (_add(p0, minus(q0), 0.003), _add(p0, q0, 0.003),
+                            _add(p1, q1, 0.003), _add(p1, minus(q1), 0.003))
+                bottom = tuple((x, y, z - 0.002) for x, y, z in top_mark)
+                solids.append(_solid(f"mark-{boundary}-{line_index}-{interval}", top_mark + bottom, FACES,
+                                     MARK_COLORS[marking["color"]], collide=False, visible=True))
     vertices = [point for solid in solids for point in solid.vertices]
     xs, ys, zs = zip(*vertices)
     return Shape(solids=tuple(solids),
@@ -101,5 +144,62 @@ def _across(points, index, half_width):
     return dx / size * half_width, dy / size * half_width, dz / size * half_width
 
 
+def _offset(points, index, distance):
+    delta = _across(points, index, distance)
+    return _add(points[index], delta, 0.0)
+
+
+def _valid_marking(value, boundary_count):
+    if not isinstance(value, dict) or not isinstance(value.get("boundary"), int):
+        return False
+    if not 0 <= value["boundary"] < boundary_count or value.get("color") not in MARK_COLORS:
+        return False
+    if not all(isinstance(value.get(key), (int, float)) for key in ("start_s_m", "end_s_m")):
+        return False
+    lines = value.get("lines")
+    return isinstance(lines, list) and all(
+        isinstance(line, dict) and line.get("pattern") in ("solid", "dashed") and
+        all(isinstance(line.get(key), (int, float)) for key in
+            ("t_offset_m", "width_m", "length_m", "space_m", "s_offset_m")) and
+        line["width_m"] > 0 and line["length_m"] >= 0 and line["space_m"] >= 0
+        for line in lines)
+
+
+def _valid_lane(value, boundary_count):
+    return (isinstance(value, dict) and isinstance(value.get("id"), int) and
+            value.get("kind") in LANE_COLORS and
+            isinstance(value.get("left_boundary"), int) and isinstance(value.get("right_boundary"), int) and
+            0 <= value["left_boundary"] < value["right_boundary"] < boundary_count)
+
+
 def _add(point, delta, lift):
     return point[0] + delta[0], point[1] + delta[1], point[2] + delta[2] + lift
+
+
+PLAN_OUTLINE_POINTS = 400
+_PLAN_CACHE: dict[tuple[str, float], dict] = {}
+
+
+def plan_outline(path: Path) -> dict:
+    """The ribbon seen from above for a 2-D plan: one polygon (the left edge forward, the
+    right edge back, thinned to PLAN_OUTLINE_POINTS) and its height range, in the object's
+    frame. Read from the sections' end points only, so large networks stay quick; kept
+    until the file changes."""
+    path = Path(path)
+    key = (str(path.resolve()), path.stat().st_mtime)
+    if key in _PLAN_CACHE:
+        return _PLAN_CACHE[key]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    sections = [section["points_m"] for section in data.get("sections", []) if len(section.get("points_m", [])) >= 2]
+    if len(sections) < 2:
+        raise ValueError(f"{path.name}: a ribbon needs two sections of two points")
+    left = [points[0] for points in sections]
+    right = [points[-1] for points in sections]
+    step = max(1, math.ceil(len(left) / (PLAN_OUTLINE_POINTS // 2)))
+    keep = lambda points: points[::step] + ([points[-1]] if (len(points) - 1) % step else [])
+    ring = keep(left) + keep(right)[::-1]
+    heights = [point[2] for points in sections for point in (points[0], points[-1])]
+    result = {"outline": [[round(x, 3), round(y, 3)] for x, y, _ in ring],
+              "z_range_m": [round(min(heights), 6), round(max(heights), 6)]}
+    _PLAN_CACHE[key] = result
+    return result
