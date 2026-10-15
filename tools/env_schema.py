@@ -513,7 +513,7 @@ def _object(value, path: str, catalog: Catalog, terrain: Terrain, base_dir: Path
             ribbon = (base_dir / ribbon).resolve()
         shape = problems.check(env_road_ribbon.load, ribbon,
                                thickness_m=float(params["thickness_m"]), color=str(params["color"]),
-                               line_color=str(params["line_color"]))
+                               line_color=str(params["line_color"]), friction=float(params["friction"]))
         problems.raise_if_errors()
     visual, visual_sha = _asset(params, "visual", path, base_dir, "GLB")
     collision, collision_sha = _asset(params, "collision", path, base_dir, "MJCF")

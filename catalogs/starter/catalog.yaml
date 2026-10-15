@@ -135,6 +135,22 @@ items:
     type: traffic_signal
     name: 信号機
 
+  # OpenDRIVE signs and signals (hakoniwa-scenario's converter). Their meaning (speed
+  # limits, signal states) is esmini's; here they are ordinary objects with colliders.
+  - id: opendrive-sign
+    type: road_sign
+    name: 標識（OpenDRIVE）
+    params: {plate: square, color: "#1e5aa8"}
+
+  - id: opendrive-speed-sign
+    type: road_sign
+    name: 速度の標識（OpenDRIVE）
+    params: {plate: round, color: "#c62828"}
+
+  - id: opendrive-signal
+    type: traffic_signal
+    name: 信号機（OpenDRIVE）
+
   # --- Town (looks: assets/*.glb, from build_town_assets.py) -------------------------
   - id: hakoniwa-stall
     type: food_stall

@@ -26,8 +26,8 @@ validation:
   status: partially_verified
   summary: >
     On 2026-09-30 on macOS arm64, recipe.py configure installed the Recipe
-    Python packages into Foundation Python (keeping mujoco 3.13.0 shared with
-    the Urban Recipes), doctor reported both source dependencies satisfied, all
+    Python packages into Foundation Python (mujoco shared with the Urban
+    Recipes; 3.13.0 then, 3.16.0 since 2026-10-15), doctor reported both source dependencies satisfied, all
     Studio unit tests passed with Foundation Python, and the Studio started from
     the Workspace, listed and validated the Recipes moved into its Recipe
     workspace, showed an imported PLATEAU Recipe in 3D, and exported two Recipes
@@ -89,7 +89,7 @@ target_environment:
       path: work/foundation/install/python
     - name: MuJoCo
       required: true
-      version: 3.13.0
+      version: 3.16.0
       path: recipes/requirements/environment-studio.txt
 
 execution_environment:
@@ -127,7 +127,7 @@ runtime_dependencies:
         version: ">=6.0,<7"
         purpose: Read and write Types, Catalogs, and Environment Recipes.
       - name: mujoco
-        version: 3.13.0
+        version: 3.16.0
         purpose: Validate Recipes physically and compile the MJCF behind the collider GLB; the same version as the Urban Recipes.
       - name: numpy
         version: ">=2.0,<3"
