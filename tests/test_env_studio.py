@@ -470,6 +470,25 @@ class StudioServerTest(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+class HeavyWorkTest(unittest.TestCase):
+    """GLB and MuJoCo checks run in worker processes (a large Recipe froze the server)."""
+
+    def body(self):
+        recipe = yaml.safe_load((env_studio.ROOT / "recipes/examples/car-test-course.yaml").read_text(encoding="utf-8"))
+        recipe.pop("catalog", None)
+        return {**recipe, "catalog_id": "starter"}
+
+    def test_glb_and_validate_come_from_workers(self):
+        self.assertTrue(env_studio.preview_glb(self.body()).startswith(b"glTF"))
+        self.assertEqual(env_studio.validate_recipe(self.body())["stage"], "physics")
+
+    def test_a_validation_over_the_time_limit_is_stopped_and_reported(self):
+        with mock.patch.object(env_studio, "VALIDATE_LIMIT_S", 0.001):
+            result = env_studio.validate_recipe(self.body())
+        self.assertEqual(result["diagnostics"][0]["code"], "physics_timeout")
+        self.assertFalse(env_studio._WORKERS)   # the stopped worker is not left behind
+
+
 class BrowserModulesTest(unittest.TestCase):
     def check(self, script):
         completed = subprocess.run(["node", str(ROOT / "tests" / script)], capture_output=True, text=True, check=False)

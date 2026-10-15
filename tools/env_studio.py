@@ -527,7 +527,81 @@ def _recipe_from_body(body: object, path: Path) -> env_schema.Recipe:
     return env_schema.parse_recipe(_recipe_data(body, path.stem), path, _catalog(body))
 
 
+# --- Heavy work outside the server process -------------------------------------
+# Making a GLB and compiling the MuJoCo world are long for a large Recipe (CARLA
+# Town04: about 80 s and 49 min) and hold the interpreter: run in this process,
+# they froze every other request. Each runs in a worker process instead; a newer
+# request of the same kind (another environment chosen) cancels the older one,
+# and the physics check has a time limit.
+
+VALIDATE_LIMIT_S = float(os.environ.get("ENV_STUDIO_VALIDATE_LIMIT_S", "60"))
+_WORKERS: dict[str, subprocess.Popen] = {}
+_WORKERS_LOCK = threading.Lock()
+
+
+class Superseded(StudioError):
+    """A newer request of the same kind replaced this one."""
+
+
+def _in_worker(kind: str, body: object, timeout: float | None = None) -> bytes | None:
+    """Run `env_studio.py --worker <kind>` on the request body; its stdout, or None
+    when the time limit was reached (the worker is stopped)."""
+    command = [sys.executable, str(Path(__file__).resolve()), "--worker", kind]
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, cwd=ROOT)
+    with _WORKERS_LOCK:
+        older = _WORKERS.get(kind)
+        _WORKERS[kind] = process
+    if older is not None and older.poll() is None:
+        older.kill()
+    try:
+        out, err = process.communicate(json.dumps(body).encode("utf-8"), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        return None
+    finally:
+        with _WORKERS_LOCK:
+            if _WORKERS.get(kind) is process:
+                del _WORKERS[kind]
+    if process.returncode in (-signal.SIGKILL, -signal.SIGTERM) or process.returncode == 137:
+        raise Superseded("a newer request replaced this one")
+    if process.returncode != 0:
+        raise StudioError((err.decode("utf-8", "replace").strip().splitlines() or ["worker failed"])[-1])
+    return out
+
+
+def worker_main(kind: str) -> int:
+    """The worker side: the request body on stdin, the result on stdout."""
+    body = json.loads(sys.stdin.buffer.read() or b"null")
+    try:
+        if kind == "glb":
+            sys.stdout.buffer.write(_preview_glb(body))
+        elif kind == "validate":
+            sys.stdout.buffer.write(json.dumps(_validate_recipe(body)).encode("utf-8"))
+        else:
+            raise StudioError(f"unknown worker {kind}")
+    except StudioError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
+
+
 def preview_glb(body: object) -> bytes:
+    return _in_worker("glb", body)
+
+
+def validate_recipe(body: object) -> dict:
+    out = _in_worker("validate", body, timeout=VALIDATE_LIMIT_S)
+    if out is None:
+        return {"ok": True, "stage": "schema", "diagnostics": [
+            {"severity": "warning", "path": "", "code": "physics_timeout",
+             "reason": f"MuJoCo の検証が {VALIDATE_LIMIT_S:g} 秒で終わらないので止めた（大きな環境）。"
+                       "スキーマの検査は合格"}]}
+    return json.loads(out)
+
+
+def _preview_glb(body: object) -> bytes:
     """The GLB the generator makes for an unsaved Recipe (the same file as generate)."""
     try:
         recipe = _recipe_from_body(body, USER_RECIPES.resolve() / "preview.yaml")
@@ -659,7 +733,7 @@ def explode_layer(body: object) -> dict:
     return {"objects": parts}
 
 
-def validate_recipe(body: object) -> dict:
+def _validate_recipe(body: object) -> dict:
     """Schema, then MuJoCo checks of an unsaved Recipe, as {ok, diagnostics}:
     the problems are an answer here, not an error."""
     try:
@@ -1498,4 +1572,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--worker":   # heavy work for the server (_in_worker)
+        raise SystemExit(worker_main(sys.argv[2]))
     raise SystemExit(main())
