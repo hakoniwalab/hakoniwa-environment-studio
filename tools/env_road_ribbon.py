@@ -31,7 +31,7 @@ def _point(value, path):
     return tuple(float(item) for item in value)
 
 
-def load(path: Path, *, thickness_m: float, color: str, line_color: str) -> Shape:
+def load(path: Path, *, thickness_m: float, color: str, line_color: str, friction: float = 1.0) -> Shape:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -126,7 +126,7 @@ def load(path: Path, *, thickness_m: float, color: str, line_color: str) -> Shap
     return Shape(solids=tuple(solids),
                  envelope={"primitive": "box", "width_m": max(xs) - min(xs), "depth_m": max(ys) - min(ys)},
                  bottom_m=min(zs), height_m=max(zs), surface="ground", snap=False,
-                 friction=1.0, layer="surface", locked=True)
+                 friction=friction, layer="surface", locked=True)
 
 
 def _solid(name, vertices, faces, color, *, collide, visible):
