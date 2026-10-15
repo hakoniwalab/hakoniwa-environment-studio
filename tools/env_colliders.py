@@ -86,7 +86,9 @@ def collider_glb(source: Path, out: Path, receipt: Path) -> dict:
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     to_glb = numpy.array(MJCF_TO_GLB)
-    scene = trimesh.Scene()
+    # One mesh per geom type: a Scene with a node per geom made trimesh's GLB writer quadratic in the geoms
+    # (its buffer lookup is a list search; Shibuya's 4,000 geoms ran for over an hour, 2026-10-16).
+    parts: dict[str, list] = {}
     counts: dict[str, int] = {}
     triangles = 0
     for geom in range(model.ngeom):
@@ -99,11 +101,15 @@ def collider_glb(source: Path, out: Path, receipt: Path) -> dict:
         transform[:3, :3] = data.geom_xmat[geom].reshape(3, 3)
         transform[:3, 3] = data.geom_xpos[geom]
         mesh.apply_transform(to_glb @ transform)
-        mesh.visual = trimesh.visual.ColorVisuals(mesh, vertex_colors=numpy.tile(COLOR, (len(mesh.vertices), 1)))
-        scene.add_geometry(mesh, node_name=mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom) or f"geom-{geom}")
         name = mujoco.mjtGeom(int(model.geom_type[geom])).name.removeprefix("mjGEOM_").lower()
+        parts.setdefault(name, []).append(mesh)
         counts[name] = counts.get(name, 0) + 1
         triangles += len(mesh.faces)
+    scene = trimesh.Scene()
+    for name, meshes in sorted(parts.items()):
+        mesh = trimesh.util.concatenate(meshes)
+        mesh.visual = trimesh.visual.ColorVisuals(mesh, vertex_colors=numpy.tile(COLOR, (len(mesh.vertices), 1)))
+        scene.add_geometry(mesh, node_name=f"colliders-{name}")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(scene.export(file_type="glb"))
     result = {
