@@ -121,6 +121,23 @@ class MjcfTest(unittest.TestCase):
         self.assertEqual(len(by_prefix("mark-")), 2)
         self.assertTrue(all(not solid.collide for solid in by_prefix("lane-") + by_prefix("mark-")))
         self.assertTrue(all(solid.color == "#f1c232" for solid in by_prefix("mark-")))
+        for mark in by_prefix("mark-"):   # a flat stripe of the line's width, not a vertical sliver
+            top = mark.vertices[:4]
+            self.assertAlmostEqual(max(p[2] for p in top) - min(p[2] for p in top), 0.0, places=9)
+            width = math.dist(top[0], top[1])
+            self.assertTrue(any(abs(width - w) < 1e-9 for w in (0.2, 0.1)), width)
+
+        # Its look: one mesh per colour, only the faces seen from above, shared vertices
+        # (a large network drawn per column was a 1 GB GLB of 850,000 primitives).
+        pieces = env_generate.ribbon_top_pieces(shape.solids)
+        colours = {solid.color for solid in shape.solids if solid.visible}
+        self.assertEqual(sorted(color for _, color in pieces), sorted(colours))
+        for (positions, normals, indices), _color in pieces:
+            self.assertTrue(all(normals[i][2] > 0.1 for i in indices))      # no sides or bottoms
+            self.assertLess(len(positions), len(indices))                     # vertices are shared
+        drawn = sum(len(indices) // 3 for (_, _, indices), _ in pieces)
+        whole = sum(len(env_generate.solid_mesh(solid)[2]) // 3 for solid in shape.solids if solid.visible)
+        self.assertLessEqual(drawn * 4, whole)                               # tops are 2 of 12 triangles
 
     def compile(self, recipe, **options):
         model = mujoco.MjModel.from_xml_string(env_generate.environment_mjcf(recipe, **options))

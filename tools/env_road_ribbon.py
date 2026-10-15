@@ -105,8 +105,12 @@ def load(path: Path, *, thickness_m: float, color: str, line_color: str) -> Shap
                           _offset(second, boundary, line["t_offset_m"]))
                 q0 = _across(first, boundary, line["width_m"] / 2)
                 q1 = _across(second, boundary, line["width_m"] / 2)
-                top_mark = (_add(p0, q0, 0.003), _add(p0, q0, -0.003),
-                            _add(p1, q1, -0.003), _add(p1, q1, 0.003))
+                # A flat stripe line_width wide, 3 mm above the road, ordered like the lane faces
+                # (start-left, start-right, end-right, end-left; +q points to the right) so its top
+                # faces up. It used to be four points on one side lifted +-3 mm: a vertical sliver.
+                minus = lambda q: (-q[0], -q[1], -q[2])
+                top_mark = (_add(p0, minus(q0), 0.003), _add(p0, q0, 0.003),
+                            _add(p1, q1, 0.003), _add(p1, minus(q1), 0.003))
                 bottom = tuple((x, y, z - 0.002) for x, y, z in top_mark)
                 solids.append(_solid(f"mark-{boundary}-{line_index}-{interval}", top_mark + bottom, FACES,
                                      MARK_COLORS[marking["color"]], collide=False, visible=True))

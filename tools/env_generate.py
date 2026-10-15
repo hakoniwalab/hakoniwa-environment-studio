@@ -48,7 +48,7 @@ import env_terrain  # noqa: E402
 from env_diagnostics import DiagnosticError  # noqa: E402
 from env_types import Solid, rotation_matrix  # noqa: E402
 
-GENERATOR_VERSION = "1"
+GENERATOR_VERSION = "2"
 CIRCLE_SEGMENTS = env_schema.CIRCLE_SEGMENTS
 BODY_PREFIX = "object:"
 GEOM_PREFIX = "geom:"
@@ -511,6 +511,36 @@ def asset_scale(obj: env_schema.EnvObject) -> tuple[float, float, float]:
     return tuple(float(obj.params.get(key, 1.0)) for key in ("scale_x", "scale_y", "scale_z"))
 
 
+def ribbon_top_pieces(solids, *, min_up: float = 0.1) -> list:
+    """A road_ribbon's look: one mesh per colour, its solids' upward faces only, shared vertices.
+
+    The ribbon is many thin convex columns (for MuJoCo's contacts); drawn one primitive per
+    column with all six sides, a large network was a 1 GB GLB of 850,000 primitives (CARLA
+    Town04). From above only the top faces show: keep the triangles facing up, merge the
+    columns of one colour, and share vertices that coincide (same position and normal).
+    """
+    merged: dict[str, tuple[list, list, list, dict]] = {}
+    for solid in solids:
+        if not solid.visible:
+            continue
+        positions, normals, indices = solid_mesh(solid)
+        out_positions, out_normals, out_indices, index_of = merged.setdefault(solid.color, ([], [], [], {}))
+        for t in range(0, len(indices), 3):
+            corners = indices[t:t + 3]
+            if sum(normals[i][2] for i in corners) / 3 < min_up:
+                continue  # a side or the bottom: not seen from above
+            for i in corners:
+                key = (round(positions[i][0], 6), round(positions[i][1], 6), round(positions[i][2], 6),
+                       round(normals[i][0], 3), round(normals[i][1], 3), round(normals[i][2], 3))
+                if key not in index_of:
+                    index_of[key] = len(out_positions)
+                    out_positions.append(positions[i])
+                    out_normals.append(normals[i])
+                out_indices.append(index_of[key])
+    return [((positions, normals, indices), color)
+            for color, (positions, normals, indices, _) in merged.items() if indices]
+
+
 def environment_glb(recipe: env_schema.Recipe) -> bytes:
     builder = _GlbBuilder()
     terrain = recipe.terrain
@@ -532,7 +562,10 @@ def environment_glb(recipe: env_schema.Recipe) -> bytes:
                                  primitives=builder.asset_primitives(visual), scale=(sx, sz, sy))
             builder.add_lights(index, builder.asset_lights(visual))  # a part's own lights (a stall's lamp)
             continue
-        pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
+        if obj.type == "road_ribbon":
+            pieces = ribbon_top_pieces(obj.solids)
+        else:
+            pieces = [(solid_mesh(solid), solid.color) for solid in obj.solids if solid.visible]
         builder.node(obj.id, pieces, *placement, extras, tilt=tilt)
     return builder.glb()
 
