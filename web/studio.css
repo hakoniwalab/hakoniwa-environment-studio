@@ -60,6 +60,8 @@ h2 { font-size: 15px; margin: 0 0 8px; }
 .views.mode-plan .view3d-host, .views.mode-3d .plan-host { display: none; }
 .plan-host, .view3d-host { min-height: 0; border-radius: 6px; overflow: hidden; background: var(--plan-bg); position: relative; }
 .view3d-host canvas { width: 100%; height: 100%; display: block; }
+.view3d-busy { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); margin: 0; padding: 6px 12px;
+  border-radius: 6px; background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 0.9rem; z-index: 2; pointer-events: none; }
 .view3d-message { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 12px; text-align: center; }
 .segmented { display: inline-flex; }
 .segmented button { border-radius: 0; margin-left: -1px; }

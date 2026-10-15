@@ -337,6 +337,7 @@ async function refreshPreview() {
       if (version !== state.previewVersion) return;
       if (state.view3d.setPoses(poses)) return;
     }
+    setBusy3d(true);
     const response = await fetch("/api/glb", {
       method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Client": CLIENT_ID },
       body: JSON.stringify(recipeBody()),
@@ -350,7 +351,21 @@ async function refreshPreview() {
     state.view3d.setSelected(state.selection);
   } catch (error) {
     setStatus(error.message, "error");
+  } finally {
+    if (version === state.previewVersion) setBusy3d(false);
   }
+}
+
+// While the GLB is made and sent (about a minute for a large environment), say so over the
+// 3D view: without it, the previous environment stayed on screen as if nothing happened.
+function setBusy3d(busy) {
+  const host = $("#view3d");
+  let note = host.querySelector(".view3d-busy");
+  if (busy && !note) {
+    note = el("p", { class: "view3d-busy" }, "⏳ 3D を作っています…（大きな環境は 1 分ほどかかります）");
+    host.append(note);
+  }
+  if (!busy && note) note.remove();
 }
 
 // --- Problems: the quick check, then the server's (schema and MuJoCo) -------------
