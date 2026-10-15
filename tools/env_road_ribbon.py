@@ -77,13 +77,20 @@ def load(path: Path, *, thickness_m: float, color: str, line_color: str) -> Shap
     if not isinstance(lanes, list) or any(not _valid_lane(value, count) for value in lanes):
         raise fail("params.ribbon_file.lanes", "wrong_type", "lane spans and kinds are required", actual=lanes)
 
+    # Lane faces covering the whole width hide the slab's top: drawing both, 0.5 mm apart,
+    # flickered (z-fighting) when seen from afar. The slab still collides; it is just not drawn.
+    covered = set()
+    for lane in lanes:
+        covered.update(range(lane["left_boundary"], lane["right_boundary"]))
+    slab_visible = covered != set(range(count - 1))
+
     solids = []
     for interval, ((s0, first), (s1, second)) in enumerate(zip(sections, sections[1:]), 1):
         # One convex column across the whole road. Adjacent columns reuse the
         # exact same top vertices from `sections`.
         top = (first[0], first[-1], second[-1], second[0])
         vertices = top + tuple((x, y, z - thickness_m) for x, y, z in top)
-        solids.append(_solid(f"slab-{interval}", vertices, FACES, color, collide=True, visible=True))
+        solids.append(_solid(f"slab-{interval}", vertices, FACES, color, collide=True, visible=slab_visible))
         for lane in lanes:
             left, right = lane["left_boundary"], lane["right_boundary"]
             lane_top = tuple(_add(point, (0, 0, 0), 0.0005) for point in

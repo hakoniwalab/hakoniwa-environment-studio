@@ -74,13 +74,25 @@ export async function pictureOfGlb(url, width, height) {
   }
 }
 
+// A decal (extras.decal: road lane faces 1, road marks 2) lies a few millimetres over a
+// surface; drawn as is it flickered from afar. Pull it toward the camera in depth instead.
+function applyDecal(material) {
+  const level = Number(material.userData?.decal) || 0;
+  if (level <= 0) return;
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = -level;
+  material.polygonOffsetUnits = -4 * level;
+}
+
 export class View3D {
   constructor(container) {
     this.container = container;
     this.loader = new GLTFLoader();
     this.size = null; // {east, north} in metres
     this.selected = new Set();
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // A logarithmic depth buffer: with near 0.05 m and far 5 km, faces a few mm apart (road
+    // marks over a road) flickered from afar (z-fighting) with the default linear depth.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.append(this.renderer.domElement);
@@ -243,6 +255,7 @@ export class View3D {
     // highlighting one does not light up the others.
     gltf.scene.traverse((node) => {
       if (node.isMesh) node.material = Array.isArray(node.material) ? node.material.map((m) => m.clone()) : node.material.clone();
+      if (node.isMesh) for (const material of [node.material].flat()) applyDecal(material);
     });
     dispose(this.model); // the previous environment's GPU buffers, materials and textures
     this.model.clear();

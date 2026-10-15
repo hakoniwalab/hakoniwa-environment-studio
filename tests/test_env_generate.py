@@ -131,11 +131,14 @@ class MjcfTest(unittest.TestCase):
         # (a large network drawn per column was a 1 GB GLB of 850,000 primitives).
         pieces = env_generate.ribbon_top_pieces(shape.solids)
         colours = {solid.color for solid in shape.solids if solid.visible}
-        self.assertEqual(sorted(color for _, color in pieces), sorted(colours))
-        for (positions, normals, indices), _color in pieces:
-            self.assertTrue(all(normals[i][2] > 0.1 for i in indices))      # no sides or bottoms
+        drawn = {color.split("@")[0] for _, color in pieces} - {env_generate.RIBBON_SIDE_COLOR}
+        self.assertEqual(sorted(drawn), sorted(colours))                  # decals carry "@<level>"
+        for (positions, normals, indices), color in pieces:
+            if color == env_generate.RIBBON_SIDE_COLOR:
+                continue                                                    # the outer edges' sides
+            self.assertTrue(all(normals[i][2] > 0.1 for i in indices))      # no inner sides or bottoms
             self.assertLess(len(positions), len(indices))                     # vertices are shared
-        drawn = sum(len(indices) // 3 for (_, _, indices), _ in pieces)
+        drawn = sum(len(indices) // 3 for (_, _, indices), color in pieces if color != env_generate.RIBBON_SIDE_COLOR)
         whole = sum(len(env_generate.solid_mesh(solid)[2]) // 3 for solid in shape.solids if solid.visible)
         self.assertLessEqual(drawn * 4, whole)                               # tops are 2 of 12 triangles
 
@@ -169,6 +172,26 @@ class MjcfTest(unittest.TestCase):
         height, geom = self.ray_height(model, data, 5.0, -10.0)
         self.assertEqual(geom, "terrain")
         self.assertAlmostEqual(height, 0.0, places=6)
+
+    def test_ribbon_look_has_edge_sides_and_no_hidden_top(self):
+        # An elevated ribbon (z = 5 m) whose lanes cover the whole width: the slab's top is not
+        # drawn under the lane faces (it flickered), the lane faces are decals (drawn over the
+        # road), and the two outer edges get sides as deep as the surface (no wall to the ground).
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            ribbon.write_text(json.dumps({"schema": "hakoniwa.road-ribbon/v1", "sections": [
+                {"s_m": s, "points_m": [[-2, s, 5.0], [2, s, 5.0]]} for s in (0, 5, 10)],
+                "lanes": [{"id": -1, "kind": "driving", "left_boundary": 0, "right_boundary": 1,
+                           "speed_limit_kmh": 50}]}), encoding="utf-8")
+            shape = env_road_ribbon.load(ribbon, thickness_m=0.02, color="#444444", line_color="#ffffff")
+        self.assertFalse(any(solid.visible for solid in shape.solids if solid.name.startswith("slab-")))
+        self.assertTrue(all(solid.collide for solid in shape.solids if solid.name.startswith("slab-")))
+        pieces = dict((color, mesh) for mesh, color in env_generate.ribbon_top_pieces(shape.solids))
+        positions, normals, indices = pieces[env_generate.RIBBON_SIDE_COLOR]
+        self.assertEqual(len(indices) // 3, 2 * 2 * 2)                     # 2 columns x 2 edges x 2 triangles
+        self.assertAlmostEqual(min(p[2] for p in positions), 5.0 - 0.02)
+        self.assertTrue(any(key.endswith("@1") for key in pieces))          # the lane face is a decal
+        self.assertEqual(sorted({round(n[0]) for n in normals}), [-1, 1])  # facing out on both sides
 
     def test_ribbon_plan_outline_is_its_edges(self):
         # The 2-D plan draws a road_ribbon from its file's outline (it showed nothing before).
