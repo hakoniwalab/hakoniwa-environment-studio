@@ -723,16 +723,22 @@ async function importSelected() {
     }
   }
   const repository = $("#import-source").value;
-  $("#import-message").textContent = `${id} を取り込んでいます…`;
+  // Each step says what it is doing: a large environment (CARLA Town04, 737 parts and
+  // 734 files) takes a while at each, and the page looked stuck.
+  $("#import-message").textContent = `⏳ ${id} を取り込んでいます…（ファイルをコピーしています）`;
+  setStatus(`⏳ ${id} を取り込んでいます…`, "busy");
   $("#import-selected").disabled = true;
   try {
     const result = await api("POST", "imports", { repository, recipe: chosen.value, id, overwrite });
+    $("#import-message").textContent = `⏳ ${result.id} を開いています…`;
     await loadRecipes();
     $("#import-dialog").close();
+    setStatus(`⏳ ${result.id} を開いています…（上面図を準備しています。3D はそのあと）`, "busy");
     await openRecipe(result.id);
     setStatus(`${repository} から ${result.id} を取り込みました（資産 ${result.copied_files} 件）`, "ok");
   } catch (error) {
     $("#import-message").textContent = error.message;
+    setStatus(error.message, "error");
     $("#import-selected").disabled = false;
   }
 }
@@ -950,6 +956,7 @@ async function loadRecipes() {
 }
 
 async function openRecipe(id) {
+  setStatus(`⏳ ${id} を開いています…（上面図を準備しています。3D はそのあと）`, "busy");
   const loaded = await api("GET", `recipes/${id}`);
   loaded.recipe.objects = loaded.recipe.objects || [];
   await loadCatalog(loaded.catalog_id || state.catalogId);

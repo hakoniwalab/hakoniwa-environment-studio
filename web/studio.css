@@ -191,3 +191,5 @@ dialog::backdrop { background: rgb(15 20 28 / 0.55); }
 .my-items summary { cursor: pointer; color: var(--muted); }
 .my-item { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .my-item button { padding: 2px 8px; font-size: 12px; }
+
+.status.busy { color: var(--text, inherit); font-weight: 600; }
