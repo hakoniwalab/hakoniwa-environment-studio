@@ -2,9 +2,11 @@
 # Foundation Python by `python tools/recipe.py configure --recipe
 # ../hakoniwa-environment-studio/recipes/business-pack/environment-studio.yaml`.
 PyYAML>=6.0,<7
-# MuJoCo validation and the collider GLB; the same version as the Urban and
-# Drone Core Recipes, which share this Foundation Python.
-mujoco==3.13.0
+# MuJoCo validation and the collider GLB; the same version as the Urban Recipes,
+# which share this Foundation Python. 3.16.0 since 2026-10-15 (3.13.0 stalled cars on
+# finely cut road surfaces and built large worlds 20-50x slower). Drone Core does not
+# use this package: its MJB is compiled with its own libmujoco (MUJOCO_VERSION.txt).
+mujoco==3.16.0
 numpy>=2.0,<3
 # CityGML parts (tools/env_citygml.py and the map import) use hakoniwa-envsim's
 # extractors, which need these.
