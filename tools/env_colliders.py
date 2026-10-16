@@ -84,7 +84,9 @@ def collider_glb(source: Path, out: Path, receipt: Path) -> dict:
 
     model = mujoco.MjModel.from_xml_path(str(source))
     data = mujoco.MjData(model)
-    mujoco.mj_forward(model, data)
+    # Positions only: mj_forward also runs the collision detection, which ran out of MuJoCo's stack on a
+    # City with many overlapping colliders (Ohashi JCT: 76 MB asked of 25 MB, 2026-10-16).
+    mujoco.mj_kinematics(model, data)
     to_glb = numpy.array(MJCF_TO_GLB)
     # One mesh per geom type: a Scene with a node per geom made trimesh's GLB writer quadratic in the geoms
     # (its buffer lookup is a list search; Shibuya's 4,000 geoms ran for over an hour, 2026-10-16).
