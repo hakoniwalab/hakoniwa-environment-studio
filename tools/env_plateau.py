@@ -41,6 +41,15 @@ class InspectionError(RuntimeError):
     pass
 
 
+def _in_selection(code: str, meshes: set[str]) -> bool:
+    """Whether a catalog file's mesh code lies in the selected third-level
+    meshes: a third-level (or finer) code by its first 8 digits, a coarser one
+    (the DEM's second-level 6 digits) when a selected mesh starts with it."""
+    if len(code) >= 8:
+        return code[:8] in meshes
+    return any(mesh.startswith(code) for mesh in meshes)
+
+
 def _capability(name: str, files: list[dict]) -> dict:
     if not files:
         return {"dataset_status": "not_available", "generation_status": "scoped_out", "max_lod": None,
@@ -77,9 +86,9 @@ def inspect(center: tuple[float, float], half: tuple[float, float], client=None)
         payload = client.request_catalog(client.search_url(API_BASE_URL, feature_type, bbox, mesh_level=mesh_level),
                                          allow_not_found=True)  # 404: no file for it here
         files = client.select_files(payload, feature_type, "latest", allow_empty=True, min_lod=min_lod)
-        if feature_type == "brid":  # a second-level mesh reaches beyond the area
-            files = [item for item in files if str(item.get("code", ""))[:8] in meshes]
-        return files
+        # A second-level query (bridges) reaches beyond the area; a second-level
+        # file (the DEM) covers the selected meshes it is the prefix of.
+        return [item for item in files if _in_selection(str(item.get("code", "")), meshes)]
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(FEATURES)) as pool:

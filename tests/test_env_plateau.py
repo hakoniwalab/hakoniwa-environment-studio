@@ -94,6 +94,23 @@ class PlateauInspectionTest(unittest.TestCase):
                              "brid": [file("brid", 3, code="64414278002"), file("brid", 3, code="64414279001")]})
         self.assertEqual(env_plateau.inspect((43.0, 141.3), (100, 100), client)["capabilities"]["bridge"]["source_file_count"], 1)
 
+    def test_a_second_level_dem_covers_the_third_level_meshes_it_contains(self):
+        # The catalog returns the DEM of Yokohama, Hiroshima and Tokyo with a
+        # second-level mesh code (6 digits), buildings with third-level ones.
+        client = FakeClient({"bldg": [file("bldg", 2, code="64414278")], "dem": [file("dem", 1, code="644142")],
+                             "tran": [file("tran", 1, code="64414278")]})
+        result = env_plateau.inspect((43.0, 141.3), (100, 100), client)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["capabilities"]["terrain"]["source_file_count"], 1)
+        self.assertEqual(result["capabilities"]["building"]["source_file_count"], 1)
+
+    def test_a_dem_of_another_second_level_mesh_is_left_out(self):
+        client = FakeClient({"bldg": [file("bldg", 2, code="64414278")], "dem": [file("dem", 1, code="644143")],
+                             "tran": [file("tran", 1, code="64414278")]})
+        result = env_plateau.inspect((43.0, 141.3), (100, 100), client)
+        self.assertEqual(result["missing"], ["terrain"])
+        self.assertTrue(result["flat_ground_possible"])
+
     def test_a_catalog_that_does_not_answer_is_an_inspection_error(self):
         class Down(FakeClient):
             def request_catalog(self, url, allow_not_found=False):
