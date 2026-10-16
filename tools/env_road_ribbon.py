@@ -44,10 +44,16 @@ def load(path: Path, *, thickness_m: float, color: str, line_color: str, frictio
         raise fail("params.ribbon_file.sections", "out_of_range", "needs 2..20000 cross-sections",
                    expected="2..20000", actual=len(raw_sections) if isinstance(raw_sections, list) else raw_sections)
     sections, count, previous_s = [], None, -math.inf
+    # "collider": false marks a section for drawing only (a dashed line's end): the road's
+    # collision pieces span it, the lane faces and lines are cut at it. The ends always collide.
+    shape_sections = []
     for index, entry in enumerate(raw_sections):
-        if not isinstance(entry, dict) or set(entry) != {"s_m", "points_m"}:
+        if not isinstance(entry, dict) or not {"s_m", "points_m"} <= set(entry) <= {"s_m", "points_m", "collider"} \
+                or entry.get("collider", False) is not False:
             raise fail(f"params.ribbon_file.sections[{index}]", "wrong_type",
-                       "a section must contain only s_m and points_m", actual=entry)
+                       "a section must contain s_m and points_m, and may say collider: false", actual=entry)
+        if "collider" not in entry or index in (0, len(raw_sections) - 1):
+            shape_sections.append(index)
         s = entry["s_m"]
         if isinstance(s, bool) or not isinstance(s, (int, float)) or not math.isfinite(s) or s <= previous_s:
             raise fail(f"params.ribbon_file.sections[{index}].s_m", "out_of_range",
@@ -85,12 +91,14 @@ def load(path: Path, *, thickness_m: float, color: str, line_color: str, frictio
     slab_visible = covered != set(range(count - 1))
 
     solids = []
-    for interval, ((s0, first), (s1, second)) in enumerate(zip(sections, sections[1:]), 1):
+    for interval, (a, b) in enumerate(zip(shape_sections, shape_sections[1:]), 1):
         # One convex column across the whole road. Adjacent columns reuse the
         # exact same top vertices from `sections`.
+        first, second = sections[a][1], sections[b][1]
         top = (first[0], first[-1], second[-1], second[0])
         vertices = top + tuple((x, y, z - thickness_m) for x, y, z in top)
         solids.append(_solid(f"slab-{interval}", vertices, FACES, color, collide=True, visible=slab_visible))
+    for interval, ((s0, first), (s1, second)) in enumerate(zip(sections, sections[1:]), 1):
         for lane in lanes:
             left, right = lane["left_boundary"], lane["right_boundary"]
             lane_top = tuple(_add(point, (0, 0, 0), 0.0005) for point in

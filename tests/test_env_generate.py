@@ -193,6 +193,27 @@ class MjcfTest(unittest.TestCase):
         self.assertTrue(any(key.endswith("@1") for key in pieces))          # the lane face is a decal
         self.assertEqual(sorted({round(n[0]) for n in normals}), [-1, 1])  # facing out on both sides
 
+    def test_drawing_only_sections_cut_the_lanes_not_the_collision_pieces(self):
+        # A dashed line's end ("collider": false) cuts the lane faces and lines, while the road's
+        # collision piece spans it: one slab over 0..10 m, two lane faces.
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            sections = [{"s_m": s, "points_m": [[-2, s, 0.0], [2, s, 0.0]]} for s in (0, 5, 10)]
+            sections[1]["collider"] = False
+            ribbon.write_text(json.dumps({"schema": "hakoniwa.road-ribbon/v1", "sections": sections,
+                "lanes": [{"id": -1, "kind": "driving", "left_boundary": 0, "right_boundary": 1,
+                           "speed_limit_kmh": 50}]}), encoding="utf-8")
+            shape = env_road_ribbon.load(ribbon, thickness_m=0.02, color="#444444", line_color="#ffffff")
+            sections[1]["collider"] = True
+            ribbon.write_text(json.dumps({"schema": "hakoniwa.road-ribbon/v1", "sections": sections}),
+                              encoding="utf-8")
+            with self.assertRaises(Exception):
+                env_road_ribbon.load(ribbon, thickness_m=0.02, color="#444444", line_color="#ffffff")
+        slabs = [solid for solid in shape.solids if solid.name.startswith("slab-")]
+        self.assertEqual(len(slabs), 1)
+        self.assertEqual(sorted(round(v[1]) for v in slabs[0].vertices[:4]), [0, 0, 10, 10])
+        self.assertEqual(len([solid for solid in shape.solids if solid.name.startswith("lane-")]), 2)
+
     def test_ribbon_plan_outline_is_its_edges(self):
         # The 2-D plan draws a road_ribbon from its file's outline (it showed nothing before).
         with tempfile.TemporaryDirectory() as directory:
