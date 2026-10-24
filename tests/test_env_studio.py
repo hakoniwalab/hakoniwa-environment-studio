@@ -198,7 +198,7 @@ class StudioServerTest(unittest.TestCase):
         self.assertTrue(next(item for item in listed if item["id"] == "drone-practice-field")["editable"])
 
     def test_workspace_environments_are_listed_only_in_the_import_dialog(self):
-        pack = self.workspace / "hakoniwa-scenario/environments/highway-3lane"
+        pack = self.workspace / "hakoniwa-scenario-pro/environments/highway-3lane"
         pack.mkdir(parents=True)
         (pack / "highway-3lane.yaml").write_text(yaml.safe_dump({
             "schema": env_studio.env_schema.RECIPE_SCHEMA, "name": "高速道路", "description": "3 lanes",
@@ -214,9 +214,9 @@ class StudioServerTest(unittest.TestCase):
         with mock.patch.object(env_studio, "ROOT", own):
             status, sources = self.call("GET", "/api/imports/sources")
             self.assertEqual(status, 200)
-            self.assertEqual(sources, [{"repository": "hakoniwa-scenario", "environments": 1,
+            self.assertEqual(sources, [{"repository": "hakoniwa-scenario-pro", "environments": 1,
                                         "unreadable": 1}])
-            status, choices = self.call("GET", "/api/imports/sources/hakoniwa-scenario")
+            status, choices = self.call("GET", "/api/imports/sources/hakoniwa-scenario-pro")
         self.assertEqual(status, 200)
         by_recipe = {item["recipe"]: item for item in choices["environments"]}
         self.assertEqual(by_recipe["highway-3lane/highway-3lane.yaml"]["size_m"],
@@ -228,7 +228,7 @@ class StudioServerTest(unittest.TestCase):
         self.assertNotIn("highway-3lane", {item["id"] for item in listed})
 
     def test_import_copies_recipe_assets_rewrites_catalog_and_records_source(self):
-        pack = self.workspace / "hakoniwa-scenario/environments/highway-3lane"
+        pack = self.workspace / "hakoniwa-scenario-pro/environments/highway-3lane"
         assets = pack / "highway-3lane.assets"
         assets.mkdir(parents=True)
         (assets / "building.glb").write_bytes(b"glTF-test")
@@ -241,7 +241,7 @@ class StudioServerTest(unittest.TestCase):
         (pack / "highway-3lane.yaml").write_text(yaml.safe_dump(recipe, sort_keys=False), encoding="utf-8")
 
         status, answer = self.call("POST", "/api/imports", {
-            "repository": "hakoniwa-scenario", "recipe": "highway-3lane/highway-3lane.yaml",
+            "repository": "hakoniwa-scenario-pro", "recipe": "highway-3lane/highway-3lane.yaml",
             "id": "copied-highway",
         })
         self.assertEqual(status, 200, answer)
@@ -253,7 +253,7 @@ class StudioServerTest(unittest.TestCase):
         self.assertEqual((self.user / "copied-highway.assets/building.glb").read_bytes(), b"glTF-test")
         record = json.loads((self.user / ".imports/copied-highway.json").read_text(encoding="utf-8"))
         self.assertEqual((record["repository"], record["source"]),
-                         ("hakoniwa-scenario", "highway-3lane/highway-3lane.yaml"))
+                         ("hakoniwa-scenario-pro", "highway-3lane/highway-3lane.yaml"))
         self.assertRegex(record["imported_at"], r"^\d{4}-\d\d-\d\dT")
         _, listed = self.call("GET", "/api/recipes")
         self.assertTrue(next(item for item in listed if item["id"] == "copied-highway")["editable"])

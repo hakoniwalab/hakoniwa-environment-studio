@@ -135,7 +135,7 @@ items:
     type: traffic_signal
     name: 信号機
 
-  # OpenDRIVE signs and signals (hakoniwa-scenario's converter). Their meaning (speed
+  # OpenDRIVE signs and signals (hakoniwa-scenario-pro's converter). Their meaning (speed
   # limits, signal states) is esmini's; here they are ordinary objects with colliders.
   - id: opendrive-sign
     type: road_sign
