@@ -871,7 +871,7 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
         top = max([recipe.terrain.max_height_m] + [obj.pose.z_m + obj.shape.height_m for obj in recipe.objects])
         _add_boundaries(world, recipe.terrain.half_east, recipe.terrain.half_north, top)
     for obj in recipe.objects:
-        if obj.collision is not None and not validation:
+        if obj.collision is not None and not validation and obj.params.get("collide", True):
             _add_collision(asset, world, recipe, obj)
             continue
         body = ET.SubElement(world, "body", {
