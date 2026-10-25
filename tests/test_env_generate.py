@@ -91,6 +91,32 @@ class GlbTest(unittest.TestCase):
 
 @unittest.skipIf(mujoco is None, "MuJoCo is not installed")
 class MjcfTest(unittest.TestCase):
+    def test_ribbon_draws_three_six_broken_yellow_and_omits_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ribbon = Path(directory) / "road.json"
+            ribbon.write_text(json.dumps({
+                "schema": "hakoniwa.road-ribbon/v1",
+                "sections": [
+                    {"s_m": 0, "points_m": [[-2, 0, 0], [0, 0, 0], [2, 0, 0]]},
+                    {"s_m": 3, "points_m": [[-2, 3, 0], [0, 3, 0], [2, 3, 0]]},
+                    {"s_m": 9, "points_m": [[-2, 9, 0], [0, 9, 0], [2, 9, 0]]},
+                    {"s_m": 12, "points_m": [[-2, 12, 0], [0, 12, 0], [2, 12, 0]]},
+                ],
+                "lanes": [],
+                "markings": [
+                    {"boundary": 1, "start_s_m": 0, "end_s_m": 12, "color": "yellow",
+                     "lines": [{"pattern": "dashed", "t_offset_m": 0, "width_m": 0.12,
+                                "length_m": 3, "space_m": 6, "s_offset_m": 0}]},
+                    {"boundary": 2, "start_s_m": 0, "end_s_m": 12, "color": "white", "lines": []},
+                ],
+            }), encoding="utf-8")
+            shape = env_road_ribbon.load(ribbon, thickness_m=0.02, color="#444444",
+                                         line_color="#ffffff")
+
+        marks = [solid for solid in shape.solids if solid.name.startswith("mark-")]
+        self.assertEqual([solid.name for solid in marks], ["mark-1-0-1", "mark-1-0-3"])
+        self.assertTrue(all(solid.color == "#f1c232" for solid in marks))
+
     def test_rich_ribbon_draws_double_colored_marks_and_lane_kinds_without_collision(self):
         with tempfile.TemporaryDirectory() as directory:
             ribbon = Path(directory) / "road.json"
