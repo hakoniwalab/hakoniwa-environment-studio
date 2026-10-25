@@ -1,0 +1,137 @@
+# CC0 scenery normalized to metres for CARLA Town04-like roadside layouts.
+# Every visual is centered in plan and stands with its base at z=0. Placement
+# width/depth/height scale the visual and its simple collider together.
+schema: hakoniwa.environment-catalog/v1
+catalog:
+  id: scenery-cc0
+  name: CC0 roadside scenery
+  description: Buildings, vegetation and roadside furniture suited to CARLA Town04 bounds.
+  includes: [../starter/catalog.yaml]
+
+items:
+  - id: cc0-pine-tall
+    type: scenery_cylinder
+    name: Pine tree (tall)
+    category: CC0 vegetation
+    params: {visual: assets/pine-tall.glb, native_width_m: 7.5, native_depth_m: 7.5, native_height_m: 12.0,
+             width_m: 7.5, depth_m: 7.5, height_m: 12.0}
+    source: {site: Kenney, original_asset: tree_pineTallA, pack: Nature Kit,
+             url: "https://kenney.nl/assets/nature-kit", license: CC0, author: Kenney, polygons: 78}
+
+  - id: cc0-oak
+    type: scenery_cylinder
+    name: Oak tree
+    category: CC0 vegetation
+    params: {visual: assets/oak.glb, native_width_m: 8.0, native_depth_m: 8.0, native_height_m: 11.0,
+             width_m: 8.0, depth_m: 8.0, height_m: 11.0}
+    source: {site: Kenney, original_asset: tree_oak, pack: Nature Kit,
+             url: "https://kenney.nl/assets/nature-kit", license: CC0, author: Kenney, polygons: 196}
+
+  - id: cc0-broadleaf
+    type: scenery_box
+    name: Broadleaf tree
+    category: CC0 vegetation
+    params: {visual: assets/broadleaf.glb, native_width_m: 6.5, native_depth_m: 6.0, native_height_m: 10.0,
+             width_m: 6.5, depth_m: 6.0, height_m: 10.0}
+    source: {site: Kenney, original_asset: tree_default, pack: Nature Kit,
+             url: "https://kenney.nl/assets/nature-kit", license: CC0, author: Kenney, polygons: 114}
+
+  - id: cc0-bush
+    type: scenery_cylinder
+    name: Low-poly bush
+    category: CC0 vegetation
+    params: {visual: assets/bush.glb, native_width_m: 1.2, native_depth_m: 1.2, native_height_m: 0.75,
+             width_m: 1.2, depth_m: 1.2, height_m: 0.75}
+    source: {site: Kenney, original_asset: plant_bush, pack: Nature Kit,
+             url: "https://kenney.nl/assets/nature-kit", license: CC0, author: Kenney, polygons: 32}
+
+  - id: cc0-house-small
+    type: scenery_box
+    name: Small suburban house
+    category: CC0 buildings
+    params: {visual: assets/house-small.glb, native_width_m: 6.0, native_depth_m: 5.0, native_height_m: 4.5,
+             width_m: 6.0, depth_m: 5.0, height_m: 4.5}
+    source: {site: Kenney, original_asset: building-type-h, pack: City Kit (Suburban),
+             url: "https://kenney.nl/assets/city-kit-suburban", license: CC0, author: Kenney, polygons: 770}
+
+  - id: cc0-house-medium
+    type: scenery_box
+    name: Medium suburban house
+    category: CC0 buildings
+    params: {visual: assets/house-medium.glb, native_width_m: 8.0, native_depth_m: 6.5, native_height_m: 6.0,
+             width_m: 8.0, depth_m: 6.5, height_m: 6.0}
+    source: {site: Kenney, original_asset: building-type-a, pack: City Kit (Suburban),
+             url: "https://kenney.nl/assets/city-kit-suburban", license: CC0, author: Kenney, polygons: 1174}
+
+  - id: cc0-house-large
+    type: scenery_box
+    name: Large suburban house
+    category: CC0 buildings
+    params: {visual: assets/house-large.glb, native_width_m: 10.0, native_depth_m: 8.0, native_height_m: 8.0,
+             width_m: 10.0, depth_m: 8.0, height_m: 8.0}
+    source: {site: Kenney, original_asset: building-type-b, pack: City Kit (Suburban),
+             url: "https://kenney.nl/assets/city-kit-suburban", license: CC0, author: Kenney, polygons: 1748}
+
+  - id: cc0-shop
+    type: scenery_box
+    name: Commercial shop
+    category: CC0 buildings
+    params: {visual: assets/shop.glb, native_width_m: 7.0, native_depth_m: 7.0, native_height_m: 9.0,
+             width_m: 7.0, depth_m: 7.0, height_m: 9.0}
+    source: {site: Kenney, original_asset: building-a, pack: City Kit (Commercial),
+             url: "https://kenney.nl/assets/city-kit-commercial", license: CC0, author: Kenney, polygons: 1252}
+
+  - id: cc0-commercial-block
+    type: scenery_box
+    name: Commercial block
+    category: CC0 buildings
+    params: {visual: assets/commercial-block.glb, native_width_m: 20.0, native_depth_m: 13.0, native_height_m: 15.0,
+             width_m: 20.0, depth_m: 13.0, height_m: 15.0}
+    source: {site: Kenney, original_asset: building-j, pack: City Kit (Commercial),
+             url: "https://kenney.nl/assets/city-kit-commercial", license: CC0, author: Kenney, polygons: 5246}
+
+  - id: cc0-street-light
+    type: scenery_box
+    name: Curved street light
+    category: CC0 poles and lamps
+    params: {visual: assets/street-light.glb, native_width_m: 0.5, native_depth_m: 2.25, native_height_m: 6.75,
+             width_m: 0.5, depth_m: 2.25, height_m: 6.75}
+    source: {site: Kenney, original_asset: light-curved, pack: City Kit (Roads),
+             url: "https://kenney.nl/assets/city-kit-roads", license: CC0, author: Kenney, polygons: 92}
+
+  - id: cc0-heritage-lamp
+    type: scenery_box
+    name: Heritage street lamp
+    category: CC0 poles and lamps
+    params: {visual: assets/heritage-lamp.glb, native_width_m: 0.7, native_depth_m: 1.5, native_height_m: 4.0,
+             width_m: 0.7, depth_m: 1.5, height_m: 4.0}
+    source: {site: Poly Haven, original_asset: Street Lamp 02, resolution: "1k source; textures 256px",
+             url: "https://polyhaven.com/a/street_lamp_02", license: CC0, author: Josh Dean, polygons: 20338}
+
+  - id: cc0-concrete-barrier
+    type: scenery_box
+    name: Concrete road barrier
+    category: CC0 guardrails and barriers
+    params: {visual: assets/concrete-barrier.glb, native_width_m: 2.35, native_depth_m: 0.35, native_height_m: 0.9,
+             width_m: 2.35, depth_m: 0.35, height_m: 0.9}
+    source: {site: Poly Haven, original_asset: Concrete Road Barrier 02, resolution: "1k source; textures 256px",
+             url: "https://polyhaven.com/a/concrete_road_barrier_02", license: CC0, author: Amal Kumar, polygons: 23822}
+
+  - id: cc0-chainlink-fence
+    type: scenery_box
+    name: Chain-link fence panel
+    category: CC0 fences
+    params: {visual: assets/chainlink-fence.glb, native_width_m: 3.0, native_depth_m: 0.08, native_height_m: 2.0,
+             width_m: 3.0, depth_m: 0.08, height_m: 2.0}
+    source: {site: Poly Haven, original_asset: Modular Chainlink Fence (double panel), resolution: "1k source; textures 256px",
+             url: "https://polyhaven.com/a/modular_chainlink_fence", license: CC0,
+             author: "James Ray Cock; Amal Kumar (fence wire material)", polygons: 3054}
+
+  - id: cc0-timber-wall
+    type: scenery_box
+    name: Timber wall panel
+    category: CC0 walls
+    params: {visual: assets/timber-wall.glb, native_width_m: 3.0, native_depth_m: 0.25, native_height_m: 2.0,
+             width_m: 3.0, depth_m: 0.25, height_m: 2.0}
+    source: {site: Kenney, original_asset: fence_planksDouble, pack: Nature Kit,
+             url: "https://kenney.nl/assets/nature-kit", license: CC0, author: Kenney, polygons: 152}

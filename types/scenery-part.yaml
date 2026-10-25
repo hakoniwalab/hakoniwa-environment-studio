@@ -1,0 +1,27 @@
+# Scenery with a separately-authored visual GLB and a simple collider. Native
+# dimensions describe the normalized GLB; placement dimensions fit both the
+# visual and physics shape to a target bounding box.
+schema: hakoniwa.environment-types/v1
+types:
+  - id: scenery_box
+    extends: object
+    label: 景観部品（箱形）
+    description: A scenery visual with one colliding box fitted to its requested dimensions.
+    id_prefix: scenery
+    params:
+      visual: {kind: text, label: 見た目（GLB）, default: "", level: item}
+      native_width_m: {kind: length, label: 元の幅, min: 0.01, max: 2000, level: item}
+      native_depth_m: {kind: length, label: 元の奥行き, min: 0.01, max: 2000, level: item}
+      native_height_m: {kind: length, label: 元の高さ, min: 0.01, max: 500, level: item}
+      width_m: {kind: length, label: 幅, min: 0.01, max: 2000, level: placement}
+      depth_m: {kind: length, label: 奥行き, min: 0.01, max: 2000, level: placement}
+      height_m: {kind: length, label: 高さ, min: 0.01, max: 500, level: placement}
+    shapes:
+      - {name: collider, primitive: box, w: $width_m, d: $depth_m, h: $height_m, collide: true}
+
+  - id: scenery_cylinder
+    extends: scenery_box
+    label: 景観部品（円柱形）
+    description: A scenery visual with one colliding upright cylinder fitted to its requested dimensions.
+    shapes:
+      - {name: collider, primitive: cylinder, w: $width_m, d: $depth_m, h: $height_m, collide: true}
