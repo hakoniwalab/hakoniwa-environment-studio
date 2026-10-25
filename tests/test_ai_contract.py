@@ -17,7 +17,7 @@ import env_validate  # noqa: E402
 
 def envstudio(*args, stdin=None):
     completed = subprocess.run([sys.executable, str(ROOT / "tools/envstudio.py"), "--json", *args],
-                               input=stdin, capture_output=True, text=True, check=False, timeout=120)
+                               input=stdin, capture_output=True, text=True, encoding="utf-8", check=False, timeout=120)
     return completed.returncode, json.loads(completed.stdout)
 
 

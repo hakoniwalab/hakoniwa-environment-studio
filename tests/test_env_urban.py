@@ -104,8 +104,8 @@ class UrbanExportTest(unittest.TestCase):
         self.assertEqual(urban_model.hfield_nrow[0], 2)  # the flat ground as an hfield
         # The job was written next to its place and moved in whole; job.json names it.
         self.assertFalse(job.with_name(job.name + ".partial").exists())
-        self.assertEqual(json.loads((job / "job.json").read_text())["title"], recipe.name)
-        self.assertNotIn(".partial", (job / "build/world/city-world-receipt.json").read_text())
+        self.assertEqual(json.loads((job / "job.json").read_text(encoding="utf-8"))["title"], recipe.name)
+        self.assertNotIn(".partial", (job / "build/world/city-world-receipt.json").read_text(encoding="utf-8"))
         problems = urban_contract_errors(job / "build/world/city-world-receipt.json")
         if problems is not None:  # urban-mobility's own check of the format, when it is next to the Studio
             self.assertEqual(problems, [])
@@ -120,7 +120,7 @@ class UrbanExportTest(unittest.TestCase):
         # The same grid, laid out the same way (the same diagonals), as a file Urban reads.
         self.assertTrue(numpy.allclose(studio_model.hfield_data, urban_model.hfield_data, atol=1e-6))
         self.assertTrue(numpy.allclose(studio_model.hfield_size, urban_model.hfield_size))
-        terrain_receipt = json.loads((Path(result["job"]) / "build/components/terrain/terrain-receipt.json").read_text())
+        terrain_receipt = json.loads((Path(result["job"]) / "build/components/terrain/terrain-receipt.json").read_text(encoding="utf-8"))
         raw = Path(terrain_receipt["hfield"]["path"]).read_bytes()
         nrow, ncol = int.from_bytes(raw[:4], "little"), int.from_bytes(raw[4:8], "little")
         self.assertEqual((nrow, ncol), (recipe.terrain.ncol, recipe.terrain.nrow))
@@ -171,7 +171,7 @@ class CityWorldExportTest(unittest.TestCase):
                      "viewer/city-world-colliders.glb", "job.json"):
             self.assertTrue((job / part).is_file(), part)
         # The receipt still names the build's MJCF: the job is small.
-        receipt = json.loads((job / "build/world/city-world-receipt.json").read_text())
+        receipt = json.loads((job / "build/world/city-world-receipt.json").read_text(encoding="utf-8"))
         self.assertEqual(receipt["mjcf"]["path"], str(self.build / "world/city-world.xml"))
         self.assertFalse((job / "build/world/city-world.xml").exists())
         self.assertFalse((self.exports / "sapporo.partial").exists())
