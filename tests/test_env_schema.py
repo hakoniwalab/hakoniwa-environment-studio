@@ -147,7 +147,7 @@ class RecipeTest(unittest.TestCase):
 class CommandLineTest(unittest.TestCase):
     def run_cli(self, *args, stdin=None):
         completed = subprocess.run([sys.executable, str(ROOT / "tools/envstudio.py"), "--json", *args],
-                                   input=stdin, capture_output=True, text=True, cwd=ROOT)
+                                   input=stdin, capture_output=True, text=True, encoding="utf-8", cwd=ROOT)
         return completed.returncode, json.loads(completed.stdout)
 
     def test_discovery(self):

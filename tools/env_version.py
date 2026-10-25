@@ -26,7 +26,7 @@ def git_commit(root: Path = ROOT) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=False, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", check=False, timeout=5,
             # No console window pops up on Windows (the Studio runs without one).
             **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )

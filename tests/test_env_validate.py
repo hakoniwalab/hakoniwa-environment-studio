@@ -110,7 +110,7 @@ class ValidateTest(unittest.TestCase):
 
         def run(*extra):
             completed = subprocess.run([sys.executable, str(ROOT / "tools/envstudio.py"), "--json", "validate", "-",
-                                        "--base", ".", *extra], input=json.dumps(data), capture_output=True, text=True,
+                                        "--base", ".", *extra], input=json.dumps(data), capture_output=True, text=True, encoding="utf-8",
                                        cwd=ROOT)
             return completed.returncode, json.loads(completed.stdout)
 

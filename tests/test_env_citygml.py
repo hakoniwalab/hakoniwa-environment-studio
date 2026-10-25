@@ -161,7 +161,7 @@ class OsmPartsTest(unittest.TestCase):
             completed = subprocess.run([
                 sys.executable, str(ROOT / "tools/env_citygml.py"), "--citygml", str(self.citygml),
                 "--center", ",".join(map(str, box().center)), "--half-extent", ",".join(map(str, self.half)),
-                "--out", str(out), "--json"], capture_output=True, text=True, check=False, timeout=120)
+                "--out", str(out), "--json"], capture_output=True, text=True, encoding="utf-8", check=False, timeout=120)
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             self.assertEqual(json.loads(completed.stdout[completed.stdout.index("{"):])["buildings"], 4)
             self.assertEqual(env_schema.load_recipe(out).objects[0].source["kind"], "citygml")
@@ -365,14 +365,14 @@ class CommandErrorTest(unittest.TestCase):
             completed = subprocess.run([
                 sys.executable, str(ROOT / "tools/env_citygml.py"), "--citygml", str(empty), "--center", "35,135",
                 "--half-extent", "50,50", "--out", str(Path(directory) / "city.yaml")],
-                capture_output=True, text=True, check=False, timeout=120)
+                capture_output=True, text=True, encoding="utf-8", check=False, timeout=120)
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
         self.assertEqual(json.loads(completed.stdout)["diagnostics"][0]["code"], "missing_field")
 
     def test_an_output_name_that_is_no_recipe_id_is_refused(self):
         completed = subprocess.run([
             sys.executable, str(ROOT / "tools/env_citygml.py"), "--citygml", ".", "--center", "35,135",
-            "--half-extent", "50,50", "--out", "work/recipes/a.b.yaml"], capture_output=True, text=True, check=False)
+            "--half-extent", "50,50", "--out", "work/recipes/a.b.yaml"], capture_output=True, text=True, encoding="utf-8", check=False)
         self.assertEqual(completed.returncode, 2)
         self.assertIn("not a Recipe id", completed.stderr)
 

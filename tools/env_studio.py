@@ -578,6 +578,9 @@ def _in_worker(kind: str, body: object, timeout: float | None = None, client: st
         older = _WORKERS.get(key)
         _WORKERS[key] = process
     if older is not None and older.poll() is None:
+        # Marked before the kill: on Windows the killed worker's exit code (1) does not
+        # tell a replaced request from a failed one.
+        older.superseded = True
         older.kill()
     try:
         out, err = process.communicate(json.dumps(body).encode("utf-8"), timeout=timeout)
@@ -589,7 +592,8 @@ def _in_worker(kind: str, body: object, timeout: float | None = None, client: st
         with _WORKERS_LOCK:
             if _WORKERS.get(key) is process:
                 del _WORKERS[key]
-    if process.returncode in (-signal.SIGKILL, -signal.SIGTERM) or process.returncode == 137:
+    killed = {-getattr(signal, "SIGKILL", signal.SIGTERM), -signal.SIGTERM, 137}
+    if getattr(process, "superseded", False) or process.returncode in killed:
         raise Superseded("a newer request replaced this one")
     if process.returncode != 0:
         raise StudioError((err.decode("utf-8", "replace").strip().splitlines() or ["worker failed"])[-1])
@@ -1376,8 +1380,19 @@ class StudioHandler(SimpleHTTPRequestHandler):
         return self._api("POST")
 
 
+class StudioServer(ThreadingHTTPServer):
+    """On Windows SO_REUSEADDR lets a second server bind a port that is already
+    listening, so the port is taken exclusively there instead."""
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def make_server(port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer(("127.0.0.1", port), StudioHandler)
+    return StudioServer(("127.0.0.1", port), StudioHandler)
 
 
 # --- Lifecycle: start / status / stop --------------------------------------------
@@ -1413,9 +1428,12 @@ def _running(state_dir: Path) -> dict | None:
 
 
 def _port_free(port: int) -> bool:
-    """Whether the Studio could listen on port (address reuse on, as the server has)."""
+    """Whether the Studio could listen on port (bound the way StudioServer binds)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if os.name == "nt":
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
         except OSError:

@@ -370,12 +370,15 @@ class ProcessGroupTest(unittest.TestCase):
     def test_posix_cancel_signals_the_group(self):
         process = mock.Mock(pid=4321)
         process.wait.side_effect = [env_cityworld.subprocess.TimeoutExpired("x", 10), 0]
+        # POSIX is simulated; Windows has no SIGKILL, so it is supplied with its POSIX value.
+        sigkill = getattr(env_cityworld.signal, "SIGKILL", 9)
         with mock.patch.object(env_cityworld, "windows", lambda: False), \
                 mock.patch.object(env_cityworld.os, "killpg", create=True) as killpg, \
+                mock.patch.object(env_cityworld.signal, "SIGKILL", sigkill, create=True), \
                 mock.patch.object(env_cityworld.subprocess, "run") as run:
             env_cityworld.stop_group(process)
         self.assertEqual(killpg.call_args_list, [mock.call(4321, env_cityworld.signal.SIGTERM),
-                                                 mock.call(4321, env_cityworld.signal.SIGKILL)])
+                                                 mock.call(4321, sigkill)])
         run.assert_not_called()
 
     def test_windows_build_job_children_open_no_window(self):

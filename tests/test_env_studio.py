@@ -502,7 +502,7 @@ class HeavyWorkTest(unittest.TestCase):
 
 class BrowserModulesTest(unittest.TestCase):
     def check(self, script):
-        completed = subprocess.run(["node", str(ROOT / "tests" / script)], capture_output=True, text=True, check=False)
+        completed = subprocess.run(["node", str(ROOT / "tests" / script)], capture_output=True, text=True, encoding="utf-8", check=False)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
     def test_the_browser_layout_check(self):
@@ -533,7 +533,7 @@ class LifecycleTest(unittest.TestCase):
     def run_tool(self, *args):
         return subprocess.run(
             [sys.executable, str(ROOT / "tools/env_studio.py"), *args, "--state-dir", str(self.state)],
-            capture_output=True, text=True, check=False, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
         )
 
     def test_start_status_stop(self):
