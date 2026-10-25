@@ -456,8 +456,16 @@ def placement_values(item: Item, given, path: str) -> dict:
 
 
 def resolve_placement(item: Item, given, path: str) -> tuple[dict, Shape]:
-    params = placement_values(item, given, path)
+    given = mapping(given, path)
+    collide = given.get("collide", True)
+    if not isinstance(collide, bool):
+        raise fail(f"{path}.collide", "wrong_type", "must be true or false", expected="boolean", actual=collide)
+    params = placement_values(item, {key: value for key, value in given.items() if key != "collide"}, path)
     shape = item.shape if params == item.params else env_types.resolve_shape(item.type, params, path)
+    if "collide" in given:
+        params["collide"] = collide
+    if not collide:
+        shape = replace(shape, solids=tuple(replace(solid, collide=False) for solid in shape.solids))
     return params, shape
 
 

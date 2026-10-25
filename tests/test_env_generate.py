@@ -336,6 +336,26 @@ class MjcfTest(unittest.TestCase):
         # The road is on the surface layer: it collides with everything but other roads.
         self.assertEqual((model.geom_contype[slab], model.geom_conaffinity[slab]), (env_generate.SURFACE_CONTYPE, 1))
 
+    def test_a_placement_can_disable_all_of_its_collision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "visual-only.yaml"
+            path.write_text("""schema: hakoniwa.environment-recipe/v1
+name: visual-only
+catalog: {catalog}
+size_m: {{east: 20, north: 20}}
+terrain: {{item: city-ground}}
+objects:
+  - id: lamp
+    item: cc0-street-light
+    pose: {{x_m: 0, y_m: 0}}
+    params: {{width_m: 0.5, depth_m: 2.25, height_m: 8, collide: false}}
+""".format(catalog=(ROOT / "catalogs/scenery-cc0/catalog.yaml").as_posix()), encoding="utf-8")
+            recipe = env_schema.load_recipe(path)
+        self.assertFalse(recipe.objects[0].solids[0].collide)
+        self.assertIs(recipe.objects[0].params["collide"], False)
+        model = ET.fromstring(env_generate.environment_mjcf(recipe))
+        self.assertIsNone(model.find(".//geom[@name='geom:lamp/collider']"))
+
     def test_objects_stand_on_the_hills(self):
         recipe = load("hills-field")
         model, data = self.compile(recipe)
