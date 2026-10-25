@@ -219,3 +219,4 @@ __marimo__/
 
 # Environment Studio
 work/
+.cache/

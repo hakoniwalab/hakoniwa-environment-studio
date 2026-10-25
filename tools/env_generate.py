@@ -285,9 +285,10 @@ class _GlbBuilder:
             self.material_ids[color] = len(self.gltf["materials"]) - 1
         return self.material_ids[color]
 
-    def textured_material(self, image: bytes, mime: str) -> int:
+    def textured_material(self, image: bytes, mime: str, alpha_mode: str | None = None,
+                          alpha_cutoff: float | None = None) -> int:
         """A material showing an image (a JPEG or PNG embedded in the GLB), one per distinct image."""
-        key = hashlib.sha256(image).hexdigest()
+        key = f"{hashlib.sha256(image).hexdigest()}:{alpha_mode}:{alpha_cutoff}"
         if key not in self.image_ids:
             for name in ("images", "textures", "samplers"):
                 self.gltf.setdefault(name, [])
@@ -295,11 +296,16 @@ class _GlbBuilder:
                 self.gltf["samplers"].append({"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497})
             self.gltf["images"].append({"bufferView": self._view(image, None), "mimeType": mime})
             self.gltf["textures"].append({"sampler": 0, "source": len(self.gltf["images"]) - 1})
-            self.gltf["materials"].append({
+            entry = {
                 "name": key[:12], "doubleSided": True,
                 "pbrMetallicRoughness": {"baseColorTexture": {"index": len(self.gltf["textures"]) - 1},
                                          "metallicFactor": 0.0, "roughnessFactor": 1.0},
-            })
+            }
+            if alpha_mode in ("MASK", "BLEND"):
+                entry["alphaMode"] = alpha_mode
+            if alpha_mode == "MASK" and alpha_cutoff is not None:
+                entry["alphaCutoff"] = alpha_cutoff
+            self.gltf["materials"].append(entry)
             self.image_ids[key] = len(self.gltf["materials"]) - 1
         return self.image_ids[key]
 
@@ -353,7 +359,8 @@ class _GlbBuilder:
             texture = source.get("pbrMetallicRoughness", {}).get("baseColorTexture")
             if texture is not None:
                 image = document["images"][document["textures"][texture["index"]]["source"]]
-                return self.textured_material(data(image["bufferView"]), image.get("mimeType", "image/jpeg"))
+                return self.textured_material(data(image["bufferView"]), image.get("mimeType", "image/jpeg"),
+                                              source.get("alphaMode"), source.get("alphaCutoff"))
             factor = source.get("pbrMetallicRoughness", {}).get("baseColorFactor", [0.7, 0.7, 0.7, 1.0])
             # A part's lights (a stall's lanterns) glow: keep their emission.
             emissive = source.get("emissiveFactor")
@@ -512,7 +519,11 @@ def asset_frame(recipe: env_schema.Recipe, obj: env_schema.EnvObject) -> tuple[f
 
 
 def asset_scale(obj: env_schema.EnvObject) -> tuple[float, float, float]:
-    """How much a building's own look and colliders are stretched (its x, y, up)."""
+    """How much an asset is stretched in its x, y and up dimensions."""
+    native = tuple(obj.params.get(f"native_{axis}_m") for axis in ("width", "depth", "height"))
+    if all(value is not None for value in native):
+        target = tuple(float(obj.params[f"{axis}_m"]) for axis in ("width", "depth", "height"))
+        return tuple(value / float(base) for value, base in zip(target, native))
     return tuple(float(obj.params.get(key, 1.0)) for key in ("scale_x", "scale_y", "scale_z"))
 
 
