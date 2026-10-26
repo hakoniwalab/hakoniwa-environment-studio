@@ -139,11 +139,11 @@ class RegisterBuildingTest(unittest.TestCase):
         }), encoding="utf-8")
         recipe = env_schema.load_recipe(recipe_path)
         points = mesh_points_in_world(env_generate.environment_mjcf(recipe), "copy")
-        # Turned a quarter: the 4 m square stays a 4 m square about (-6, 4), its lowest point on the ground.
-        self.assertAlmostEqual(min(p[0] for p in points), -8.0, places=6)
-        self.assertAlmostEqual(max(p[0] for p in points), -4.0, places=6)
-        self.assertAlmostEqual(min(p[1] for p in points), 2.0, places=6)
-        self.assertAlmostEqual(max(p[1] for p in points), 6.0, places=6)
+        # NWU: Recipe (-6 east, 4 north) is (4 north, 6 west).
+        self.assertAlmostEqual(min(p[0] for p in points), 2.0, places=6)
+        self.assertAlmostEqual(max(p[0] for p in points), 6.0, places=6)
+        self.assertAlmostEqual(min(p[1] for p in points), 4.0, places=6)
+        self.assertAlmostEqual(max(p[1] for p in points), 8.0, places=6)
         self.assertAlmostEqual(min(p[2] for p in points), 0.0, places=6)
         self.assertAlmostEqual(max(p[2] for p in points), HIGH - LOW, places=6)
 

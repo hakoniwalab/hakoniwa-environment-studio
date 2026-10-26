@@ -16,10 +16,10 @@ export writes a saved Recipe in that layout:
   <job>/build/components/terrain/             terrain.hf, terrain.xml, terrain-receipt.json
   <job>/viewer/city-world.glb, city-world-colliders.glb (+ receipt; env_colliders.py)
 
-The MJCF is the Studio's generated world with the Studio's own frame turned
-into Urban's: the ground is an hfield at the top level (Envsim's own file for
+The MJCF uses the Studio's generated NWU world directly: the ground is an
+hfield at the top level (Envsim's own file for
 an Envsim terrain, the Studio's grid for hills, a flat 2 x 2 field
-otherwise), everything else stands in one body turned -90 degrees about z.
+otherwise).
 Visual-only geoms are left out (the GLB shows them; Urban's World MJCF is what
 collides, as an Envsim one is), and so are lights (the vehicles bring theirs).
 Only size, asset and worldbody are written: every rotation is a quaternion, so
@@ -45,7 +45,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 from pathlib import Path
 import shutil
 import struct
@@ -65,8 +64,6 @@ from env_diagnostics import DiagnosticError  # noqa: E402
 EXPORTS = env_workspace.recipe_workspace() / "urban"
 MJCF_FRAME = "X=North,Y=-East,Z=Up"
 GLB_FRAME = "X=East,Y=Up,Z=-North"
-# The Studio's frame (x east, y north) inside Urban's (x north, y west): -90 degrees about z.
-STUDIO_FRAME_QUAT = (math.sqrt(0.5), 0.0, 0.0, -math.sqrt(0.5))
 # A flat ground as an hfield (as Urban's plain Worlds): MuJoCo needs a positive height range.
 FLAT_HEIGHT_M = 0.001
 FLAT_BASE_M = 0.1
@@ -125,15 +122,14 @@ def world_mjcf(recipe: env_schema.Recipe, hfield_file: str, ground: dict) -> str
     ET.SubElement(world, "geom", {
         "name": env_generate.TERRAIN_GEOM, "type": "hfield", "hfield": "terrain", "pos": _numbers((0, 0, ground["pos_z"])),
         "rgba": _numbers((*env_generate.hex_rgb(terrain.color), 1.0)), "friction": _numbers((terrain.friction, 0.005, 0.0001))})
-    frame = ET.SubElement(world, "body", {"name": "studio-frame", "quat": _numbers(STUDIO_FRAME_QUAT)})
     for element in studio.find("worldbody"):
         if element.tag == "geom" and element.get("name") == env_generate.TERRAIN_GEOM:
             continue
-        frame.append(element)
+        world.append(element)
     # Visual-only geoms (paint, lamps) are the GLB's: the World MJCF holds what
     # collides. Lights are the vehicles' (Urban keeps each vehicle model's
     # lighting, named sun / fill_light, when it composes the World in).
-    for parent in list(frame.iter()):
+    for parent in list(world.iter()):
         for child in list(parent):
             if child.tag == "light" or (child.tag == "geom" and child.get("contype") == "0"
                                         and child.get("conaffinity") == "0"):

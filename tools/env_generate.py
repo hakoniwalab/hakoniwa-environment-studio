@@ -6,8 +6,9 @@ solids with the same size, position and tilt, and the same terrain. The output
 is deterministic: the same Recipe always gives the same files.
 
 Frames:
-  Recipe / MuJoCo: ENU, x east, y north, z up, metres, origin at the centre.
-  GLB (glTF):      x = east, y = up, z = -north.
+  Recipe:      ENU, x east, y north, z up, metres, origin at the centre.
+  MuJoCo:      NWU, x north, y west, z up.
+  GLB (glTF):  x = east, y = up, z = -north.
 
 Names: each object keeps its Recipe id. The GLB node is named after it (item
 and type in its extras); in MuJoCo it is the body object:<id> with one geom
@@ -48,7 +49,7 @@ import env_terrain  # noqa: E402
 from env_diagnostics import DiagnosticError  # noqa: E402
 from env_types import Solid, rotation_matrix  # noqa: E402
 
-GENERATOR_VERSION = "3"
+GENERATOR_VERSION = "4"
 CIRCLE_SEGMENTS = env_schema.CIRCLE_SEGMENTS
 BODY_PREFIX = "object:"
 GEOM_PREFIX = "geom:"
@@ -637,8 +638,21 @@ def environment_glb(recipe: env_schema.Recipe) -> bytes:
 
 # --- MuJoCo -------------------------------------------------------------------------
 
-# Envsim's MuJoCo frame (x north, y west) turned into this one (x east, y north): +90 degrees about z.
+# Recipe ENU inside Hakoniwa's MuJoCo NWU frame: -90 degrees about z.
+RECIPE_FRAME_QUAT = (math.sqrt(0.5), 0.0, 0.0, -math.sqrt(0.5))
+# Envsim colliders are already NWU. This maps them into an object's local Recipe
+# axes; the object's NWU pose applies the inverse frame change again.
 ENVSIM_FRAME_QUAT = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
+
+
+def _mjcf_position(east: float, north: float, up: float) -> tuple[float, float, float]:
+    """Recipe ENU position in Hakoniwa's MuJoCo NWU world."""
+    return north, -east, up
+
+
+def _mjcf_rotation(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
+    """Rz(-90 degrees) * R_recipe as a MuJoCo (w, x, y, z) quaternion."""
+    return _qmul(RECIPE_FRAME_QUAT, quaternion(roll, pitch, yaw))
 
 
 def _terrain_geom(root: ET.Element, world: ET.Element, terrain: env_terrain.Terrain,
@@ -650,7 +664,7 @@ def _terrain_geom(root: ET.Element, world: ET.Element, terrain: env_terrain.Terr
             "name": "terrain", "file": hfield_file or terrain.hfield["path"],
             "size": " ".join(repr(float(value)) for value in terrain.hfield["size"])})
         ET.SubElement(world, "geom", {"name": TERRAIN_GEOM, "type": "hfield", "hfield": "terrain", "pos": "0 0 0",
-                                      "quat": _numbers(ENVSIM_FRAME_QUAT), "rgba": rgba, "friction": friction})
+                                      "rgba": rgba, "friction": friction})
         return
     if terrain.kind == "hfield":
         rows, cols, samples = env_terrain.envsim_order(terrain)
@@ -670,13 +684,13 @@ def _terrain_geom(root: ET.Element, world: ET.Element, terrain: env_terrain.Terr
                                       for r in reversed(range(rows)) for c in range(cols)),
             })
             ET.SubElement(world, "geom", {"name": TERRAIN_GEOM, "type": "hfield", "hfield": "terrain",
-                                          "pos": _numbers((0, 0, low)), "quat": _numbers(ENVSIM_FRAME_QUAT),
+                                          "pos": _numbers((0, 0, low)),
                                           "rgba": rgba, "friction": friction})
             return
     top = 0.0 if terrain.kind != "hfield" else max(h for row in terrain.heights for h in row)
     ET.SubElement(world, "geom", {
         "name": TERRAIN_GEOM, "type": "box", "rgba": rgba, "friction": friction,
-        "size": _numbers((terrain.half_east, terrain.half_north, env_terrain.BASE_M / 2)),
+        "size": _numbers((terrain.half_north, terrain.half_east, env_terrain.BASE_M / 2)),
         "pos": _numbers((0, 0, top - env_terrain.BASE_M / 2)),
     })
 
@@ -686,10 +700,10 @@ def _add_boundaries(world: ET.Element, half_east: float, half_north: float, top_
     the highest object (`top_m`): an object touching one sticks out."""
     t, h = BOUNDARY_THICKNESS_M, max(BOUNDARY_HEIGHT_M, top_m + 60.0)
     for name, centre, half in (
-        ("south", (0.0, -half_north - t / 2), (half_east + t, t / 2)),
-        ("north", (0.0, half_north + t / 2), (half_east + t, t / 2)),
-        ("west", (-half_east - t / 2, 0.0), (t / 2, half_north + t)),
-        ("east", (half_east + t / 2, 0.0), (t / 2, half_north + t)),
+        ("south", (-half_north - t / 2, 0.0), (t / 2, half_east + t)),
+        ("north", (half_north + t / 2, 0.0), (t / 2, half_east + t)),
+        ("west", (0.0, half_east + t / 2), (half_north + t, t / 2)),
+        ("east", (0.0, -half_east - t / 2), (half_north + t, t / 2)),
     ):
         ET.SubElement(world, "geom", {"name": BOUNDARY_PREFIX + name, "type": "box", "rgba": "1 0 0 0.1",
                                       "pos": _numbers((*centre, h / 2 - 50.0)), "size": _numbers((*half, h / 2))})
@@ -764,8 +778,8 @@ def _add_collision(asset: ET.Element, world: ET.Element, recipe: env_schema.Reci
     Catalog's building) they are in the object's own frame, in Envsim's axes."""
     x, y, z, yaw = asset_frame(recipe, obj)
     anchor = obj.anchor or {"x_m": 0.0, "y_m": 0.0, "z_m": 0.0}
-    body = ET.SubElement(world, "body", {"name": BODY_PREFIX + obj.id, "pos": _numbers((x, y, z)),
-                                         "quat": _numbers(quaternion(obj.pose.roll_deg, obj.pose.pitch_deg, yaw))})
+    body = ET.SubElement(world, "body", {"name": BODY_PREFIX + obj.id, "pos": _numbers(_mjcf_position(x, y, z)),
+                                         "quat": _numbers(_mjcf_rotation(obj.pose.roll_deg, obj.pose.pitch_deg, yaw))})
     frame = ET.SubElement(body, "body", {"name": f"{obj.id}/envsim-frame",
                                          "pos": _numbers((-anchor["x_m"], -anchor["y_m"], -anchor["z_m"])),
                                          "quat": _numbers(ENVSIM_FRAME_QUAT)})
@@ -865,7 +879,7 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
     ET.SubElement(visual, "global", {"offwidth": "1280", "offheight": "720"})
     asset = ET.SubElement(root, "asset")
     world = ET.SubElement(root, "worldbody")
-    ET.SubElement(world, "light", {"name": "sun", "directional": "true", "pos": "0 0 50", "dir": "-0.3 0.2 -1"})
+    ET.SubElement(world, "light", {"name": "sun", "directional": "true", "pos": "0 0 50", "dir": "0.2 0.3 -1"})
     _terrain_geom(root, world, recipe.terrain, hfield_file)
     if validation:
         top = max([recipe.terrain.max_height_m] + [obj.pose.z_m + obj.shape.height_m for obj in recipe.objects])
@@ -875,8 +889,9 @@ def environment_mjcf(recipe: env_schema.Recipe, *, validation: bool = False, hfi
             _add_collision(asset, world, recipe, obj)
             continue
         body = ET.SubElement(world, "body", {
-            "name": BODY_PREFIX + obj.id, "pos": _numbers((obj.pose.x_m, obj.pose.y_m, obj.pose.z_m)),
-            "quat": _numbers(quaternion(obj.pose.roll_deg, obj.pose.pitch_deg, obj.pose.yaw_deg)),
+            "name": BODY_PREFIX + obj.id,
+            "pos": _numbers(_mjcf_position(obj.pose.x_m, obj.pose.y_m, obj.pose.z_m)),
+            "quat": _numbers(_mjcf_rotation(obj.pose.roll_deg, obj.pose.pitch_deg, obj.pose.yaw_deg)),
         })
         if validation:
             ET.SubElement(body, "freejoint", {"name": f"joint:{obj.id}"})
@@ -939,7 +954,7 @@ def manifest(recipe: env_schema.Recipe, files: dict[str, str] | None = None) -> 
         "name": recipe.name,
         "recipe": str(recipe.path),
         "fingerprint": fingerprint(recipe),
-        "frame": {"units": "m", "mjcf": "X=East,Y=North,Z=Up", "glb": "X=East,Y=Up,Z=-North", "origin": "centre"},
+        "frame": {"units": "m", "mjcf": "X=North,Y=West,Z=Up", "glb": "X=East,Y=Up,Z=-North", "origin": "centre"},
         "size_m": {"east": recipe.size_east_m, "north": recipe.size_north_m},
         "half_extent_m": {"east_west": recipe.size_east_m / 2, "north_south": recipe.size_north_m / 2},
         "terrain": {"item": recipe.terrain_item, **recipe.terrain.as_json(with_heights=False),

@@ -1,10 +1,12 @@
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,10 +39,12 @@ def read_glb(data: bytes):
 
 
 def world_corners(obj, solid):
-    """A solid's outline vertices in the environment frame."""
+    """A solid's outline vertices in the MuJoCo NWU environment frame."""
     yaw = math.radians(obj.pose.yaw_deg)
     c, s = math.cos(yaw), math.sin(yaw)
-    return [(obj.pose.x_m + c * x - s * y, obj.pose.y_m + s * x + c * y, obj.pose.z_m + z) for x, y, z in solid.corners()]
+    enu = [(obj.pose.x_m + c * x - s * y, obj.pose.y_m + s * x + c * y, obj.pose.z_m + z)
+           for x, y, z in solid.corners()]
+    return [(north, -east, up) for east, north, up in enu]
 
 
 def same_points(a, b, tolerance=1e-5):
@@ -91,6 +95,67 @@ class GlbTest(unittest.TestCase):
 
 @unittest.skipIf(mujoco is None, "MuJoCo is not installed")
 class MjcfTest(unittest.TestCase):
+    def test_recipe_axes_are_written_as_nwu_while_glb_stays_gltf(self):
+        recipe = env_schema.parse_recipe({
+            "schema": env_schema.RECIPE_SCHEMA,
+            "name": "axis acceptance",
+            "catalog": str((ROOT / "catalogs/starter/catalog.yaml").resolve()),
+            "size_m": {"east": 40, "north": 40},
+            "terrain": {"item": "grass-ground"},
+            "objects": [
+                {"id": "north", "item": "box-obstacle", "pose": {"x_m": 0, "y_m": 10, "yaw_deg": 0}},
+                {"id": "east", "item": "box-obstacle", "pose": {"x_m": 10, "y_m": 0, "yaw_deg": 0}},
+            ],
+        }, Path("axis-acceptance.yaml"))
+        model, data = self.compile(recipe)
+        bodies = {name: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "object:" + name)
+                  for name in ("north", "east")}
+        north_z, east_z = recipe.objects[0].pose.z_m, recipe.objects[1].pose.z_m
+        self.assertTrue(np.allclose(data.xpos[bodies["north"]], (10.0, 0.0, north_z), atol=1e-12))
+        self.assertTrue(np.allclose(data.xpos[bodies["east"]], (0.0, -10.0, east_z), atol=1e-12))
+        # yaw 0: the object's local +y (front/north) is Hakoniwa world +x.
+        self.assertTrue(np.allclose(data.xmat[bodies["north"]].reshape(3, 3)[:, 1], (1.0, 0.0, 0.0), atol=1e-12))
+
+        document, _ = read_glb(env_generate.environment_glb(recipe))
+        nodes = {node["name"]: node for node in document["nodes"]}
+        self.assertEqual(nodes["north"]["translation"], [0.0, north_z, -10.0])
+        self.assertEqual(nodes["east"]["translation"], [10.0, east_z, 0.0])
+
+    def test_the_old_enu_standalone_mapping_fails_the_north_acceptance(self):
+        recipe = env_schema.parse_recipe({
+            "schema": env_schema.RECIPE_SCHEMA, "name": "ENU regression",
+            "catalog": str((ROOT / "catalogs/starter/catalog.yaml").resolve()),
+            "size_m": {"east": 40, "north": 40}, "terrain": {"item": "grass-ground"},
+            "objects": [{"id": "north", "item": "box-obstacle", "pose": {"x_m": 0, "y_m": 10}}],
+        }, Path("enu-regression.yaml"))
+        with mock.patch.object(env_generate, "_mjcf_position", side_effect=lambda east, north, up: (east, north, up)):
+            model, data = self.compile(recipe)
+        body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "object:north")
+        self.assertFalse(np.allclose(data.xpos[body], (10.0, 0.0, recipe.objects[0].pose.z_m), atol=1e-12))
+
+    def test_an_asymmetric_hfield_has_its_north_edge_at_mjcf_plus_x_and_glb_minus_z(self):
+        recipe = load("drone-practice-field")
+        terrain = env_generate.env_terrain.Terrain(
+            kind="hfield", color="#445566", friction=1.0,
+            size_east_m=4.0, size_north_m=6.0, nrow=3, ncol=2,
+            heights=((9.0, 8.0), (4.0, 3.0), (1.0, 0.0)), max_height_m=9.0,
+            grid_east_m=4.0, grid_north_m=6.0,
+        )
+        recipe = replace(recipe, size_east_m=4.0, size_north_m=6.0, terrain=terrain, objects=[])
+        model, data = self.compile(recipe)
+        height, geom = self.ray_height(model, data, 2.999, 1.999)
+        self.assertEqual(geom, "terrain")
+        self.assertAlmostEqual(height, 9.0, places=2)
+
+        document, binary = read_glb(env_generate.environment_glb(recipe))
+        node = next(node for node in document["nodes"] if node["name"] == "terrain")
+        primitive = document["meshes"][node["mesh"]]["primitives"][0]
+        accessor = document["accessors"][primitive["attributes"]["POSITION"]]
+        view = document["bufferViews"][accessor["bufferView"]]
+        start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+        vertices = struct.iter_unpack("<fff", binary[start:start + accessor["count"] * 12])
+        self.assertIn((-2.0, 9.0, -3.0), list(vertices))
+
     def test_ribbon_draws_three_six_broken_yellow_and_omits_none(self):
         with tempfile.TemporaryDirectory() as directory:
             ribbon = Path(directory) / "road.json"
@@ -189,13 +254,15 @@ class MjcfTest(unittest.TestCase):
                 x = -terrain.half_east + col / (terrain.ncol - 1) * terrain.size_east_m
                 y = terrain.half_north - row / (terrain.nrow - 1) * terrain.size_north_m
                 inset = (min(max(x, -19.999), 19.999), min(max(y, -19.999), 19.999))
-                height, geom = self.ray_height(model, data, *inset)
+                height, geom = self.ray_height(model, data, inset[1], -inset[0])
                 self.assertEqual(geom, "terrain")
                 self.assertAlmostEqual(height, terrain.heights[row][col], places=3)
 
     def test_flat_ground_top_is_at_zero(self):
         model, data = self.compile(load("drone-practice-field"))
-        height, geom = self.ray_height(model, data, 5.0, -10.0)
+        terrain = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "terrain")
+        self.assertTrue(np.allclose(model.geom_size[terrain], (15.0, 10.0, 0.25), atol=1e-12))
+        height, geom = self.ray_height(model, data, -10.0, -5.0)
         self.assertEqual(geom, "terrain")
         self.assertAlmostEqual(height, 0.0, places=6)
 
@@ -362,7 +429,7 @@ objects:
         for obj in recipe.objects:
             with self.subTest(object=obj.id):
                 # Just beside the object's base the ground is not above it.
-                ground, geom = self.ray_height(model, data, obj.pose.x_m, obj.pose.y_m)
+                ground, geom = self.ray_height(model, data, obj.pose.y_m, -obj.pose.x_m)
                 self.assertIn(geom, ("terrain", *[env_generate.geom_name(obj.id, s.name) for s in obj.solids]))
                 self.assertLessEqual(recipe.terrain.height_at(obj.pose.x_m, obj.pose.y_m), obj.pose.z_m + 1e-6)
 
@@ -383,7 +450,9 @@ class CommandTest(unittest.TestCase):
             out = Path(directory) / "out"
             self.assertEqual(env_generate.main([str(EXAMPLES / "drone-practice-field.yaml"), "--out-dir", str(out)]), 0)
             manifest = json.loads((out / "environment.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["generator"], "4")
             self.assertEqual(manifest["half_extent_m"], {"east_west": 10.0, "north_south": 15.0})
+            self.assertEqual(manifest["frame"]["mjcf"], "X=North,Y=West,Z=Up")
             self.assertEqual(manifest["objects"][0]["mjcf_body"], "object:gate-1")
             self.assertEqual(len(manifest["fingerprint"]), 64)
             self.assertEqual((out / "environment.glb").read_bytes()[:4], b"glTF")
