@@ -3,8 +3,7 @@
 made it: generate the Recipe's MuJoCo world and GLB and compare them with the
 Envsim build's own (world/city-world.xml and world/city-world.glb).
 
-MuJoCo world (both compiled by MuJoCo; Envsim's frame x north, y west turned
-into the Studio's x east, y north):
+MuJoCo world (both compiled by MuJoCo in Hakoniwa's x north, y west frame):
 
 * every Envsim geom has a Studio geom of the same name (the Studio prefixes it
   with its object's id) with the same type, size, contact bits and friction,
@@ -43,12 +42,6 @@ TOLERANCE_GLB_M = 0.001
 ENVSIM_GROUND = "plateau_ground"
 
 
-def _to_studio(vector):
-    """Envsim's MuJoCo frame (x north, y west) to the Studio's (x east, y north)."""
-    x, y, z = vector
-    return (-y, x, z)
-
-
 def _compiled(xml: str | None = None, path: Path | None = None):
     import mujoco
 
@@ -69,7 +62,6 @@ def compare_mjcf(envsim_xml: Path, studio_xml: str) -> dict:
     for index in range(sm.ngeom):
         geom = name(sm, index)
         studio[geom.split("/", 1)[1] if "/" in geom else geom] = index
-    turn = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])  # _to_studio as a matrix
     report = {"envsim_geoms": em.ngeom, "matched": 0, "missing": [], "different": [], "added_colliders": [],
               "max_position_error_m": 0.0, "max_orientation_error": 0.0}
     matched = set()
@@ -91,8 +83,8 @@ def compare_mjcf(envsim_xml: Path, studio_xml: str) -> dict:
         if em.geom_type[index] != mujoco.mjtGeom.mjGEOM_MESH and not np.allclose(
                 em.geom_size[index], sm.geom_size[other], atol=1e-9):
             problems.append("size")
-        position = float(np.max(np.abs(turn @ ed.geom_xpos[index] - sd.geom_xpos[other])))
-        orientation = float(np.max(np.abs(turn @ ed.geom_xmat[index].reshape(3, 3) - sd.geom_xmat[other].reshape(3, 3))))
+        position = float(np.max(np.abs(ed.geom_xpos[index] - sd.geom_xpos[other])))
+        orientation = float(np.max(np.abs(ed.geom_xmat[index].reshape(3, 3) - sd.geom_xmat[other].reshape(3, 3))))
         report["max_position_error_m"] = max(report["max_position_error_m"], position)
         report["max_orientation_error"] = max(report["max_orientation_error"], orientation)
         if position > TOLERANCE_M:

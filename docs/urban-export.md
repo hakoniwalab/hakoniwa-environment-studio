@@ -20,9 +20,9 @@ Studio の Recipe workspace の `urban/<Recipe ID>/`（`$HAKONIWA_WORK_DIR/recip
 | `build/components/terrain/` | 地形の格子（`terrain.hf`）、`terrain.xml`、`terrain-receipt.json` |
 | `viewer/` | `city-world.glb` の写しと、当たり判定の表示用 GLB（`tools/env_colliders.py`）とそのレシート |
 
-- **MJCF**：Studio が生成する世界を、urban の座標系に回したものです。
+- **座標系**：Recipe は名前付き ENU（`x_m` = 東、`y_m` = 北、`size_m.east/north`、yaw は東から反時計回り）です。MJCF は箱庭 world の NWU（x = 北、y = 西、z = 上）で、`tools/env_generate.py` が一度だけ `(e,n,u) → (n,-e,u)`、姿勢を `Rz(-90°) · R_recipe` に変換します。Urban 書き出しは追加回転しません。GLB は glTF の Y-up（x = 東、y = 上、z = -北）のままです。
+- **MJCF**：Studio が生成する NWU の世界をそのまま使います。
   - 地面は最上位の hfield です。envsim の地形は envsim の格子ファイルそのまま、丘は Studio の格子、平らな地面は 2×2 の平らな格子（urban の平らな World と同じ）です。
-  - それ以外の部品は、z 軸まわりに −90° 回した 1 つの body の中に置きます。
   - 最上位は `asset` と `worldbody` だけです。回転はすべて四元数にしているので、合成される相手のコンパイラの角度設定に左右されません。
   - 当たり判定のない見た目だけの形（白線など）は入れません。見た目は GLB が受け持ちます。
   - 照明も入れません。urban は車のモデルの照明（`sun`・`fill_light`）を残したまま World を合成するので、同じ名前があると合成が止まります。

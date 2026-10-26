@@ -90,8 +90,8 @@ class BuildingAssetTest(unittest.TestCase):
                 distance = mujoco.mj_ray(model, data, np.array(start, float), np.array(direction, float), None, 1, -1, geom)
                 return None if distance < 0 else distance
 
-            # East end of the wall (its x), its top.
-            east = 40.0 - hit([40.0, 0.0, 2.0], [-1.0, 0.0, 0.0])
+            # East end of the wall (MJCF -y), its top.
+            east = 40.0 - hit([0.0, -40.0, 2.0], [0.0, 1.0, 0.0])
             top = 40.0 - hit([0.0, 0.0, 40.0], [0.0, 0.0, -1.0])
             return east, top
 
@@ -119,13 +119,15 @@ class BuildingAssetTest(unittest.TestCase):
             "params: {height_m: 6, length_m: 12, width_m: 3}}")))
         pose = recipe.objects[0].pose
         self.assertEqual((pose.roll_deg, pose.pitch_deg), (-5.0, 10.0))
-        expected = env_generate.quaternion(-5, 10, 90)
+        # Hand-calculated Rz(-90 degrees) * R_recipe.
+        expected = (0.9952465414778341, -0.04345340242735779, 0.08707278979269381, 0.003801680104023597)
         body = next(b for b in ET.fromstring(env_generate.environment_mjcf(recipe)).iter("body") if b.get("name") == "object:up")
         for got, want in zip(map(float, body.get("quat").split()), expected):
             self.assertAlmostEqual(got, want, places=6)
         document, _ = env_generate.read_glb(env_generate.environment_glb(recipe))
         node = next(node for node in document["nodes"] if node["name"] == "up")
-        w, x, y, z = expected
+        # The GLB stays in its existing glTF frame (the Recipe quaternion remapped to x, up, -north).
+        w, x, y, z = (0.7010573846499779, -0.09229595564125725, 0.030843564597231907, 0.706433772212892)
         for got, want in zip(node["rotation"], [x, z, -y, w]):
             self.assertAlmostEqual(got, want, places=6)
 

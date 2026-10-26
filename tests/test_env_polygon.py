@@ -145,7 +145,8 @@ class SurfaceLayerTest(unittest.TestCase):
 
         def top(x, y):
             geom = np.zeros(1, dtype=np.int32)
-            distance = mujoco.mj_ray(model, data, np.array([x, y, 100.0]), np.array([0, 0, -1.0]), None, 1, -1, geom)
+            # Recipe (east, north) -> MJCF (north, west).
+            distance = mujoco.mj_ray(model, data, np.array([y, -x, 100.0]), np.array([0, 0, -1.0]), None, 1, -1, geom)
             name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, int(geom[0])) or ""
             return round(100.0 - distance, 3), name
 

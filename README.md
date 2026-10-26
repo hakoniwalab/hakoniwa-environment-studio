@@ -276,9 +276,11 @@ python ../hakoniwa-environment-studio/tools/env_citygml.py --citygml work/recipe
 - AI エージェント向けの契約（contract / inspect / validate → repair のループ）：[docs/ai-contract.md](docs/ai-contract.md)
 - 部品の型：`types/environment-types.yaml`、最初の Catalog：`catalogs/starter/catalog.yaml`
 - 例の環境：`recipes/examples/`（ドローン練習場 20 m × 30 m、車のテストコース、丘のフィールド）
-- 生成物（#3）：`environment.glb`（Three.js、glTF の x = 東・y = 上・z = -北）、`environment.xml`（MuJoCo、ENU。地形は hfield か z = 0 が上面の板、物体は `object:<id>` の body と形状ごとの `geom:<id>/<形状名>`、線や灯火のような見た目だけの形状は contype 0 の group 2）、`environment.json`（対応表、範囲、地形、sha256、指紋）。同じ Recipe からは同じファイルができます。
+- 生成物（#3）：`environment.glb`（Three.js / glTF）、`environment.xml`（MuJoCo。地形は hfield か z = 0 が上面の板、物体は `object:<id>` の body と形状ごとの `geom:<id>/<形状名>`、線や灯火のような見た目だけの形状は contype 0 の group 2）、`environment.json`（対応表、範囲、地形、sha256、指紋）。同じ Recipe からは同じファイルができます。
 
-座標は ENU（x = 東、y = 北、z = 上）、単位は m と度、原点は環境の中心です（hakoniwa-urban-mobility の世界と同じ）。
+### 座標系
+
+Recipe は名前付き ENU（`x_m` = 東、`y_m` = 北、z = 上、`size_m.east/north`、yaw は東から反時計回り）です。MJCF は箱庭 world の NWU（x = 北、y = 西、z = 上）で、`tools/env_generate.py` が一度だけ `(e,n,u) → (n,-e,u)`、姿勢を `Rz(-90°) · R_recipe` に変換します。`tools/env_urban.py` は追加回転しません。GLB は glTF の Y-up（x = 東、y = 上、z = -北）のままで、Godot カメラと一致します。単位は m と度、原点は環境の中心です。
 
 ## MVP roadmap
 

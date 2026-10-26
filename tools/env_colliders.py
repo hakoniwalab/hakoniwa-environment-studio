@@ -19,7 +19,7 @@ import hashlib
 import json
 from pathlib import Path
 
-# MJCF (X=North, Y=-East, Z=Up) -> GLB (X=East, Y=Up, Z=-North).
+# MJCF (X=North, Y=West, Z=Up) -> GLB (X=East, Y=Up, Z=-North).
 MJCF_TO_GLB = ((0.0, -1.0, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0), (-1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
 PLANE_HALF_M = 500.0  # an infinite plane (size 0) is drawn this far out
 COLOR = (110, 200, 120, 255)
@@ -117,7 +117,7 @@ def collider_glb(source: Path, out: Path, receipt: Path) -> dict:
     result = {
         "schema_version": 1,
         "source_mjcf": str(source),
-        "coordinate_transform": "MJCF(X=North,Y=-East,Z=Up)->Three.js(X=East,Y=Up,Z=-North)",
+        "coordinate_transform": "MJCF(X=North,Y=West,Z=Up)->Three.js(X=East,Y=Up,Z=-North)",
         "geom_counts": dict(sorted(counts.items())),
         "triangle_count": triangles,
         "output": {"path": str(out), "bytes": out.stat().st_size, "sha256": hashlib.sha256(out.read_bytes()).hexdigest()},

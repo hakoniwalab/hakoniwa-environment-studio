@@ -13,10 +13,12 @@ Environment Studio の入力はすべて YAML（JSON でも可）の 3 層です
 ## 1. 座標と単位
 
 - 長さは **m**（小数、精度は mm まで）、角度は **度**。
-- **ENU**：x = 東、y = 北、z = 上。
+- Recipe は名前付き **ENU**：`x_m` = 東、`y_m` = 北、z = 上、`size_m.east/north`。
 - **原点は環境の中心**。大きさ `size_m: {east, north}` は全体の幅で、範囲は ±半分。hakoniwa-urban-mobility の世界（MuJoCo の原点が中心、`half_extent_m`）とそのまま対応します。
 - **yaw** は東から反時計回り（urban-mobility の `yaw_deg` と同じ）。
 - 物体の向き：物体のローカル +y が「正面」。車はスロープをローカル +y へ登り、ドローンはゲートをローカル y 方向に通り抜け、標識・信号はローカル +y を向きます。
+
+生成する MJCF は箱庭 world の **NWU**（x = 北、y = 西、z = 上）です。`tools/env_generate.py` が一度だけ Recipe の `(e,n,u)` を `(n,-e,u)`、姿勢を `Rz(-90°) · R_recipe` に変換し、Urban 書き出しは追加回転しません。GLB は glTF の Y-up（x = 東、y = 上、z = -北）のままです。
 
 ## 2. Type
 
@@ -114,9 +116,9 @@ types:
 - `dem`：その `terrain-receipt.json`（絶対パスか Recipe からの相対パス）
 - `visual`：地形の見た目の GLB（envsim の `terrain.glb`）。あれば、格子から作るメッシュの代わりに生成する GLB に入れます
 
-格子は envsim の hfield と同じ点・同じ範囲（receipt の half extent）で、標本化し直しません。高さは MuJoCo がそのファイルから計算する値（いちばん低い点を 0 とし、`terrain.xml` の z の大きさを掛けたもの）です。生成する MuJoCo の世界も、同じ hfield ファイルを envsim の座標系のまま（z 軸まわりに 90°回して）読みます。環境が地形より広いとき（はみ出す建物で広げた分）、配置では端の高さが続きます。receipt の SHA-256 と地形ファイルが食い違うときは `invalid_shape` です。
+格子は envsim の hfield と同じ点・同じ範囲（receipt の half extent）で、標本化し直しません。高さは MuJoCo がそのファイルから計算する値（いちばん低い点を 0 とし、`terrain.xml` の z の大きさを掛けたもの）です。生成する MuJoCo の世界も、同じ hfield ファイルを NWU のまま無回転で読みます。環境が地形より広いとき（はみ出す建物で広げた分）、配置では端の高さが続きます。receipt の SHA-256 と地形ファイルが食い違うときは `invalid_shape` です。
 
-格子の並びは MuJoCo と同じです：行 0 が北の端（+y）、最後の行が南の端、列 0 が西の端（-x）、最後の列が東の端（`tests/test_env_generate.py` で MuJoCo と照合）。
+Recipe 内の格子は、行 0 が北の端、最後の行が南の端、列 0 が西の端、最後の列が東の端です。MJCF へは同じ標本を NWU の hfield 順に並べ替えて書き、GLB へは北端が glTF の -z になるように書きます（`tests/test_env_generate.py` で非正方形・非対称の格子を照合）。
 
 物体は、外形がかかる格子のマスの四隅のうち**いちばん高い地面**に底面を置きます。MuJoCo は各マスを三角形に分けて面にするので、その面がマスの四隅より高くなることはなく、坂の上でも地面にめり込みません（マスの中の起伏の分だけ浮くことはあります）。さらに 5 mm 上に置きます（`HFIELD_CLEARANCE_M`、`env_rules.py`）。`elevated` の物体はそこから `z_m` 上です。
 

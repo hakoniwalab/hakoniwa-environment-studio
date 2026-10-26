@@ -193,11 +193,13 @@ class PassthroughTest(unittest.TestCase):
         sm = mujoco.MjModel.from_xml_string(env_generate.environment_mjcf(parsed))
         sd = mujoco.MjData(sm)
         mujoco.mj_forward(sm, sd)
-        before = env_roundtrip._to_studio(ed.geom_xpos[mujoco.mj_name2id(em, mujoco.mjtObj.mjOBJ_GEOM, f"geom_{gml_id}")])
+        before = ed.geom_xpos[mujoco.mj_name2id(em, mujoco.mjtObj.mjOBJ_GEOM, f"geom_{gml_id}")]
         after = sd.geom_xpos[mujoco.mj_name2id(sm, mujoco.mjtObj.mjOBJ_GEOM, f"{part['id']}/geom_{gml_id}")]
         ax, ay = part["anchor"]["x_m"], part["anchor"]["y_m"]
-        dx, dy = before[0] - ax, before[1] - ay
-        expected = (ax + 5.0 - dy, ay + dx, before[2])
+        before_east, before_north = -before[1], before[0]
+        dx, dy = before_east - ax, before_north - ay
+        after_east, after_north = ax + 5.0 - dy, ay + dx
+        expected = (after_north, -after_east, before[2])
         self.assertTrue(np.allclose(after, expected, atol=1e-6), (after, expected))
 
     def test_a_copied_building_keeps_its_own_collider_names(self):
